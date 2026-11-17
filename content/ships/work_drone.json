@@ -17,15 +17,27 @@
   "mounts": [
     { "on": 4, "face": "left", "at": [3, 3], "type": "microIonThruster" },
     { "on": 2, "face": "left", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 0, "face": "left", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 6, "face": "left", "at": [3, 3], "type": "microIonThruster" },
     { "on": 5, "face": "right", "at": [3, 3], "type": "microIonThruster" },
     { "on": 3, "face": "right", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 1, "face": "right", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 7, "face": "right", "at": [3, 3], "type": "microIonThruster" },
     { "on": 4, "face": "down", "at": [3, 3], "type": "microIonThruster" },
     { "on": 1, "face": "down", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 0, "face": "down", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 5, "face": "down", "at": [3, 3], "type": "microIonThruster" },
     { "on": 7, "face": "up", "at": [3, 3], "type": "microIonThruster" },
     { "on": 2, "face": "up", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 3, "face": "up", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 6, "face": "up", "at": [3, 3], "type": "microIonThruster" },
     { "on": 0, "face": "front", "at": [3, 3], "type": "microIonThruster" },
     { "on": 3, "face": "front", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 1, "face": "front", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 2, "face": "front", "at": [3, 3], "type": "microIonThruster" },
     { "on": 5, "face": "back", "at": [3, 3], "type": "microIonThruster" },
-    { "on": 6, "face": "back", "at": [3, 3], "type": "microIonThruster" }
+    { "on": 6, "face": "back", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 4, "face": "back", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 7, "face": "back", "at": [3, 3], "type": "microIonThruster" }
   ]
 }

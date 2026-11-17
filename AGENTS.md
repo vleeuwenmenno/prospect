@@ -369,10 +369,19 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   or saved (`Restore` clears them): no tractor acquires a fetched body and no second fetch takes it; claims and
   `MayPickup` are the tractor's. Carry is per bay tier (`bay.carryKg`, `bayTiers.carry`); the group lifts only when the
   drones within `tetherMetres` of their places (`DroneFetch.Place`, phase 1) carry its mass, at
-  `carryAcceleration` times their carry over the mass, at most `carrySpeed`. `TickCarries` runs after the tractors pull
+  `carryAcceleration` times their carry over the mass, never above `carryFollowShare` of the weakest holder's push
+  (`DroneFetch.CarryAcceleration`), at most `carrySpeed`, round the hull when the straight way crosses it
+  (`DroneFetch.CarryGoal`). `TickCarries` runs after the tractors pull
   and before loose cargo drifts; a group whose drones (out or launching) no longer carry the mass drops it
-  (`DroneReply.Dropped`). Drones aim ahead of a moving container by `DroneFetch.Lead`. A drone back from a fetch flies to
-  its bay's hold point first (recall phase `RecallFromAfar`). Wire: protocol 66, `DroneCommandMessage.Subject`,
+  (`DroneReply.Dropped`). Every drone is flown through `ServerHost.Steer`, never `Fly` straight: it hands the
+  autopilot a target that makes it ask for the place's frame velocity plus closing on it (`DroneSteering.Wanted`,
+  `Target`; a slow drone is never given a target under the arrival distance), so drones keep up with a moving hull or
+  body with no wire change. On its way a drone keeps `separationMetres` from its hull's other drones
+  (`DroneSteering.Apart`), goes round its own hull's sphere plus `clearanceMetres` (`DroneSteering.Around`) and round
+  its load to a place on the far side. Any drone coming home first flies to its own slot beside its bay's hold point
+  (`HomeSlot`, recall phase `RecallFromAfar`), and only one drone of a bay lines up at a time (`LaneTaken`).
+  Tests: `DroneFlightTests` (one per cause: moving hull, light load, crossing, far side, docking) and
+  `DroneSteeringTests`; rules and numbers in `docs/roadmap/drones-mining.md`, "Drone flight as built". Wire: protocol 66, `DroneCommandMessage.Subject`,
   `BayView.Fetching`, replies 11–20. Interface: `FetchContainer` (`/`) on the hovered free container
   (`WorldView.HoverContainerId`) or the targeted one, the target panel's FETCH WITH DRONES button
   (`DrawFetchButton`), the chip's "N FETCHING". Tests: `DroneFetchTests`. Capture:
@@ -395,7 +404,8 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   (`autoPickupPauseSeconds`), a manual launch ends the pause. The second checkbox, "Pick up ores", is in
   "Ore collection (R4)". Tests:
   `DroneFetchTests` (auto pickup), `DronePopupTests`. Capture: `tools/prepare_drone_fetch_capture.py`, then
-  `--open cargo --jettison 5 --drone-autopickup 3 --drone-popup` (scripted runs only). Capture:
+  `--open cargo --jettison 5 --drone-autopickup 3 --drone-popup` (scripted runs only); `--drone-ores <s>` turns
+  "Pick up ores" on, for `--open ore`. Capture:
   `--open drones` (launch 3 at 1.5 s, recall at `--drone-recall`, default 14 s) and `--open edit-bay` (a bay's ghost
   on a top face, hatch up); `make bench` runs `--open drones` on the shipped build.
 - **Drone scans (D3):** two levels of the same group job, `DroneScanKind.Survey` (true bulk composition at

@@ -114,6 +114,27 @@ public sealed record DroneRules
     /// <summary>The fastest drones carry a container, relative to the hull they bring it to.</summary>
     public required float CarrySpeed { get; init; }
 
+    /// <summary>
+    /// The share of the weakest push of the drones holding a body that its carry may accelerate it at, however light it
+    /// is: faster than its drones can follow, a body flies off without them and overshoots the hand-over.
+    /// </summary>
+    public required float CarryFollowShare { get; init; }
+
+    /// <summary>How far apart drones of one hull keep while they fly to a place, so two never fly side by side touching.</summary>
+    public required float SeparationMetres { get; init; }
+
+    /// <summary>The speed, in metres a second, at which two drones in the same spot are pushed apart; less as they part.</summary>
+    public required float SeparationSpeed { get; init; }
+
+    /// <summary>How many seconds ahead two drones' courses are looked at for keeping them apart.</summary>
+    public required float SeparationSeconds { get; init; }
+
+    /// <summary>
+    /// Room kept between a drone, or a body it carries, and the sphere that holds its own hull: a way that would cross
+    /// it goes round instead (<see cref="DroneSteering.Around"/>).
+    /// </summary>
+    public required float ClearanceMetres { get; init; }
+
     /// <summary>Gap between a carrying drone and the container's side.</summary>
     public required float AttachGapMetres { get; init; }
 
@@ -203,6 +224,11 @@ public sealed record DroneRules
             FetchRangeMetres = Number("fetchRangeMetres", 1, 20000),
             CarryAcceleration = Number("carryAcceleration", 0.01f, 50),
             CarrySpeed = Number("carrySpeed", 0.1f, 200),
+            CarryFollowShare = Number("carryFollowShare", 0.05f, 1),
+            SeparationMetres = Number("separationMetres", 0, 50),
+            SeparationSpeed = Number("separationSpeed", 0, 50),
+            SeparationSeconds = Number("separationSeconds", 0, 10),
+            ClearanceMetres = Number("clearanceMetres", 0, 100),
             AttachGapMetres = Number("attachGapMetres", 0, 10),
             TetherMetres = Number("tetherMetres", 0.1f, 100),
             MaxCarriers = Whole("maxCarriers", 1, DroneFetch.Places),

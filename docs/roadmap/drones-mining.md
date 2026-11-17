@@ -191,21 +191,25 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
    - Orders in D1: Hold (a point in the base's frame; by default 14 m out from each hatch, spread on a grid) and
      Recall (line up 6 m out, fly in, dock). A jump recalls; drones still out when the ship leaves are lost.
    - Interface: `.` launches all, `,` recalls all, a DRONES chip over the console. No drone panel yet (D2).
-   - Gaps: no avoidance on the way home; the hold point is not chosen in the interface yet; drones out of a hull
+   - Gaps: the hold point is not chosen in the interface yet; drones out of a hull
      that is not the one flown show nowhere but in the world.
 2. D2, fetching cargo: drones bring containers back; two or more lift a heavy one; claims respected. **Done.** Notes:
    - Hand-over, not stowing: drones bring a container 10 m out in front of a tractor beam and set the beam's claim on
      it; the beam stows it by its own path and packing. Chosen because it adds no second stow rule. A fetch is refused
      without a beam that sees the hand-over point, or without rack room.
    - Carry: 5 t a Common drone (`carryKg`, scaled by `bayTiers.carry`). A heavier container takes as many drones as
-     its mass needs, at most 8 (`maxCarriers`). They lift only together; the pull is 1.5 m/s² times their carry over
-     the mass, at most 12 m/s. Drones holding station go first, then the bays launch the rest.
+     its mass needs, at most 8 (`maxCarriers`). They lift only together; the pull is 2 m/s² times their carry over
+     the mass, never above 0.6 of the weakest holder's push (`carryFollowShare`), at most 20 m/s. Drones holding
+     station go first, then the bays launch the rest.
    - Range 3 km from the ship (`fetchRangeMetres`). Claims, pickup delay and keep-claim are the tractor's rules.
    - A lost carrier, a ship that jumps, a recall or a 600 s time-out drops the container where it is.
    - Interface: `/` on the hovered or targeted container, the target panel's button, "N FETCHING" on the chip.
-   - Gaps: drones have no battery limit beyond D1's power use (no endurance figure); no avoidance; a ship with no
+   - Gaps: drones have no battery limit beyond D1's power use (no endurance figure); no avoidance of rocks (only of
+     their own hull and of each other, see "Drone flight"); a ship with no
      tractor beam cannot be fetched to; two fetches for one rack slot are both accepted and the second is dropped
      with "no rack room" at the hand-over; a beam busy with another container makes the drones wait at the point.
+   - Drone flight (fixed 2026-11-17, see "Drone flight as built"): drones now keep up with a moving ship, keep a
+     light load beside them, part from each other, go round their own hull and dock one at a time.
 3. D3, scans: group scan and detailed scan. **Done** (2026-11-17), see "D3 as built".
 4. D4, charges: drones place charges along the player's cutting plane (needs R2).
 
@@ -286,6 +290,45 @@ The `scans` entry of `content/blocks/drones.json`, shared content:
 - A player keeps 32 drone scans; the oldest gives way to a new rock.
 - The result describes the rock as generated. Scrapes (R1) do not change it; cracks (R2) will need their parent's map.
 - A ship that moves over 6 km from the rock gives the scan up.
+
+## Drone flight as built
+
+Fixed 2026-11-17 after play showed drones wandering, losing loads and slow. Each cause has a test in
+`DroneFlightTests`; the shared rules are `DroneSteering` (`DroneSteeringTests`).
+
+### Causes found, and the fix
+
+- A light load flew off. The carry was 1.5 m/s² times carry over mass: a 500 kg chunk got 15 m/s², drones push 3.
+  The load left them, overshot the ship by over 100 m, and they chased it. Fix: the carry never exceeds
+  `carryFollowShare` of the weakest holder's push (`DroneFetch.CarryAcceleration`).
+- Drones trailed a moving ship. The autopilot stops at its target in the world; on a ship at 10 m/s drones never
+  docked. Fix: the server hands the autopilot a target that makes it ask for the frame's velocity plus closing on
+  the place (`DroneSteering.Wanted`, `Target`). No wire change: the client predicts from the target as before.
+- Drones launched together crossed and flew touching. Fix: drones of one hull on their way keep `separationMetres`
+  apart, looking `separationSeconds` ahead (`DroneSteering.Apart`).
+- Drones and loads went through their own hull. A container below the ship was pulled into its belly and stuck,
+  never handed over. Fix: ways that cross the hull's sphere plus `clearanceMetres` go round it
+  (`DroneSteering.Around`, `DroneFetch.CarryGoal`); a drone goes round its load to a place on the far side.
+- Drones coming home met at one hold point and the hatch. Fix: each waits at its own slot beside the hold point
+  (never on the hatch's line) and one at a time lines up (`LaneTaken`).
+- Slow: the work drone had two ion thrusters a side (3 m/s²). It now has four (5.3 m/s²).
+
+### Numbers (headless, shipped ship, command to delivered)
+
+- Container 150 m out: 32–33 s before, 26–27 s after.
+- 500 kg chunk 47 m off a rock: 45 s and 361 m of path before, 13 s and 55 m after.
+- Container straight below the ship: never delivered before (232 hull contacts), 32.5 s after.
+- Ship coasting at 10 m/s: drones never docked in 400 s before, docked 6–7 s after delivery after.
+- Two drones launched together: 1,391 ticks touching before, none after. Drops: none before or after.
+
+### Not built, known limits
+
+- No avoidance of rocks; a drone's place beside a chunk on a rock's surface can still be near it. None was hit in
+  the headless runs (nearest 5.9 m).
+- The hull's sphere is coarse: a long ship gets wide detours.
+- Full thrust on three axes at once outruns the work drone's generator (the editor's thrust warning, as for the
+  escape drone); its battery covers about 30 s of that.
+- An autopilot target nearer than 3 m counts as reached, so a drone at rest cannot make a move under 3 m.
 
 ## R1 as built
 

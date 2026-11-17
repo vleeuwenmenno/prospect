@@ -137,9 +137,9 @@ public sealed partial class ServerHost
     }
 
     /// <summary>
-    /// Turns an order home. A fetching drone gives up its place beside the container for its bay's hold point and
-    /// flies there first (<see cref="RecallFromAfar"/>), so it comes in along the hatch's normal instead of cutting
-    /// across the hull from wherever the fetch ended.
+    /// Turns an order home. Every drone first flies to its own place beside its bay's hold point
+    /// (<see cref="RecallFromAfar"/>), going round the hull, so it comes in along the hatch's normal instead of cutting
+    /// across the hull from wherever its task ended, and drones coming home together wait their turn apart.
     /// </summary>
     private void ToRecall(ref TaskOrder order)
     {
@@ -147,12 +147,13 @@ public sealed partial class ServerHost
         // only then takes the recall, from its bay's hold point as a fetching drone does.
         if (IsScan(order.Task) && order.Phase != ScanOrderPhase.ScanLeaving) { order.Phase = ScanOrderPhase.ScanLeaving; return; }
         var far = false;
-        if ((order.Task is OrderTask.Fetch or OrderTask.FetchOre || IsScan(order.Task)) && _hulls.IsAlive(order.Base))
+        var page = PageOf(order.Base);
+        if (page >= 0 && _hulls.IsAlive(order.Base))
         {
             var design = _content.Designs[_hulls.Info(order.Base.Index).Design];
             if ((uint)order.Bay < (uint)design.Bays.Length)
             {
-                order.Point = DroneBayRules.DefaultHold(design, design.Bays[order.Bay], _content.Drones.HoldDistanceMetres);
+                order.Point = HomeSlot(design, order.Bay, ref _bayPages[page].Bays[order.Bay]);
                 far = true;
             }
         }
@@ -163,7 +164,7 @@ public sealed partial class ServerHost
     }
 
     /// <summary>
-    /// Flies a fetching drone to its place beside the container, aimed ahead of it by what its autopilot lags, and
+    /// Flies a fetching drone to its place beside the container, closing on it as seen from the container, and
     /// marks it holding on (phase 1) while it is within the tether of that place. Calls it home when the container is
     /// gone, has been let go or the fetch has taken too long.
     /// </summary>
@@ -171,15 +172,17 @@ public sealed partial class ServerHost
     {
         var index = _containers.Find((uint)order.Subject);
         var held = index >= 0 && _containers.Items[index].FetchHull == order.Base.Packed;
-        return FetchBody(ref order, page, held, held ? _containers.Items[index].Position : default, held ? _containers.Items[index].Velocity : default);
+        return FetchBody(ref order, page, held, held ? _containers.Items[index].Position : default, held ? _containers.Items[index].Velocity : default,
+            held ? FreeContainers.Half(_content.Cargo, _containers.Items[index].Size).Length() : 0);
     }
 
     /// <summary>
     /// The one flight of a fetching drone, whatever it fetches: to its place beside the body at
-    /// <paramref name="bodyPosition"/>, aimed ahead of it by what its autopilot lags, phase 1 while within the tether.
+    /// <paramref name="bodyPosition"/> (reaching <paramref name="bodyRadius"/> from its centre), closing on it as seen from
+    /// the body (<see cref="Steer"/>), phase 1 while within the tether.
     /// Home when the body is no longer <paramref name="held"/> for its hull or the fetch has taken too long.
     /// </summary>
-    private bool FetchBody(ref TaskOrder order, int page, bool held, Double3 bodyPosition, Vector3 bodyVelocity)
+    private bool FetchBody(ref TaskOrder order, int page, bool held, Double3 bodyPosition, Vector3 bodyVelocity, float bodyRadius)
     {
         if (!held || (order.Until != 0 && _tick >= order.Until))
         {
@@ -190,8 +193,9 @@ public sealed partial class ServerHost
         var place = bodyPosition + HullRotation.Rotate(order.Point, _hulls.State(order.Base.Index).Orientation);
         var position = _hulls.State(order.Actor.Index).Position;
         order.Phase = place.RelativeTo(position).LengthSquared() <= rules.TetherMetres * rules.TetherMetres ? (byte)1 : (byte)0;
-        var lead = DroneFetch.Lead(bodyVelocity.Length(), _hulls.Flight(order.Actor.Index).WeakestPush);
-        Fly(order.Actor, place + bodyVelocity * lead, rules.TetherMetres * 0.5f);
+        // Seen from the body, round it to a place on its far side and clear of the other drones; on its way, round its
+        // own hull too (holding on, it stays beside the body, which keeps clear of the hull itself).
+        Steer(order, place, bodyVelocity, rules.TetherMetres * 0.25f, group: true, hull: order.Phase == 0, bodyPosition, bodyRadius);
         return true;
     }
 
@@ -215,7 +219,7 @@ public sealed partial class ServerHost
                 continue;
             }
 
-            CarryGroup(hull, page, item.Id, OrderTask.Fetch, out var holding, out var total, out var attached);
+            CarryGroup(hull, page, item.Id, OrderTask.Fetch, out var holding, out var total, out var attached, out var push);
             var mass = TractorSimulation.Mass(_content.Cargo, item);
             if (total < mass) { DropFetch(ref item, hull, DroneReply.Dropped); continue; }
             var info = _hulls.Info(hull.Index);
@@ -227,7 +231,8 @@ public sealed partial class ServerHost
             var handover = WorldPoint(hull, local);
             var carrier = state.Velocity + HullRotation.Rotate(Vector3.Cross(state.AngularVelocity, local - _hulls.Flight(hull.Index).CenterOfMass), state.Orientation);
             // As the tractor does: the container drifts only after this, so measure where it will be at the tick's end.
-            var delta = handover.RelativeTo(item.Position + item.Velocity * HullSim.Dt);
+            var next = item.Position + item.Velocity * HullSim.Dt;
+            var delta = handover.RelativeTo(next);
             var relative = (item.Velocity - carrier).Length();
             item.Orientation = Quaternion.Normalize(Quaternion.Slerp(item.Orientation, state.Orientation,
                 Math.Min(1f, _content.Cargo.Tractor.AlignRate * HullSim.Dt)));
@@ -255,7 +260,11 @@ public sealed partial class ServerHost
                 }
             }
             var speed = Math.Min(rules.CarrySpeed, 0.9f * _content.Designs[_content.WorkDroneDesign].Flight.MaxSpeed);
-            DroneFetch.Pull(ref item, delta, carrier, rules.CarryAcceleration * holding / (float)mass, speed);
+            var flight = _hulls.Flight(hull.Index);
+            var goal = DroneFetch.CarryGoal(next, FreeContainers.Half(_content.Cargo, item.Size), handover,
+                WorldPoint(hull, flight.CenterOfMass), flight.Radius, rules.ClearanceMetres);
+            DroneFetch.Pull(ref item, goal.RelativeTo(next), carrier,
+                DroneFetch.CarryAcceleration(rules.CarryAcceleration, holding, mass, rules.CarryFollowShare, push), speed);
         }
     }
 
@@ -270,21 +279,23 @@ public sealed partial class ServerHost
 
     /// <summary>
     /// What the drones of <paramref name="hull"/> on <paramref name="task"/> for body <paramref name="id"/> carry: the
-    /// kilograms of those holding on (phase 1) and how many they are, and the kilograms of all of them, drones still
-    /// waiting to launch for it included.
+    /// kilograms of those holding on (phase 1), how many they are and the weakest push among them, and the kilograms of
+    /// all of them, drones still waiting to launch for it included.
     /// </summary>
-    private void CarryGroup(HullHandle hull, int page, uint id, OrderTask task, out float holding, out float total, out int attached)
+    private void CarryGroup(HullHandle hull, int page, uint id, OrderTask task, out float holding, out float total, out int attached, out float push)
     {
         holding = total = 0;
         attached = 0;
+        push = float.MaxValue;
         for (var i = 0; i < _orderCount; i++)
         {
             ref readonly var order = ref _orders[i];
             if (order.Task != task || order.Subject != id || order.Base != hull || !_hulls.IsAlive(order.Actor)) continue;
             var carry = CarryOf(order);
             total += carry;
-            if (order.Phase == 1) { holding += carry; attached++; }
+            if (order.Phase == 1) { holding += carry; attached++; push = Math.Min(push, _hulls.Flight(order.Actor.Index).WeakestPush); }
         }
+        if (attached == 0) push = 0;
         ref var p = ref _bayPages[page];
         if (p.FetchPending > 0 && p.FetchSubject == id && p.FetchOre == (task == OrderTask.FetchOre)) total += p.FetchPendingKg;
     }

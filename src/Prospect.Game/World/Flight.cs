@@ -733,8 +733,11 @@ public struct HullOrder
 /// <summary>Flies a hull toward its order by producing the same inputs a pilot would.</summary>
 public static class Autopilot
 {
-    private const float ArrivalDistance = 3f;
-    private const float ArrivalSpeed = 1.5f;
+    /// <summary>Within this many metres of its target, a hull slower than <see cref="ArrivalSpeed"/> has arrived.</summary>
+    public const float ArrivalDistance = 3f;
+
+    /// <summary>The speed, in metres a second, under which a hull within <see cref="ArrivalDistance"/> has arrived.</summary>
+    public const float ArrivalSpeed = 1.5f;
 
     /// <summary>
     /// Returns the input for this tick. <paramref name="arrived"/> is true once the hull is at rest at the target,

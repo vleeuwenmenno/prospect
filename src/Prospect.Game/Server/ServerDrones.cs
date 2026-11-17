@@ -590,7 +590,7 @@ public sealed partial class ServerHost
         switch (order.Task)
         {
             case OrderTask.Hold:
-                Fly(order.Actor, WorldPoint(order.Base, order.Point), _content.Drones.HoldSlackMetres);
+                Steer(order, WorldPoint(order.Base, order.Point), PointVelocity(order.Base, order.Point), _content.Drones.HoldSlackMetres, group: true, hull: true);
                 return true;
             case OrderTask.Recall:
                 return Recall(ref order, page);
@@ -607,20 +607,82 @@ public sealed partial class ServerHost
     }
 
     /// <summary>
-    /// Keeps a drone's autopilot on <paramref name="target"/>: a new order once it has drifted <paramref name="slack"/>
-    /// away, or once the point it was given has moved a quarter of that.
+    /// Keeps a drone's autopilot on <paramref name="target"/>: a new order once the point it was given has moved a
+    /// quarter of <paramref name="slack"/>, or once the drone has drifted <paramref name="slack"/> from it after
+    /// arriving. An order the autopilot finished keeps its target, so a moving target is followed after arrival too.
     /// </summary>
     private void Fly(HullHandle drone, Double3 target, float slack)
     {
         ref var state = ref _hulls.State(drone.Index);
         ref var info = ref _hulls.Info(drone.Index);
+        var shifted = info.Order.Target.RelativeTo(target).LengthSquared() > slack * slack * 0.0625f;
         var moved = info.Order.Kind == OrderKind.MoveTo
-            ? info.Order.Target.RelativeTo(target).LengthSquared() > slack * slack * 0.0625f
-            : target.RelativeTo(state.Position).LengthSquared() > slack * slack;
+            ? shifted
+            : shifted || target.RelativeTo(state.Position).LengthSquared() > slack * slack;
         if (moved) HullSim.SetOrder(ref state, ref info.Order, new HullOrder { Kind = OrderKind.MoveTo, Target = target });
     }
 
-    /// <summary>Lines a drone up in front of its hatch, flies it straight in, and docks it. False once docked.</summary>
+    /// <summary>The velocity in the world of the point <paramref name="local"/> of a hull (its own frame, metres from its pivot).</summary>
+    private Vector3 PointVelocity(HullHandle hull, Vector3 local)
+    {
+        var state = _hulls.State(hull.Index);
+        return state.Velocity + HullRotation.Rotate(Vector3.Cross(state.AngularVelocity, local - _hulls.Flight(hull.Index).CenterOfMass), state.Orientation);
+    }
+
+    /// <summary>
+    /// Flies the drone of <paramref name="order"/> to <paramref name="place"/>, which moves at <paramref name="frame"/>:
+    /// through the autopilot, with a target that makes it close on the place as seen from that frame
+    /// (<see cref="DroneSteering"/>), so it neither trails a moving hull nor overshoots a moving body. With
+    /// <paramref name="group"/> (on its way somewhere, not lined up at a hatch) it keeps clear of the other drones of its
+    /// hull; with <paramref name="hull"/> it also goes round its own hull instead of through it; with a
+    /// <paramref name="bodyRadius"/> it goes round the body about <paramref name="body"/> to reach a place on its far side.
+    /// Takes no memory: the drones of one hull are found by a pass over the fixed order table.
+    /// </summary>
+    private void Steer(in TaskOrder order, Double3 place, Vector3 frame, float slack, bool group, bool hull = false,
+        Double3 body = default, float bodyRadius = 0)
+    {
+        var rules = _content.Drones;
+        var drone = order.Actor;
+        var position = _hulls.State(drone.Index).Position;
+        var push = _hulls.Flight(drone.Index).WeakestPush;
+        var goal = place;
+        var aimed = frame.LengthSquared() > FrameRestSpeed * FrameRestSpeed;
+        var apart = Vector3.Zero;
+        var radius = _hulls.Flight(drone.Index).Radius;
+        Double3 waypoint;
+        if (hull && _hulls.IsAlive(order.Base)
+            && DroneSteering.Around(position, place, WorldPoint(order.Base, _hulls.Flight(order.Base.Index).CenterOfMass),
+                _hulls.Flight(order.Base.Index).Radius + radius + rules.ClearanceMetres, out waypoint))
+            goal = DroneSteering.Beyond(position, waypoint);
+        else if (bodyRadius > 0 && DroneSteering.Around(position, place, body, bodyRadius + radius, out waypoint))
+            goal = waypoint;
+        if (group)
+        {
+            for (var i = 0; i < _orderCount; i++)
+            {
+                ref readonly var other = ref _orders[i];
+                if (other.Base != order.Base || other.Actor == drone || !_hulls.IsAlive(other.Actor)) continue;
+                ref readonly var near = ref _hulls.State(other.Actor.Index);
+                apart += DroneSteering.Apart(position.RelativeTo(near.Position), _hulls.State(drone.Index).Velocity - near.Velocity,
+                    rules.SeparationMetres, rules.SeparationSpeed, rules.SeparationSeconds);
+            }
+            if (apart != Vector3.Zero) aimed = true;
+        }
+
+        // A place at rest is the plain autopilot's own target: it stops there as it always has.
+        if (!aimed) { Fly(drone, goal, slack); return; }
+        var wanted = DroneSteering.Wanted(position, goal, frame, push) + apart;
+        Fly(drone, DroneSteering.Target(position, _hulls.State(drone.Index).Velocity, wanted, push), slack);
+    }
+
+    /// <summary>Below this speed, in metres a second, a drone's place counts as at rest and it is flown to the place itself.</summary>
+    private const float FrameRestSpeed = 0.05f;
+
+    /// <summary>
+    /// Brings a drone home: first to its own place beside its bay's hold point (<see cref="RecallFromAfar"/>), going round
+    /// the hull, then, once no other drone of that bay is lining up or docking, straight out in front of the hatch, then
+    /// in. One drone at a time in the lane, so drones coming home together never meet at the hatch. False once docked.
+    /// </summary>
     private bool Recall(ref TaskOrder order, int page)
     {
         var rules = _content.Drones;
@@ -635,35 +697,43 @@ public sealed partial class ServerHost
                 if (BlockSet.Has(alive, design.Bays[b]) && p.Bays[b].Stocked + p.Bays[b].Out < design.Types[design.Bays[b]].Bay!.Capacity) found = b;
             if (found < 0)
             {
-                Fly(order.Actor, WorldPoint(order.Base, order.Point), rules.HoldSlackMetres);
+                Steer(order, WorldPoint(order.Base, order.Point), PointVelocity(order.Base, order.Point), rules.HoldSlackMetres, group: true, hull: true);
                 return true;
             }
             if (p.Bays[order.Bay].Out > 0) p.Bays[order.Bay].Out--;
             p.Bays[found].Out++;
             p.Revision++;
             order.Bay = found;
-            order.Phase = 0;
+            order.Point = HomeSlot(design, found, ref p.Bays[found]);
+            order.Phase = RecallFromAfar;
         }
 
         var block = design.Bays[order.Bay];
         var normal = DroneBayRules.Normal(DroneBayRules.Hatch(design, block));
         var radius = _content.Designs[_content.WorkDroneDesign].Flight.Radius;
-        var staging = WorldPoint(order.Base, DroneBayRules.StagingPoint(design, block, rules.StagingMetres));
+        var stagingLocal = DroneBayRules.StagingPoint(design, block, rules.StagingMetres);
+        var staging = WorldPoint(order.Base, stagingLocal);
         var position = _hulls.State(order.Actor.Index).Position;
         if (order.Phase == RecallFromAfar)
         {
             var hold = WorldPoint(order.Base, order.Point);
-            if (hold.RelativeTo(position).LengthSquared() <= rules.StagingRadiusMetres * rules.StagingRadiusMetres) order.Phase = 0;
-            else { Fly(order.Actor, hold, rules.StagingRadiusMetres * 0.5f); return true; }
+            var dockWorld = WorldPoint(order.Base, DroneBayRules.DockPoint(design, block, radius));
+            if (hold.RelativeTo(position).LengthSquared() > rules.StagingRadiusMetres * rules.StagingRadiusMetres
+                || LaneTaken(order, dockWorld, 0.5f * rules.StagingMetres))
+            {
+                Steer(order, hold, PointVelocity(order.Base, order.Point), rules.StagingRadiusMetres * 0.5f, group: true, hull: true);
+                return true;
+            }
+            order.Phase = 0;
         }
         if (order.Phase == 0)
         {
             if (staging.RelativeTo(position).LengthSquared() <= rules.StagingRadiusMetres * rules.StagingRadiusMetres) order.Phase = 1;
-            else { Fly(order.Actor, staging, rules.StagingRadiusMetres * 0.5f); return true; }
+            else { Steer(order, staging, PointVelocity(order.Base, stagingLocal), rules.StagingRadiusMetres * 0.5f, group: false); return true; }
         }
 
         // A drone only passes an open hatch; while it is blocked the drone waits lined up in front of it.
-        if (!HatchClear(order.Base, block)) { Fly(order.Actor, staging, rules.StagingRadiusMetres * 0.5f); return true; }
+        if (!HatchClear(order.Base, block)) { Steer(order, staging, PointVelocity(order.Base, stagingLocal), rules.StagingRadiusMetres * 0.5f, group: false); return true; }
         var dock = DroneBayRules.DockPoint(design, block, radius);
         if (WorldPoint(order.Base, dock).RelativeTo(position).LengthSquared() <= rules.DockRadiusMetres * rules.DockRadiusMetres)
         {
@@ -677,8 +747,34 @@ public sealed partial class ServerHost
         }
 
         // Aim past the hatch, so the autopilot is still closing when the drone reaches it.
-        Fly(order.Actor, WorldPoint(order.Base, dock - normal * rules.DockPushMetres), rules.DockRadiusMetres);
+        var past = dock - normal * rules.DockPushMetres;
+        Steer(order, WorldPoint(order.Base, past), PointVelocity(order.Base, past), rules.DockRadiusMetres, group: false);
         return true;
+    }
+
+    /// <summary>
+    /// The place a drone of bay <paramref name="bay"/> waits at when it comes home: its own beside the bay's hold point,
+    /// never the hold point itself, which is on the line the drone in the lane flies in along.
+    /// </summary>
+    private Vector3 HomeSlot(HullDesign design, int bay, ref BayRecord record) =>
+        DroneBayRules.HoldSlot(DroneBayRules.DefaultHold(design, design.Bays[bay], _content.Drones.HoldDistanceMetres),
+            DroneBayRules.Hatch(design, design.Bays[bay]), 1 + record.Slot++, _content.Drones.HoldSpacingMetres);
+
+    /// <summary>
+    /// Whether another drone of the same bay is lining up in front of the hatch, or flying in from there and still
+    /// farther than <paramref name="clear"/> from <paramref name="dock"/>: the next may line up once it is nearly in.
+    /// </summary>
+    private bool LaneTaken(in TaskOrder order, Double3 dock, float clear)
+    {
+        for (var i = 0; i < _orderCount; i++)
+        {
+            ref readonly var other = ref _orders[i];
+            if (other.Task != OrderTask.Recall || other.Phase is not (0 or 1) || other.Base != order.Base || other.Bay != order.Bay
+                || other.Actor == order.Actor || !_hulls.IsAlive(other.Actor))
+                continue;
+            if (other.Phase == 0 || dock.RelativeTo(_hulls.State(other.Actor.Index).Position).LengthSquared() > clear * clear) return true;
+        }
+        return false;
     }
 
     /// <summary>Sends each pilot their flown hull's bays when they change, with the newest answer to a drone command.</summary>
