@@ -9,7 +9,7 @@ namespace Prospect.Client.Screens;
 /// <summary>What a drone scan key did, so a test can say it.</summary>
 internal enum DroneScanKeyAction : byte
 {
-    /// <summary>Nothing: no bay, no target, or another kind of scan is under way.</summary>
+    /// <summary>Nothing: no bay, or no target.</summary>
     None,
 
     /// <summary>Asked the server to send drones around the targeted rock.</summary>
@@ -47,11 +47,11 @@ internal static class DroneScanUi
     }
 
     /// <summary>
-    /// What a press of a scan key does. Ready: the drones are in place, so either key orders the scan. Moving or
-    /// scanning: the same kind again gives it up, the other kind does nothing. Otherwise: ask for a scan of
+    /// What a press of the scan key does. Ready: the drones are in place, so the key orders the scan. Moving or
+    /// scanning: the key again gives it up. Otherwise: ask for a scan of
     /// <paramref name="target"/>, if there is one; the server's answer (too large, too far, busy) shows on the chip.
     /// </summary>
-    public static DroneScanKeyAction Press(in BayView view, uint ownHull, DroneScanKind kind, RockRef? target, PlayerInputBridge bridge)
+    public static DroneScanKeyAction Press(in BayView view, uint ownHull, RockRef? target, PlayerInputBridge bridge)
     {
         if (!DroneUi.Present(view, ownHull)) return DroneScanKeyAction.None;
         switch (view.ScanPhase)
@@ -60,22 +60,20 @@ internal static class DroneScanUi
                 bridge.StartDroneScan(ownHull);
                 return DroneScanKeyAction.Start;
             case DroneScanPhase.Moving or DroneScanPhase.Scanning:
-                if (view.ScanKind != kind) return DroneScanKeyAction.None;
                 bridge.CancelDroneScan(ownHull);
                 return DroneScanKeyAction.Cancel;
             default:
                 if (target is not { } rock) return DroneScanKeyAction.None;
-                bridge.RequestDroneScan(ownHull, kind, rock);
+                bridge.RequestDroneScan(ownHull, rock);
                 return DroneScanKeyAction.Request;
         }
     }
 
-    /// <summary>The two scan keys: the survey key and the detailed scan key.</summary>
+    /// <summary>The scan key.</summary>
     public static void HandleKeys(ActionMap actions, InputDevices devices, bool keyboard, in BayView view, uint ownHull, RockRef? target, PlayerInputBridge bridge)
     {
         if (!DroneUi.Present(view, ownHull)) return;
-        if (actions.Pressed(devices, InputAction.SurveyRock, keyboard)) Press(view, ownHull, DroneScanKind.Survey, target, bridge);
-        else if (actions.Pressed(devices, InputAction.DetailedScan, keyboard)) Press(view, ownHull, DroneScanKind.Detailed, target, bridge);
+        if (actions.Pressed(devices, InputAction.DroneScan, keyboard)) Press(view, ownHull, target, bridge);
     }
 
     /// <summary>The scan button's own click: orders a ready scan. Nothing otherwise, and never the key's cancel.</summary>
@@ -86,7 +84,7 @@ internal static class DroneScanUi
         return true;
     }
 
-    /// <summary>The cancel button's click: gives the scan under way up, whatever its kind.</summary>
+    /// <summary>The cancel button's click: gives the scan under way up.</summary>
     public static bool CancelIfActive(in BayView view, uint ownHull, PlayerInputBridge bridge)
     {
         if (!DroneUi.Present(view, ownHull) || !Active(view)) return false;
@@ -103,16 +101,7 @@ internal static class DroneScanUi
         _ => upperName,
     };
 
-    /// <summary>The words of a vein hint band: none, a few (1 to 3), several (4 or 5), many (6 or more).</summary>
-    public static ReadOnlySpan<byte> VeinHintWords(byte hint) => hint switch
-    {
-        0 => "VEINS: NONE"u8,
-        1 => "VEINS: FEW (1-3)"u8,
-        2 => "VEINS: SEVERAL (4-5)"u8,
-        _ => "VEINS: MANY (6+)"u8,
-    };
-
-    /// <summary>How many pockets a detailed scan found and how many of them are unstable.</summary>
+    /// <summary>How many pockets a scan found and how many of them are unstable.</summary>
     public static void Pockets(in DroneScanRecord record, out int total, out int unstable)
     {
         total = Math.Min((int)record.Map.PocketCount, RockInteriorRules.MaxPockets);
@@ -121,21 +110,17 @@ internal static class DroneScanUi
             if (record.Map.Pockets[p].Unstable) unstable++;
     }
 
-    /// <summary>Rows of the text under the composition for a record: its name and age, then its veins; a detailed scan adds the hologram's button and, when it is on, its legend.</summary>
-    public static float RecordFooterHeight(ModuleLook.DroneScanLook look, DroneScanKind kind, bool hologramOn)
-    {
-        var height = look.LineHeight * 2;
-        if (kind == DroneScanKind.Detailed) height += look.ButtonHeight + look.Gap + (hologramOn ? look.LineHeight : 0f);
-        return height;
-    }
+    /// <summary>Rows of the text under the composition for a record: its name and age, its veins and pockets, the hologram's button and, when it is on, its legend.</summary>
+    public static float RecordFooterHeight(ModuleLook.DroneScanLook look, bool hologramOn) =>
+        look.LineHeight * 2 + look.ButtonHeight + look.Gap + (hologramOn ? look.LineHeight : 0f);
 
     /// <summary>The height of the block with the scan buttons and their status line, in unscaled pixels.</summary>
     public static float ButtonBlockHeight(ModuleLook.DroneScanLook look) => look.Gap + look.ButtonHeight + look.Gap + look.LineHeight;
 }
 
 /// <summary>
-/// Whether the detailed scan's hologram shows over its rock. A session choice, never saved; it turns on by itself
-/// when a detailed result arrives for the rock targeted (or the rock the hull's scan is of), so the first look at a
+/// Whether the drone scan's hologram shows over its rock. A session choice, never saved; it turns on by itself
+/// when a result arrives for the rock targeted (or the rock the hull's scan is of), so the first look at a
 /// scan needs no key. The first view seen sets what is already known without showing it.
 /// </summary>
 internal sealed class ScanHologramState
@@ -150,7 +135,7 @@ internal sealed class ScanHologramState
     /// <summary>The key or the button.</summary>
     public void Toggle() => On = !On;
 
-    /// <summary>Reads this frame's results; <paramref name="target"/> and <paramref name="scanRock"/> are the rocks a new detailed result turns it on for.</summary>
+    /// <summary>Reads this frame's results; <paramref name="target"/> and <paramref name="scanRock"/> are the rocks a new result turns it on for.</summary>
     public void Observe(DroneScanKnowledgeView view, RockRef? target, RockRef? scanRock)
     {
         if (_seen && view.Revision == _revision) return;
@@ -162,7 +147,7 @@ internal sealed class ScanHologramState
         {
             ref var record = ref view.Records[i];
             newest = Math.Max(newest, record.RecordedTick);
-            if (fresh || record.Kind != DroneScanKind.Detailed || record.RecordedTick <= _newest) continue;
+            if (fresh || record.RecordedTick <= _newest) continue;
             var rock = record.Rock;
             if (target == rock || scanRock == rock) On = true;
         }

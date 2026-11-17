@@ -227,8 +227,7 @@ public struct BayView
     /// <summary>True while the hull's drones fetch loose ore chunks on their own.</summary>
     public bool PickUpOres;
 
-    /// <summary>The hull's drone scan: its kind and phase (<see cref="DroneScanPhase.None"/> without one) and its rock.</summary>
-    public DroneScanKind ScanKind;
+    /// <summary>The hull's drone scan: its phase (<see cref="DroneScanPhase.None"/> without one) and its rock.</summary>
     public DroneScanPhase ScanPhase;
     public RockRef ScanRock;
 
@@ -268,8 +267,8 @@ public static class BayMessage
     public const int RecordBytes = 2 + 1 + 1 + 1 + 1 + 1 + 8;
     public const int HeaderBytes = 1 + 4 + 8 + 4 + 1 + 1 + 1 + 1 + 1 + ScanBytes + 1;
 
-    /// <summary>The scan: kind, phase, sector, index, drones, in place, start and end.</summary>
-    public const int ScanBytes = 1 + 1 + 12 + 4 + 1 + 1 + 8 + 8;
+    /// <summary>The scan: phase, sector, index, drones, in place, start and end.</summary>
+    public const int ScanBytes = 1 + 12 + 4 + 1 + 1 + 8 + 8;
     public const int MaxWireSize = HeaderBytes + DroneBayRules.MaxBays * RecordBytes;
 
     /// <summary>Writes the view whole.</summary>
@@ -280,7 +279,7 @@ public static class BayMessage
         writer.WriteByte((byte)view.Reply); writer.WriteByte(view.ReplyCount); writer.WriteByte(view.Fetching);
         writer.WriteByte(view.AutoPickup ? (byte)1 : (byte)0);
         writer.WriteByte(view.PickUpOres ? (byte)1 : (byte)0);
-        writer.WriteByte((byte)view.ScanKind); writer.WriteByte((byte)view.ScanPhase);
+        writer.WriteByte((byte)view.ScanPhase);
         writer.WriteInt32(view.ScanRock.Sector.X); writer.WriteInt32(view.ScanRock.Sector.Y); writer.WriteInt32(view.ScanRock.Sector.Z);
         writer.WriteInt32(view.ScanRock.Index); writer.WriteByte(view.ScanDrones); writer.WriteByte(view.ScanInPlace);
         writer.WriteInt64(view.ScanStarted); writer.WriteInt64(view.ScanCompletes);
@@ -303,14 +302,14 @@ public static class BayMessage
         view.Reply = (DroneReply)reader.ReadByte(); view.ReplyCount = reader.ReadByte(); view.Fetching = reader.ReadByte();
         var auto = reader.ReadByte(); view.AutoPickup = auto == 1;
         var ores = reader.ReadByte(); view.PickUpOres = ores == 1;
-        view.ScanKind = (DroneScanKind)reader.ReadByte(); view.ScanPhase = (DroneScanPhase)reader.ReadByte();
+        view.ScanPhase = (DroneScanPhase)reader.ReadByte();
         view.ScanRock = new RockRef(new SectorCoord(reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32()), reader.ReadInt32());
         view.ScanDrones = reader.ReadByte(); view.ScanInPlace = reader.ReadByte();
         view.ScanStarted = reader.ReadInt64(); view.ScanCompletes = reader.ReadInt64();
         view.Count = reader.ReadByte();
         var scanShape = view.ScanPhase == DroneScanPhase.None
-            ? view.ScanKind == DroneScanKind.None && view.ScanRock == default && view.ScanDrones == 0 && view.ScanInPlace == 0
-            : view.ScanKind is DroneScanKind.Survey or DroneScanKind.Detailed && view.ScanPhase <= DroneScanPhase.Returning
+            ? view.ScanRock == default && view.ScanDrones == 0 && view.ScanInPlace == 0
+            : view.ScanPhase <= DroneScanPhase.Returning
                 && view.ScanRock.Index >= 0 && view.ScanDrones is > 0 and <= DroneScanning.MaxDrones && view.ScanInPlace <= view.ScanDrones;
         var scanTime = view.ScanPhase == DroneScanPhase.Scanning ? view.ScanStarted >= 0 && view.ScanCompletes >= view.ScanStarted
             : view.ScanStarted == 0 && view.ScanCompletes == 0;

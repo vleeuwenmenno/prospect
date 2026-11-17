@@ -335,15 +335,15 @@ public sealed class PlayerInputBridge
 
     /// <summary>
     /// Asks the server to send drones from <paramref name="hull"/>'s bays to their places around <paramref name="rock"/>
-    /// for a scan of <paramref name="kind"/>. The server works out how many it takes and says why when it cannot
+    /// for a scan. The server works out how many it takes and says why when it cannot
     /// (<see cref="SessionSnapshot.Bays"/>); the drones' progress is <see cref="BayView.ScanPhase"/>.
     /// </summary>
-    public void RequestDroneScan(uint hull, DroneScanKind kind, RockRef rock)
+    public void RequestDroneScan(uint hull, RockRef rock)
     {
-        if (hull == 0 || kind == DroneScanKind.None || rock.Index < 0) return;
+        if (hull == 0 || rock.Index < 0) return;
         lock (_lock)
         {
-            _droneScan = new DroneScanCommandMessage(hull, DroneScanAction.Request, kind, rock);
+            _droneScan = new DroneScanCommandMessage(hull, DroneScanAction.Request, rock);
             _hasDroneScan = true;
         }
     }
@@ -359,7 +359,7 @@ public sealed class PlayerInputBridge
         if (hull == 0) return;
         lock (_lock)
         {
-            _droneScan = new DroneScanCommandMessage(hull, action, DroneScanKind.None, default);
+            _droneScan = new DroneScanCommandMessage(hull, action, default);
             _hasDroneScan = true;
         }
     }

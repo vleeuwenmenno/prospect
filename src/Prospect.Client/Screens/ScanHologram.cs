@@ -113,12 +113,11 @@ internal sealed class ScanHologram
 
     /// <summary>
     /// Builds the primitives for <paramref name="record"/> of a rock at <paramref name="centre"/> turned by
-    /// <paramref name="rotation"/>. False, with nothing built, for a survey or a rock wholly behind the camera.
+    /// <paramref name="rotation"/>. False, with nothing built, for a rock wholly behind the camera.
     /// </summary>
     public bool Build(in DroneScanRecord record, in HologramCamera camera, Double3 centre, Quaternion rotation, ModuleLook.DroneScanLook look)
     {
         SegmentCount = PocketCount = DotCount = 0;
-        if (record.Kind != DroneScanKind.Detailed) return false;
         var middle = camera.ToView(centre);
         if (middle.Z + record.Radius < HologramCamera.NearPlane) return false;
         ref readonly var map = ref record.Map;

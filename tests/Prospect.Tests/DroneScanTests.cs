@@ -27,7 +27,7 @@ public sealed class DroneScanTests
     private static readonly SectorCoord[] Coords = [default, new(-40, 0, -29), new(8, 0, -8), new(3, 0, 1)];
 
     /// <summary>A pod with one drone bay (four drones), or with <paramref name="secondBay"/> two (eight), and no tractor beam.</summary>
-    private static GameContent Content(bool secondBay = false) => DroneFetchTests.Content(secondBay, tractor: false);
+    private static GameContent Content(bool secondBay = true) => DroneFetchTests.Content(secondBay, tractor: false);
 
     // ------------------------------------------------------------------------------------------------------------
     // Shared rules
@@ -55,46 +55,26 @@ public sealed class DroneScanTests
     }
 
     [Fact]
-    public void TheDroneCountFollowsTheRocksSizeAndNeverFallsBelowTheLevelsMinimum()
+    public void TheDroneCountFollowsTheRocksSizeAndNeverFallsBelowTheMinimum()
     {
         var (_, round) = ExtremeShapes();
-        foreach (var kind in new[] { DroneScanKind.Survey, DroneScanKind.Detailed })
-        {
-            var figures = Rules.Of(kind);
-            var previous = 0;
-            foreach (var (name, radius) in Sizes)
-            {
-                var needed = DroneScanning.Needed(Rules, kind, radius, round);
-                Assert.True(needed >= figures.MinDrones, $"{kind} {name}: {needed} is under the minimum {figures.MinDrones}");
-                Assert.True(needed >= previous, $"{kind} {name}: {needed} drones after {previous} for a smaller rock");
-                previous = needed;
-            }
-
-            // A speck takes the minimum however small.
-            Assert.Equal(figures.MinDrones, DroneScanning.Needed(Rules, kind, 0.5f, round));
-        }
-
-        Assert.True(DroneScanning.Needed(Rules, DroneScanKind.Detailed, 1000f, round) > Rules.Detailed.MaxDrones);
-        // Every shape's giant asks for at least as many drones as its small rock, and none is zero.
-        for (var shape = 0; shape < Galaxy.AsteroidShapes; shape++)
-            foreach (var kind in new[] { DroneScanKind.Survey, DroneScanKind.Detailed })
-                Assert.InRange(DroneScanning.Needed(Rules, kind, 10f, shape), Rules.Of(kind).MinDrones, DroneScanning.Needed(Rules, kind, 1000f, shape));
-    }
-
-    [Fact]
-    public void ADetailedScanTakesMoreDronesThanASurveyOfTheSameRock()
-    {
-        var (_, round) = ExtremeShapes();
+        var previous = 0;
         foreach (var (name, radius) in Sizes)
         {
-            var survey = DroneScanning.Needed(Rules, DroneScanKind.Survey, radius, round);
-            var detailed = DroneScanning.Needed(Rules, DroneScanKind.Detailed, radius, round);
-            Assert.True(detailed >= survey, $"{name}: detailed {detailed}, survey {survey}");
+            var needed = DroneScanning.Needed(Rules, radius, round);
+            Assert.True(needed >= Rules.MinDrones, $"{name}: {needed} is under the minimum {Rules.MinDrones}");
+            Assert.True(needed >= previous, $"{name}: {needed} drones after {previous} for a smaller rock");
+            previous = needed;
         }
 
-        // The documented figures: a medium rock cannot be done in detail by a bay of four, and the giant is too large.
-        Assert.InRange(DroneScanning.Needed(Rules, DroneScanKind.Detailed, 100f, round), 5, Rules.Detailed.MaxDrones);
-        Assert.True(DroneScanning.Needed(Rules, DroneScanKind.Survey, 1000f, round) >= DroneScanning.Needed(Rules, DroneScanKind.Survey, 100f, round));
+        // A speck takes the minimum however small.
+        Assert.Equal(Rules.MinDrones, DroneScanning.Needed(Rules, 0.5f, round));
+        Assert.True(DroneScanning.Needed(Rules, 1000f, round) > Rules.MaxDrones);
+        // The documented figures: a medium rock cannot be done by a bay of four, and the giant is too large.
+        Assert.InRange(DroneScanning.Needed(Rules, 100f, round), 5, Rules.MaxDrones);
+        // Every shape's giant asks for at least as many drones as its small rock, and none is zero.
+        for (var shape = 0; shape < Galaxy.AsteroidShapes; shape++)
+            Assert.InRange(DroneScanning.Needed(Rules, 10f, shape), Rules.MinDrones, DroneScanning.Needed(Rules, 1000f, shape));
     }
 
     [Fact]
@@ -106,13 +86,12 @@ public sealed class DroneScanTests
         DroneScanning.Extent(elongated, out var farL, out var meanL, out var nearL);
         DroneScanning.Extent(round, out var farR, out var meanR, out var nearR);
         Assert.True(farL / nearL > farR / nearR);
-        foreach (var kind in new[] { DroneScanKind.Survey, DroneScanKind.Detailed })
-            foreach (var (name, mean) in new[] { ("small", 8f), ("medium", 80f), ("giant", 800f) })
-            {
-                var stretched = DroneScanning.Needed(Rules, kind, mean / meanL, elongated);
-                var plain = DroneScanning.Needed(Rules, kind, mean / meanR, round);
-                Assert.True(stretched >= plain, $"{kind} {name}: shape {elongated} (ratio {farL / nearL:F2}) takes {stretched}, shape {round} (ratio {farR / nearR:F2}) takes {plain}");
-            }
+        foreach (var (name, mean) in new[] { ("small", 8f), ("medium", 80f), ("giant", 800f) })
+        {
+            var stretched = DroneScanning.Needed(Rules, mean / meanL, elongated);
+            var plain = DroneScanning.Needed(Rules, mean / meanR, round);
+            Assert.True(stretched >= plain, $"{name}: shape {elongated} (ratio {farL / nearL:F2}) takes {stretched}, shape {round} (ratio {farR / nearR:F2}) takes {plain}");
+        }
     }
 
     [Fact]
@@ -246,26 +225,17 @@ public sealed class DroneScanTests
     }
 
     [Fact]
-    public void VeinHintsBandTheVeinCount()
-    {
-        byte[] expected = [0, 1, 1, 1, 2, 2, 3, 3, 3];
-        for (var veins = 0; veins < expected.Length; veins++) Assert.Equal(expected[veins], DroneScanning.VeinHint(veins));
-        Assert.Equal(0, DroneScanning.VeinHint(-1));
-    }
-
-    [Fact]
     public void TheScanFiguresAreReadAndNonsenseIsRefused()
     {
         Assert.Equal(3000f, Rules.RangeMetres);
         Assert.Equal(0.001f, Rules.Resolution);
-        Assert.Equal(2, Rules.Survey.MinDrones);
-        Assert.Equal(12, Rules.Detailed.MaxDrones);
-        Assert.Equal(180L, Rules.Survey.ScanTicks);
-        Assert.Equal(360L, Rules.Detailed.ScanTicks);
+        Assert.Equal(3, Rules.MinDrones);
+        Assert.Equal(12, Rules.MaxDrones);
+        Assert.Equal(360L, Rules.ScanTicks);
         Assert.Equal(180L * 60, Rules.MoveTicks);
         Assert.Equal(120L * 60, Rules.ReadyTicks);
 
-        const string Good = """{ "rangeMetres": 3000, "standoffFraction": 0.6, "minStandoffMetres": 12, "maxStandoffMetres": 300, "placeToleranceMetres": 2.5, "travelStepDegrees": 25, "moveSeconds": 180, "readySeconds": 120, "resolution": 0.001, "survey": { "coverageSquareMetres": 40000, "cover": 0.5, "minDrones": 2, "maxDrones": 8, "scanSeconds": 3 }, "detailed": { "coverageSquareMetres": 20000, "cover": 1, "minDrones": 3, "maxDrones": 12, "scanSeconds": 6 } }""";
+        const string Good = """{ "rangeMetres": 3000, "standoffFraction": 0.6, "minStandoffMetres": 12, "maxStandoffMetres": 300, "placeToleranceMetres": 2.5, "travelStepDegrees": 25, "moveSeconds": 180, "readySeconds": 120, "resolution": 0.001, "coverageSquareMetres": 20000, "cover": 1, "minDrones": 3, "maxDrones": 12, "scanSeconds": 6 }""";
         using (var good = System.Text.Json.JsonDocument.Parse(Good)) Assert.Equal(Rules, DroneScanRules.Read(good.RootElement, 12));
 
         foreach (var broken in new[]
@@ -276,14 +246,14 @@ public sealed class DroneScanTests
             Good.Replace("\"minStandoffMetres\": 12", "\"minStandoffMetres\": 400"),
             Good.Replace("\"minDrones\": 3", "\"minDrones\": 13"),
             Good.Replace("\"maxDrones\": 12", "\"maxDrones\": 40"),
-            Good.Replace("\"cover\": 0.5", "\"cover\": 0"),
+            Good.Replace("\"cover\": 1,", "\"cover\": 0,"),
         })
         {
             using var document = System.Text.Json.JsonDocument.Parse(broken);
             Assert.Throws<InvalidDataException>(() => DroneScanRules.Read(document.RootElement, 12));
         }
 
-        // A level may not ask for more drones than a player may have out.
+        // A scan may not ask for more drones than a player may have out.
         using var tight = System.Text.Json.JsonDocument.Parse(Good);
         Assert.Throws<InvalidDataException>(() => DroneScanRules.Read(tight.RootElement, 10));
     }
@@ -308,11 +278,11 @@ public sealed class DroneScanTests
     }
 
     /// <summary>A record built the way the server builds one, for any rock.</summary>
-    internal static DroneScanRecord Record(Galaxy galaxy, RockRef rock, in Asteroid asteroid, DroneScanKind kind, uint owner, long tick)
+    internal static DroneScanRecord Record(Galaxy galaxy, RockRef rock, in Asteroid asteroid, uint owner, long tick)
     {
         var record = new DroneScanRecord { Owner = owner, Sector = rock.Sector, Index = rock.Index, RecordedTick = tick };
         RockInterior.Describe(galaxy, rock, asteroid, out var interior);
-        DroneScanResults.Build(kind, asteroid, interior, Rules.Resolution, ref record);
+        DroneScanResults.Build(asteroid, interior, Rules.Resolution, ref record);
         return record;
     }
 
@@ -339,7 +309,7 @@ public sealed class DroneScanTests
     [Fact]
     public void ABuiltRecordMatchesTheRocksInteriorAndIsValid()
     {
-        var detailed = 0;
+        var scanned = 0;
         var withVeins = 0;
         var withUnstable = 0;
         var withMix = 0;
@@ -349,10 +319,9 @@ public sealed class DroneScanTests
         foreach (var (rock, asteroid) in rocks)
         {
             RockInterior.Describe(World, rock, asteroid, out var interior);
-            foreach (var kind in new[] { DroneScanKind.Survey, DroneScanKind.Detailed })
             {
-                var record = Record(World, rock, asteroid, kind, 5, 9);
-                Assert.True(DroneScanRecordRules.Valid(record), $"{rock} {kind}");
+                var record = Record(World, rock, asteroid, 5, 9);
+                Assert.True(DroneScanRecordRules.Valid(record), $"{rock}");
 
                 // The bulk: the rock's true shares, floored to the drones' step, never more than is there.
                 Assert.Equal(asteroid.Resource, record.Resource);
@@ -368,15 +337,7 @@ public sealed class DroneScanTests
                 }
 
                 Assert.Equal(asteroid.Radius, record.Radius);
-                Assert.Equal(DroneScanning.VeinHint(interior.VeinCount), record.VeinHint);
-                if (kind == DroneScanKind.Survey)
-                {
-                    Assert.Equal(0, record.Map.VeinCount);
-                    Assert.Equal(0, record.Map.PocketCount);
-                    continue;
-                }
-
-                detailed++;
+                scanned++;
                 CheckMap(record, interior, asteroid);
                 if (record.Map.VeinCount > 0) withVeins++;
                 for (var p = 0; p < record.Map.PocketCount; p++) if (record.Map.Pockets[p].Unstable) { withUnstable++; break; }
@@ -384,8 +345,8 @@ public sealed class DroneScanTests
             }
         }
 
-        Assert.True(detailed >= 40 && withVeins >= 10 && withUnstable >= 3 && withMix >= 4 && heatUnstable >= 3,
-            $"{detailed} detailed, {withVeins} with veins, {withUnstable} with an unstable pocket, {withMix} mixed, {heatUnstable} with an unstable heat cell");
+        Assert.True(scanned >= 40 && withVeins >= 10 && withUnstable >= 3 && withMix >= 4 && heatUnstable >= 3,
+            $"{scanned} scanned, {withVeins} with veins, {withUnstable} with an unstable pocket, {withMix} mixed, {heatUnstable} with an unstable heat cell");
     }
 
     private static void CheckMap(in DroneScanRecord record, in RockInterior interior, in Asteroid asteroid)
@@ -458,7 +419,7 @@ public sealed class DroneScanTests
         foreach (var (rock, asteroid) in Rocks(World, 60))
         {
             RockInterior.Describe(World, rock, asteroid, out var interior);
-            var record = Record(World, rock, asteroid, DroneScanKind.Detailed, 5, 9);
+            var record = Record(World, rock, asteroid, 5, 9);
             for (var p = 0; p < interior.PocketCount; p++)
             {
                 if (interior.PocketKind(p) == RockPocketKind.Ore) continue;
@@ -499,13 +460,10 @@ public sealed class DroneScanTests
         {
             if (asteroid.Resource >= 0) continue;
             bare++;
-            foreach (var kind in new[] { DroneScanKind.Survey, DroneScanKind.Detailed })
-            {
-                var record = Record(World, rock, asteroid, kind, 5, 9);
-                Assert.Equal((-1, -1, -1, 0f, 0), (record.Resource, record.Mix1, record.Mix2, record.Grade, (int)record.VeinHint));
-                Assert.Equal(0, record.Map.VeinCount);
-                Assert.True(DroneScanRecordRules.Valid(record));
-            }
+            var record = Record(World, rock, asteroid, 5, 9);
+            Assert.Equal((-1, -1, -1, 0f), (record.Resource, record.Mix1, record.Mix2, record.Grade));
+            Assert.Equal(0, record.Map.VeinCount);
+            Assert.True(DroneScanRecordRules.Valid(record));
         }
 
         Assert.True(bare > 0, "no bare rock in the sample");
@@ -515,18 +473,16 @@ public sealed class DroneScanTests
     public void AValidRecordIsRefusedWhenItsPartsDisagree()
     {
         var (rock, asteroid) = Rocks(World, 60).First(r => r.Asteroid.Resource >= 0 && r.Asteroid.Mix1 >= 0 && r.Asteroid.Mix2 >= 0);
-        var good = Record(World, rock, asteroid, DroneScanKind.Detailed, 5, 9);
+        var good = Record(World, rock, asteroid, 5, 9);
         Assert.True(DroneScanRecordRules.Valid(good));
         var cases = new List<(string What, DroneScanRecord Record)>();
         void Case(string what, Func<DroneScanRecord, DroneScanRecord> change) => cases.Add((what, change(good)));
         Case("no owner", r => { r.Owner = 0; return r; });
-        Case("no kind", r => { r.Kind = DroneScanKind.None; return r; });
         Case("negative index", r => { r.Index = -1; return r; });
         Case("past the wire's index", r => { r.Index = 70000; return r; });
         Case("negative tick", r => { r.RecordedTick = -1; return r; });
         Case("radius zero", r => { r.Radius = 0; return r; });
         Case("radius NaN", r => { r.Radius = float.NaN; return r; });
-        Case("vein hint 4", r => { r.VeinHint = 4; return r; });
         Case("share above one", r => { r.Grade = 1.5f; return r; });
         Case("share NaN", r => { r.Mix1Share = float.NaN; return r; });
         Case("mix-in named twice", r => { r.Mix1 = r.Resource; return r; });
@@ -534,7 +490,6 @@ public sealed class DroneScanTests
         Case("shares over one", r => { r.Grade = 0.9f; r.Mix1Share = 0.5f; return r; });
         Case("resource 32", r => { r.Resource = 32; return r; });
         Case("bare rock with a grade", r => { r.Resource = -1; return r; });
-        Case("survey with a map", r => { r.Kind = DroneScanKind.Survey; r.Map.VeinCount = 1; return r; });
         Case("nine veins", r => { r.Map.VeinCount = 9; return r; });
         Case("five pockets", r => { r.Map.PocketCount = 5; return r; });
         Case("a vein of one point", r => { r.Map.VeinCount = 1; r.Map.Veins[0].Points = 1; return r; });
@@ -549,7 +504,7 @@ public sealed class DroneScanTests
     // Wire
     // ------------------------------------------------------------------------------------------------------------
 
-    private static DroneScanRecord RichRecord(DroneScanKind kind, uint owner = 7, long tick = 1234)
+    private static DroneScanRecord RichRecord(uint owner = 7, long tick = 1234)
     {
         var content = new SectorContent();
         var best = default((RockRef Rock, Asteroid Asteroid));
@@ -567,7 +522,7 @@ public sealed class DroneScanTests
         }
 
         Assert.True(score > 0);
-        return Record(World, best.Rock, best.Asteroid, kind, owner, tick);
+        return Record(World, best.Rock, best.Asteroid, owner, tick);
     }
 
     internal static byte[] Bytes(in DroneScanRecord record)
@@ -581,46 +536,39 @@ public sealed class DroneScanTests
     [Fact]
     public void ARecordRoundTripsThroughTheCodecAndSizeSaysHowManyBytes()
     {
-        foreach (var kind in new[] { DroneScanKind.Survey, DroneScanKind.Detailed })
-        {
-            var record = RichRecord(kind);
-            var bytes = Bytes(record);
-            Assert.Equal(DroneScanCodec.Size(record), bytes.Length);
-            Assert.True(bytes.Length <= DroneScanCodec.MaxBytes);
-            Assert.Equal(kind == DroneScanKind.Survey, bytes.Length == DroneScanCodec.HeadBytes);
-            var reader = new NetReader(bytes);
-            Assert.True(DroneScanCodec.Read(ref reader, out var copy));
-            Assert.Equal(0, reader.Remaining);
-            Assert.Equal(bytes, Bytes(copy));
-            Assert.Equal((record.Owner, record.Kind, record.Sector, record.Index, record.RecordedTick, record.Radius), (copy.Owner, copy.Kind, copy.Sector, copy.Index, copy.RecordedTick, copy.Radius));
-            Assert.Equal((record.Resource, record.Mix1, record.Mix2, record.Grade, record.Mix1Share, record.Mix2Share, record.VeinHint),
-                (copy.Resource, copy.Mix1, copy.Mix2, copy.Grade, copy.Mix1Share, copy.Mix2Share, copy.VeinHint));
-            Assert.Equal(record.Map.VeinCount, copy.Map.VeinCount);
-            Assert.Equal(record.Map.PocketCount, copy.Map.PocketCount);
-            if (kind == DroneScanKind.Detailed)
-            {
-                Assert.True(record.Map.VeinCount > 0 && record.Map.PocketCount > 0, "the sample's richest rock has no veins and pockets to carry");
-                for (var v = 0; v < record.Map.VeinCount; v++)
-                    for (var k = 0; k < record.Map.Veins[v].Points; k++)
-                        Assert.Equal(record.VeinPoint(v, k), copy.VeinPoint(v, k));
-                for (var c = 0; c < DroneScanning.HeatCells; c++) Assert.Equal((record.Map.Heat[c], record.Map.Surface[c]), (copy.Map.Heat[c], copy.Map.Surface[c]));
-            }
+        var record = RichRecord();
+        var bytes = Bytes(record);
+        Assert.Equal(DroneScanCodec.Size(record), bytes.Length);
+        Assert.InRange(bytes.Length, DroneScanCodec.MinBytes, DroneScanCodec.MaxBytes);
+        var reader = new NetReader(bytes);
+        Assert.True(DroneScanCodec.Read(ref reader, out var copy));
+        Assert.Equal(0, reader.Remaining);
+        Assert.Equal(bytes, Bytes(copy));
+        Assert.Equal((record.Owner, record.Sector, record.Index, record.RecordedTick, record.Radius), (copy.Owner, copy.Sector, copy.Index, copy.RecordedTick, copy.Radius));
+        Assert.Equal((record.Resource, record.Mix1, record.Mix2, record.Grade, record.Mix1Share, record.Mix2Share),
+            (copy.Resource, copy.Mix1, copy.Mix2, copy.Grade, copy.Mix1Share, copy.Mix2Share));
+        Assert.Equal(record.Map.VeinCount, copy.Map.VeinCount);
+        Assert.Equal(record.Map.PocketCount, copy.Map.PocketCount);
+        Assert.True(record.Map.VeinCount > 0 && record.Map.PocketCount > 0, "the sample's richest rock has no veins and pockets to carry");
+        for (var v = 0; v < record.Map.VeinCount; v++)
+            for (var k = 0; k < record.Map.Veins[v].Points; k++)
+                Assert.Equal(record.VeinPoint(v, k), copy.VeinPoint(v, k));
+        for (var c = 0; c < DroneScanning.HeatCells; c++) Assert.Equal((record.Map.Heat[c], record.Map.Surface[c]), (copy.Map.Heat[c], copy.Map.Surface[c]));
 
-            var message = new byte[DroneScanResultMessage.MaxWireSize];
-            var writer = new NetWriter(message);
-            DroneScanResultMessage.Write(ref writer, record);
-            Assert.Equal(1 + bytes.Length, writer.Written.Length);
-            Assert.Equal((byte)MessageId.DroneScanResult, writer.Written[0]);
-            reader = new NetReader(writer.Written[1..]);
-            Assert.True(DroneScanResultMessage.TryRead(ref reader, out var viaMessage));
-            Assert.Equal(bytes, Bytes(viaMessage));
-        }
+        var message = new byte[DroneScanResultMessage.MaxWireSize];
+        var writer = new NetWriter(message);
+        DroneScanResultMessage.Write(ref writer, record);
+        Assert.Equal(1 + bytes.Length, writer.Written.Length);
+        Assert.Equal((byte)MessageId.DroneScanResult, writer.Written[0]);
+        reader = new NetReader(writer.Written[1..]);
+        Assert.True(DroneScanResultMessage.TryRead(ref reader, out var viaMessage));
+        Assert.Equal(bytes, Bytes(viaMessage));
     }
 
     [Fact]
     public void TheLargestMapFitsTheBoundExactly()
     {
-        var record = RichRecord(DroneScanKind.Detailed);
+        var record = RichRecord();
         record.Map.VeinCount = RockInteriorRules.MaxVeins;
         record.Map.PocketCount = RockInteriorRules.MaxPockets;
         for (var v = 0; v < RockInteriorRules.MaxVeins; v++)
@@ -646,9 +594,7 @@ public sealed class DroneScanTests
     [Fact]
     public void MalformedRecordBytesAreRefused()
     {
-        var detailed = RichRecord(DroneScanKind.Detailed);
-        var bytes = Bytes(detailed);
-        const int KindAt = 4;
+        var bytes = Bytes(RichRecord());
         var veinCountAt = DroneScanCodec.HeadBytes;
         var pocketCountAt = DroneScanCodec.HeadBytes + 1;
         var firstVeinPointsAt = DroneScanCodec.HeadBytes + 2;
@@ -657,9 +603,6 @@ public sealed class DroneScanTests
         byte[] With(int at, byte value) { var copy = (byte[])bytes.Clone(); copy[at] = value; return copy; }
 
         Assert.True(Reads(bytes));
-        Assert.False(Reads(With(KindAt, 0)));
-        Assert.False(Reads(With(KindAt, 3)));
-        Assert.False(Reads(With(KindAt, 255)));
         Assert.False(Reads(With(veinCountAt, (byte)(RockInteriorRules.MaxVeins + 1))));
         Assert.False(Reads(With(pocketCountAt, (byte)(RockInteriorRules.MaxPockets + 1))));
         Assert.False(Reads(With(firstVeinPointsAt, (byte)(RockInteriorRules.MaxVeinPoints + 1))));
@@ -669,18 +612,13 @@ public sealed class DroneScanTests
         Assert.False(Reads(bytes[..DroneScanCodec.HeadBytes]));
         Assert.False(Reads(bytes[..10]));
         Assert.False(Reads([]));
-        // The head: an owner of zero and a vein hint past three.
+        // The head: an owner of zero.
         Assert.False(Reads([.. new byte[4], .. bytes[4..]]));
-        Assert.False(Reads(With(DroneScanCodec.HeadBytes - 1, 4)));
 
-        // Trailing bytes: a message with anything after the record is refused, and so is a "survey" followed by a map.
-        var asSurvey = With(KindAt, (byte)DroneScanKind.Survey);
-        Assert.True(Reads(asSurvey));
-        var reader = new NetReader(asSurvey);
-        Assert.False(DroneScanResultMessage.TryRead(ref reader, out _));
+        // Trailing bytes: a message with anything after the record is refused.
         var trailing = new byte[bytes.Length + 1];
         bytes.CopyTo(trailing, 0);
-        reader = new NetReader(trailing);
+        var reader = new NetReader(trailing);
         Assert.False(DroneScanResultMessage.TryRead(ref reader, out _));
         reader = new NetReader(bytes);
         Assert.True(DroneScanResultMessage.TryRead(ref reader, out _));
@@ -702,28 +640,25 @@ public sealed class DroneScanTests
 
         var rock = new RockRef(new SectorCoord(-3, 0, 7), 41);
         var hull = 7u | 1u << 16;
-        Assert.True(Reads(new(hull, DroneScanAction.Request, DroneScanKind.Detailed, rock), out var read));
-        Assert.Equal(new DroneScanCommandMessage(hull, DroneScanAction.Request, DroneScanKind.Detailed, rock), read);
-        Assert.True(Reads(new(hull, DroneScanAction.Request, DroneScanKind.Survey, new RockRef(default, ushort.MaxValue)), out _));
-        Assert.True(Reads(new(hull, DroneScanAction.Start, DroneScanKind.None, default), out _));
-        Assert.True(Reads(new(hull, DroneScanAction.Cancel, DroneScanKind.None, default), out _));
+        Assert.True(Reads(new(hull, DroneScanAction.Request, rock), out var read));
+        Assert.Equal(new DroneScanCommandMessage(hull, DroneScanAction.Request, rock), read);
+        Assert.True(Reads(new(hull, DroneScanAction.Request, new RockRef(default, ushort.MaxValue)), out _));
+        Assert.True(Reads(new(hull, DroneScanAction.Start, default), out _));
+        Assert.True(Reads(new(hull, DroneScanAction.Cancel, default), out _));
 
-        // A request names a kind and a rock; a start or cancel names neither; the hull is never zero; nothing trails.
-        Assert.False(Reads(new(hull, DroneScanAction.Request, DroneScanKind.None, rock), out _));
-        Assert.False(Reads(new(hull, DroneScanAction.Request, (DroneScanKind)3, rock), out _));
-        Assert.False(Reads(new(hull, DroneScanAction.Request, DroneScanKind.Survey, new RockRef(default, -1)), out _));
-        Assert.False(Reads(new(hull, DroneScanAction.Request, DroneScanKind.Survey, new RockRef(default, ushort.MaxValue + 1)), out _));
-        Assert.False(Reads(new(hull, DroneScanAction.Start, DroneScanKind.Survey, default), out _));
-        Assert.False(Reads(new(hull, DroneScanAction.Start, DroneScanKind.None, rock), out _));
-        Assert.False(Reads(new(hull, DroneScanAction.Cancel, DroneScanKind.None, new RockRef(default, 1)), out _));
-        Assert.False(Reads(new(hull, (DroneScanAction)0, DroneScanKind.None, default), out _));
-        Assert.False(Reads(new(hull, (DroneScanAction)4, DroneScanKind.None, default), out _));
-        Assert.False(Reads(new(0, DroneScanAction.Start, DroneScanKind.None, default), out _));
-        Assert.False(Reads(new(hull, DroneScanAction.Start, DroneScanKind.None, default), out _, trailing: 1));
+        // A request names a rock; a start or cancel names none; the hull is never zero; nothing trails.
+        Assert.False(Reads(new(hull, DroneScanAction.Request, new RockRef(default, -1)), out _));
+        Assert.False(Reads(new(hull, DroneScanAction.Request, new RockRef(default, ushort.MaxValue + 1)), out _));
+        Assert.False(Reads(new(hull, DroneScanAction.Start, rock), out _));
+        Assert.False(Reads(new(hull, DroneScanAction.Cancel, new RockRef(default, 1)), out _));
+        Assert.False(Reads(new(hull, (DroneScanAction)0, default), out _));
+        Assert.False(Reads(new(hull, (DroneScanAction)4, default), out _));
+        Assert.False(Reads(new(0, DroneScanAction.Start, default), out _));
+        Assert.False(Reads(new(hull, DroneScanAction.Start, default), out _, trailing: 1));
 
         // A message that is cut short is refused too.
         var writer = new NetWriter(buffer);
-        new DroneScanCommandMessage(hull, DroneScanAction.Start, DroneScanKind.None, default).Write(ref writer);
+        new DroneScanCommandMessage(hull, DroneScanAction.Start, default).Write(ref writer);
         var reader = new NetReader(writer.Written[1..^3]);
         Assert.False(DroneScanCommandMessage.TryRead(ref reader, out _));
     }
@@ -739,7 +674,6 @@ public sealed class DroneScanTests
             Tick = 500,
             Reply = DroneReply.ScanSent,
             ReplyCount = 6,
-            ScanKind = DroneScanKind.Detailed,
             ScanPhase = phase,
             ScanRock = rock,
             ScanDrones = drones,
@@ -760,7 +694,7 @@ public sealed class DroneScanTests
         foreach (var phase in new[] { DroneScanPhase.Moving, DroneScanPhase.Ready, DroneScanPhase.Returning })
         {
             Assert.True(Round(Scanning(phase), out var copy));
-            Assert.Equal((DroneScanKind.Detailed, phase, rock, (byte)6, (byte)4), (copy.ScanKind, copy.ScanPhase, copy.ScanRock, copy.ScanDrones, copy.ScanInPlace));
+            Assert.Equal((phase, rock, (byte)6, (byte)4), (copy.ScanPhase, copy.ScanRock, copy.ScanDrones, copy.ScanInPlace));
             Assert.Equal(DroneReply.ScanSent, copy.Reply);
         }
 
@@ -774,12 +708,10 @@ public sealed class DroneScanTests
         Assert.True(Round(new BayView { Hull = 9, Tick = 5, Reply = DroneReply.ScanUnavailable }, out _));
         Assert.False(Round(new BayView { Hull = 9, Tick = 5, Reply = (DroneReply)32 }, out _));
 
-        Assert.False(Round(Scanning(DroneScanPhase.None), out _));                                   // kind and rock with no phase
+        Assert.False(Round(Scanning(DroneScanPhase.None), out _));                                   // a rock with no phase
         Assert.False(Round(new BayView { Hull = 9, Tick = 5, ScanDrones = 2 }, out _));              // drones with no scan
         Assert.False(Round(new BayView { Hull = 9, Tick = 5, ScanInPlace = 1 }, out _));
         Assert.False(Round(new BayView { Hull = 9, Tick = 5, ScanRock = rock }, out _));
-        var noKind = Scanning(DroneScanPhase.Moving); noKind.ScanKind = DroneScanKind.None;
-        Assert.False(Round(noKind, out _));                                                          // a phase with no kind
         Assert.False(Round(Scanning(DroneScanPhase.Moving, drones: 0, inPlace: 0), out _));
         Assert.False(Round(Scanning(DroneScanPhase.Moving, drones: 33, inPlace: 0), out _));         // more than any scan takes
         Assert.False(Round(Scanning(DroneScanPhase.Moving, drones: 6, inPlace: 7), out _));          // more in place than there are
@@ -791,7 +723,7 @@ public sealed class DroneScanTests
         var badRock = Scanning(DroneScanPhase.Moving); badRock.ScanRock = new RockRef(rock.Sector, -1);
         Assert.False(Round(badRock, out _));
 
-        Assert.Equal(70u, ProtocolInfo.Version);
+        Assert.Equal(71u, ProtocolInfo.Version);
         Assert.Equal(49, (int)MessageId.DroneScan);
         Assert.Equal(50, (int)MessageId.DroneScanResult);
         Assert.True(BayMessage.MaxWireSize >= BayMessage.HeaderBytes + DroneBayRules.MaxBays * BayMessage.RecordBytes);
@@ -814,22 +746,21 @@ public sealed class DroneScanTests
             world.CopyDroneScans(view);
         }
 
-        var survey = RichRecord(DroneScanKind.Survey, owner: 7, tick: 100);
-        Deliver(survey);
+        var first = RichRecord(owner: 7, tick: 100);
+        Deliver(first);
         Assert.Equal(1, view.Count);
-        Assert.Equal(DroneScanKind.Survey, view.Records[0].Kind);
-        Assert.Equal(0, view.Find(survey.Rock));
+        Assert.Equal(0, view.Find(first.Rock));
         // Someone else's result is ignored.
-        Deliver(RichRecord(DroneScanKind.Survey, owner: 8, tick: 101));
+        Deliver(RichRecord(owner: 8, tick: 101));
         Assert.Equal(1, view.Count);
-        // A detailed scan of the same rock replaces the survey rather than adding to it.
+        // A newer scan of the same rock replaces the first rather than adding to it.
         var revision = view.Revision;
-        Deliver(RichRecord(DroneScanKind.Detailed, owner: 7, tick: 200));
+        Deliver(RichRecord(owner: 7, tick: 200));
         Assert.Equal(1, view.Count);
-        Assert.Equal(DroneScanKind.Detailed, view.Records[0].Kind);
+        Assert.Equal(200L, view.Records[0].RecordedTick);
         Assert.NotEqual(revision, view.Revision);
         // A resource the galaxy does not have is refused whole.
-        var odd = RichRecord(DroneScanKind.Survey, owner: 7, tick: 300);
+        var odd = RichRecord(owner: 7, tick: 300);
         odd.Index++;
         odd.Resource = Shipped.Galaxy.Resources.Length + 1;
         odd.Grade = 0.1f;
@@ -839,14 +770,14 @@ public sealed class DroneScanTests
         // More rocks than the view holds: the oldest gives way.
         for (var i = 0; i < DroneScanRecordRules.KnowledgePerOwner + 3; i++)
         {
-            var record = RichRecord(DroneScanKind.Survey, owner: 7, tick: 1000 + i);
+            var record = RichRecord(owner: 7, tick: 1000 + i);
             record.Index = 1000 + i;
             Deliver(record);
         }
 
         Assert.Equal(DroneScanRecordRules.KnowledgePerOwner, view.Count);
-        Assert.True(view.Find(new RockRef(survey.Sector, 1000 + DroneScanRecordRules.KnowledgePerOwner + 2)) >= 0);
-        Assert.True(view.Find(survey.Rock) < 0);
+        Assert.True(view.Find(new RockRef(first.Sector, 1000 + DroneScanRecordRules.KnowledgePerOwner + 2)) >= 0);
+        Assert.True(view.Find(first.Rock) < 0);
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -940,17 +871,17 @@ public sealed class DroneScanTests
         return length - surface * target.Asteroid.Radius;
     }
 
-    private static void Command(SaveRig rig, DroneScanAction action, DroneScanKind kind = DroneScanKind.None, RockRef rock = default)
+    private static void Command(SaveRig rig, DroneScanAction action, RockRef rock = default)
     {
-        rig.Link.DroneScan(new DroneScanCommandMessage(Own(rig), action, kind, rock));
+        rig.Link.DroneScan(new DroneScanCommandMessage(Own(rig), action, rock));
         rig.Tick();
     }
 
     /// <summary>Asks for a scan and returns the server's answer, ticking half a second afterwards so the next command is not rate limited.</summary>
-    private static DroneReply Ask(SaveRig rig, DroneScanKind kind, RockRef rock, out int count)
+    private static DroneReply Ask(SaveRig rig, RockRef rock, out int count)
     {
         var before = rig.Link.Bays.ReplySequence;
-        Command(rig, DroneScanAction.Request, kind, rock);
+        Command(rig, DroneScanAction.Request, rock);
         Assert.NotEqual(before, rig.Link.Bays.ReplySequence);
         var reply = rig.Link.Bays.Reply;
         count = rig.Link.Bays.ReplyCount;
@@ -968,7 +899,7 @@ public sealed class DroneScanTests
         return reply;
     }
 
-    private static int Needed(Target target, DroneScanKind kind) => DroneScanning.Needed(Rules, kind, target.Asteroid.Radius, target.Asteroid.Shape);
+    private static int Needed(Target target) => DroneScanning.Needed(Rules, target.Asteroid.Radius, target.Asteroid.Shape);
 
     [Fact]
     public void TheHomeSectorHasASmallAMediumAndAGiantRockToScan()
@@ -982,43 +913,39 @@ public sealed class DroneScanTests
     [Fact]
     public void AScanIsRefusedWithTheReasonAndSendsNoDrone()
     {
-        var content = Content();
+        var content = Content(secondBay: false);
         using var rig = Rig(content);
         var small = Pick(rig, 20f, clear: true);
-        var medium = Pick(rig, 200f, where: a => DroneScanning.Needed(Rules, DroneScanKind.Detailed, a.Radius, a.Shape) is >= 5 and <= 12 && DroneScanning.Needed(Rules, DroneScanKind.Survey, a.Radius, a.Shape) <= 4);
+        var medium = Pick(rig, 200f, where: a => DroneScanning.Needed(Rules, a.Radius, a.Shape) is >= 5 and <= 12);
         var giant = Pick(rig, 1900f);
 
         // No sensor reaches the rock: it is not found, however near it is on the map.
         Stand(rig, small, 8000f);
-        Assert.Equal(DroneReply.NotFound, Ask(rig, DroneScanKind.Survey, small.Rock, out _));
+        Assert.Equal(DroneReply.NotFound, Ask(rig, small.Rock, out _));
 
         // In sight but out of the drones' range (their range is counted from the rock's surface).
         Stand(rig, small, Rules.RangeMetres + 500f);
-        Assert.Equal(DroneReply.TooFar, Ask(rig, DroneScanKind.Survey, small.Rock, out _));
+        Assert.Equal(DroneReply.TooFar, Ask(rig, small.Rock, out _));
 
         // Rocks the sector does not have.
         Stand(rig, small, 150f);
         var sector = small.Rock.Sector;
         var count = rig.Rocks.Sector(sector).AsteroidCount;
-        Assert.Equal(DroneReply.NotFound, Ask(rig, DroneScanKind.Survey, new RockRef(sector, count), out _));
-        Assert.Equal(DroneReply.NotFound, Ask(rig, DroneScanKind.Survey, new RockRef(sector, ushort.MaxValue), out _));
+        Assert.Equal(DroneReply.NotFound, Ask(rig, new RockRef(sector, count), out _));
+        Assert.Equal(DroneReply.NotFound, Ask(rig, new RockRef(sector, ushort.MaxValue), out _));
 
-        // A giant is too large for either level, and the answer says how many drones it would take.
+        // A giant is too large, and the answer says how many drones it would take.
         Stand(rig, giant, 150f);
-        foreach (var kind in new[] { DroneScanKind.Survey, DroneScanKind.Detailed })
-        {
-            Assert.True(Needed(giant, kind) > Rules.Of(kind).MaxDrones);
-            Assert.Equal(DroneReply.TooLarge, Ask(rig, kind, giant.Rock, out var asked));
-            Assert.Equal(Math.Min(Needed(giant, kind), byte.MaxValue), asked);
-        }
+        Assert.True(Needed(giant) > Rules.MaxDrones);
+        Assert.Equal(DroneReply.TooLarge, Ask(rig, giant.Rock, out var asked));
+        Assert.Equal(Math.Min(Needed(giant), byte.MaxValue), asked);
 
-        // A bay of four does a medium rock's survey, but not its detailed scan: that takes more drones than it holds.
+        // A bay of four cannot scan a medium rock: that takes more drones than it holds.
         Stand(rig, medium, 150f);
-        var detailed = Needed(medium, DroneScanKind.Detailed);
-        Assert.InRange(detailed, 5, Rules.Detailed.MaxDrones);
-        Assert.True(Needed(medium, DroneScanKind.Survey) <= 4);
-        Assert.Equal(DroneReply.TooFew, Ask(rig, DroneScanKind.Detailed, medium.Rock, out var few));
-        Assert.Equal(detailed, few);
+        var needed = Needed(medium);
+        Assert.InRange(needed, 5, Rules.MaxDrones);
+        Assert.Equal(DroneReply.TooFew, Ask(rig, medium.Rock, out var few));
+        Assert.Equal(needed, few);
 
         Assert.Empty(Drones(rig));
         Assert.Equal(DroneScanPhase.None, rig.Link.Bays.ScanPhase);
@@ -1038,7 +965,7 @@ public sealed class DroneScanTests
         using var rig = Rig(FleetContent.Value);
         var small = Pick(rig, 20f, clear: true);
         Stand(rig, small, 150f);
-        Assert.Equal(DroneReply.NoBay, Ask(rig, DroneScanKind.Survey, small.Rock, out _));
+        Assert.Equal(DroneReply.NoBay, Ask(rig, small.Rock, out _));
         Assert.Equal(DroneReply.NoBay, Say(rig, DroneScanAction.Start));
         Assert.Equal(DroneReply.NoBay, Say(rig, DroneScanAction.Cancel));
     }
@@ -1049,19 +976,19 @@ public sealed class DroneScanTests
         using var rig = Rig(Content());
         var small = Pick(rig, 20f, clear: true);
         Stand(rig, small, 150f);
-        Assert.Equal(DroneReply.ScanSent, Ask(rig, DroneScanKind.Survey, small.Rock, out var sent));
-        Assert.Equal(Needed(small, DroneScanKind.Survey), sent);
-        Assert.Equal((DroneScanKind.Survey, DroneScanPhase.Moving, small.Rock, (byte)sent), (rig.Link.Bays.ScanKind, rig.Link.Bays.ScanPhase, rig.Link.Bays.ScanRock, rig.Link.Bays.ScanDrones));
+        Assert.Equal(DroneReply.ScanSent, Ask(rig, small.Rock, out var sent));
+        Assert.Equal(Needed(small), sent);
+        Assert.Equal((DroneScanPhase.Moving, small.Rock, (byte)sent), (rig.Link.Bays.ScanPhase, rig.Link.Bays.ScanRock, rig.Link.Bays.ScanDrones));
 
-        Assert.Equal(DroneReply.ScanBusy, Ask(rig, DroneScanKind.Survey, small.Rock, out _));
-        Assert.Equal(DroneReply.ScanBusy, Ask(rig, DroneScanKind.Detailed, small.Rock, out _));
+        Assert.Equal(DroneReply.ScanBusy, Ask(rig, small.Rock, out _));
+        Assert.Equal(DroneReply.ScanBusy, Ask(rig, small.Rock, out _));
         Assert.Equal(DroneReply.ScanNotReady, Say(rig, DroneScanAction.Start));
         Assert.Equal(DroneScanPhase.Moving, rig.Link.Bays.ScanPhase);
 
         // Commands come at a limited pace: a second inside the same quarter second is dropped, the first stands.
-        rig.Link.DroneScan(new DroneScanCommandMessage(Own(rig), DroneScanAction.Start, DroneScanKind.None, default));
+        rig.Link.DroneScan(new DroneScanCommandMessage(Own(rig), DroneScanAction.Start, default));
         var sequence = rig.Link.Bays.ReplySequence;
-        rig.Link.DroneScan(new DroneScanCommandMessage(Own(rig), DroneScanAction.Cancel, DroneScanKind.None, default));
+        rig.Link.DroneScan(new DroneScanCommandMessage(Own(rig), DroneScanAction.Cancel, default));
         rig.Tick();
         Assert.Equal(DroneScanPhase.Moving, rig.Link.Bays.ScanPhase);
         Assert.Equal(sequence + 1, rig.Link.Bays.ReplySequence);
@@ -1080,13 +1007,13 @@ public sealed class DroneScanTests
     /// Asks for a scan, waits for Ready, orders it and waits for the result and for the drones to be home, checking
     /// on every tick that none of them is inside the rock.
     /// </summary>
-    private static Outcome Scan(SaveRig rig, Target target, DroneScanKind kind)
+    private static Outcome Scan(SaveRig rig, Target target)
     {
         var outcome = new Outcome();
         var owner = Owner(rig);
         var before = rig.Server.DroneScanKnowledge(owner).Length;
-        var needed = Needed(target, kind);
-        Assert.Equal(DroneReply.ScanSent, Ask(rig, kind, target.Rock, out var sent));
+        var needed = Needed(target);
+        Assert.Equal(DroneReply.ScanSent, Ask(rig, target.Rock, out var sent));
         Assert.Equal(needed, sent);
 
         void Watch()
@@ -1103,7 +1030,7 @@ public sealed class DroneScanTests
             Assert.True(done(), what);
         }
 
-        Until(() => rig.Link.Bays.ScanPhase == DroneScanPhase.Ready, Rules.MoveSeconds, $"{kind}: every drone in its place");
+        Until(() => rig.Link.Bays.ScanPhase == DroneScanPhase.Ready, Rules.MoveSeconds, "every drone in its place");
         outcome.ReadyTick = rig.WorldTick;
         Assert.Equal(DroneReply.ScanReady, rig.Link.Bays.Reply);
         Assert.Equal((byte)needed, rig.Link.Bays.ScanDrones);
@@ -1117,7 +1044,7 @@ public sealed class DroneScanTests
         var standoff = DroneScanning.Standoff(Rules, target.Asteroid.Radius);
         for (var i = 0; i < count; i++)
         {
-            if (orders[i].Task != (kind == DroneScanKind.Survey ? OrderTask.Survey : OrderTask.DetailedScan)) continue;
+            if (orders[i].Task != OrderTask.Scan) continue;
             Assert.Equal(ScanOrderPhase.InPlace, orders[i].Phase);
             var at = HullRotation.Unrotate(rig.Hulls.State(orders[i].Actor.Index).Position.RelativeTo(target.Centre), target.Asteroid.Rotation);
             for (var slot = 0; slot < needed; slot++)
@@ -1134,15 +1061,15 @@ public sealed class DroneScanTests
         Command(rig, DroneScanAction.Start);
         outcome.StartTick = rig.WorldTick;
         Assert.Equal(DroneReply.ScanRunning, rig.Link.Bays.Reply);
-        Assert.Equal((kind, DroneScanPhase.Scanning), (rig.Link.Bays.ScanKind, rig.Link.Bays.ScanPhase));
-        Assert.Equal(Rules.Of(kind).ScanTicks, rig.Link.Bays.ScanCompletes - rig.Link.Bays.ScanStarted);
+        Assert.Equal(DroneScanPhase.Scanning, rig.Link.Bays.ScanPhase);
+        Assert.Equal(Rules.ScanTicks, rig.Link.Bays.ScanCompletes - rig.Link.Bays.ScanStarted);
         Assert.InRange(rig.Link.Bays.ScanStarted, outcome.StartTick - 2, outcome.StartTick);
 
         // A second order while it runs is answered "running" and changes nothing.
         rig.Tick(20);
         Assert.Equal(DroneReply.ScanRunning, Say(rig, DroneScanAction.Start));
         var completes = rig.Link.Bays.ScanCompletes;
-        Until(() => rig.Server.DroneScanKnowledge(owner).Length > before || rig.Link.Bays.ScanPhase == DroneScanPhase.Returning, Rules.Of(kind).ScanSeconds + 5, $"{kind}: the result");
+        Until(() => rig.Server.DroneScanKnowledge(owner).Length > before || rig.Link.Bays.ScanPhase == DroneScanPhase.Returning, Rules.ScanSeconds + 5, "the result");
         outcome.DoneTick = rig.WorldTick;
         Assert.InRange(outcome.DoneTick, completes, completes + 4);
         Assert.Equal(DroneReply.ScanDone, rig.Link.Bays.Reply);
@@ -1155,7 +1082,7 @@ public sealed class DroneScanTests
         outcome.Record = knowledge[at2];
 
         // The drones come home: out of the rock's way, into their bay, and the bay is full again.
-        Until(() => Drones(rig).Count == 0 && rig.Link.Bays.ScanPhase == DroneScanPhase.None, 150, $"{kind}: the drones home");
+        Until(() => Drones(rig).Count == 0 && rig.Link.Bays.ScanPhase == DroneScanPhase.None, 150, "the drones home");
         rig.Tick(30);
         Assert.Equal(DroneScanPhase.None, rig.Link.Bays.ScanPhase);
         var bays = rig.Link.Bays;
@@ -1164,15 +1091,15 @@ public sealed class DroneScanTests
         return outcome;
     }
 
-    private static void CheckRecord(SaveRig rig, Target target, Outcome outcome, DroneScanKind kind)
+    private static void CheckRecord(SaveRig rig, Target target, Outcome outcome)
     {
         var record = outcome.Record;
-        Assert.Equal((Owner(rig), kind, target.Rock.Sector, target.Rock.Index), (record.Owner, record.Kind, record.Sector, record.Index));
+        Assert.Equal((Owner(rig), target.Rock.Sector, target.Rock.Index), (record.Owner, record.Sector, record.Index));
         Assert.InRange(record.RecordedTick, outcome.StartTick, outcome.DoneTick);
         Assert.True(DroneScanRecordRules.Valid(record));
 
         // It is what the interior says, to the byte.
-        var expected = Record(rig.Server.Galaxy, target.Rock, target.Asteroid, kind, record.Owner, record.RecordedTick);
+        var expected = Record(rig.Server.Galaxy, target.Rock, target.Asteroid, record.Owner, record.RecordedTick);
         Assert.Equal(Bytes(expected), Bytes(record));
 
         // And it reached the client's snapshot view the way the server sent it.
@@ -1194,41 +1121,26 @@ public sealed class DroneScanTests
 
         // The drones kept clear of the rock all the way there, in place and home.
         Assert.True(outcome.MinClearance > 0f, $"a drone came to {outcome.MinClearance:F2} m from the rock's surface");
-        Assert.True(outcome.MostOut >= Needed(target, kind));
+        Assert.True(outcome.MostOut >= Needed(target));
     }
 
     [Fact]
-    public void ASurveyGoesThroughRequestPlaceScanResultAndHome()
+    public void AScanGoesThroughRequestPlaceScanResultAndHome()
     {
         using var rig = Rig(Content());
         var small = Pick(rig, 20f, clear: true);
         Stand(rig, small, 150f);
-        var outcome = Scan(rig, small, DroneScanKind.Survey);
-        CheckRecord(rig, small, outcome, DroneScanKind.Survey);
-        Assert.Equal(0, outcome.Record.Map.VeinCount);
-        Assert.Equal(0, outcome.Record.Map.PocketCount);
-        // The same drones can go straight out again.
+        Assert.True(Needed(small) <= 8, "two bays hold the drones a small rock's scan takes");
+        var outcome = Scan(rig, small);
+        CheckRecord(rig, small, outcome);
         Assert.Equal(1, rig.Server.DroneScanKnowledge(Owner(rig)).Length);
-    }
 
-    [Fact]
-    public void ADetailedScanOfASmallRockMapsItAndASurveyAfterwardsDoesNotReplaceIt()
-    {
-        var content = Content(secondBay: true);
-        using var rig = Rig(content);
-        var small = Pick(rig, 20f, clear: true);
-        Stand(rig, small, 150f);
-        Assert.True(Needed(small, DroneScanKind.Detailed) <= 8, "two bays hold the drones a small rock's detailed scan takes");
-        var detailed = Scan(rig, small, DroneScanKind.Detailed);
-        CheckRecord(rig, small, detailed, DroneScanKind.Detailed);
-        Assert.Equal(DroneScanKind.Detailed, detailed.Record.Kind);
-
-        // A survey of the same rock is carried out and answered, and what is kept stays the detailed map.
-        var survey = Scan(rig, small, DroneScanKind.Survey);
-        Assert.Equal(DroneScanKind.Detailed, survey.Record.Kind);
-        Assert.Equal(Bytes(detailed.Record), Bytes(survey.Record));
+        // The same drones can go straight out again, and the newer scan of the rock replaces the first.
+        var again = Scan(rig, small);
         Assert.Equal(1, rig.Server.DroneScanKnowledge(Owner(rig)).Length);
-        Assert.True(survey.MinClearance > 0f);
+        Assert.True(again.Record.RecordedTick > outcome.Record.RecordedTick);
+        Assert.Equal(Bytes(Record(rig.Server.Galaxy, small.Rock, small.Asteroid, again.Record.Owner, again.Record.RecordedTick)), Bytes(again.Record));
+        Assert.True(again.MinClearance > 0f);
     }
 
     [Fact]
@@ -1237,7 +1149,7 @@ public sealed class DroneScanTests
         using var rig = Rig(Content());
         var small = Pick(rig, 20f, clear: true);
         Stand(rig, small, 150f);
-        Assert.Equal(DroneReply.ScanSent, Ask(rig, DroneScanKind.Survey, small.Rock, out var sent));
+        Assert.Equal(DroneReply.ScanSent, Ask(rig, small.Rock, out var sent));
         TickUntil(rig, () => Drones(rig).Count == sent, 5, "the drones out");
         rig.Tick(60);
         Command(rig, DroneScanAction.Cancel);
@@ -1256,7 +1168,7 @@ public sealed class DroneScanTests
 
         // The hull is free to scan again at once.
         rig.Tick(30);
-        Assert.Equal(DroneReply.ScanSent, Ask(rig, DroneScanKind.Survey, small.Rock, out _));
+        Assert.Equal(DroneReply.ScanSent, Ask(rig, small.Rock, out _));
     }
 
     [Fact]
@@ -1265,7 +1177,7 @@ public sealed class DroneScanTests
         using var rig = Rig(Content());
         var small = Pick(rig, 20f, clear: true);
         Stand(rig, small, 150f);
-        Assert.Equal(DroneReply.ScanSent, Ask(rig, DroneScanKind.Survey, small.Rock, out var sent));
+        Assert.Equal(DroneReply.ScanSent, Ask(rig, small.Rock, out var sent));
         TickUntil(rig, () => Drones(rig).Count == sent, 5, "the drones out");
         rig.Hulls.Destroy(rig.Hulls.HandleAt(Drones(rig)[0]));
         rig.Tick(2);
@@ -1281,7 +1193,7 @@ public sealed class DroneScanTests
         using var rig = Rig(Content());
         var small = Pick(rig, 20f, clear: true);
         Stand(rig, small, 150f);
-        Assert.Equal(DroneReply.ScanSent, Ask(rig, DroneScanKind.Survey, small.Rock, out _));
+        Assert.Equal(DroneReply.ScanSent, Ask(rig, small.Rock, out _));
         TickUntil(rig, () => rig.Link.Bays.ScanPhase == DroneScanPhase.Ready, Rules.MoveSeconds, "ready");
         TickUntil(rig, () => rig.Link.Bays.ScanPhase == DroneScanPhase.Returning, Rules.ReadySeconds + 5, "the wait is given up");
         Assert.Equal(DroneReply.ScanTimedOut, rig.Link.Bays.Reply);
@@ -1295,7 +1207,7 @@ public sealed class DroneScanTests
         using var rig = Rig(Content());
         var small = Pick(rig, 20f, clear: true);
         Stand(rig, small, 150f);
-        Assert.Equal(DroneReply.ScanSent, Ask(rig, DroneScanKind.Survey, small.Rock, out var sent));
+        Assert.Equal(DroneReply.ScanSent, Ask(rig, small.Rock, out var sent));
         TickUntil(rig, () => Drones(rig).Count == sent, 10, "the drones out");
 
         var tickDrones = typeof(ServerHost).GetMethod("TickDrones", Private)!.CreateDelegate<Action>(rig.Server);
@@ -1323,7 +1235,7 @@ public sealed class DroneScanTests
             if (!started && rig.Link.Bays.ScanPhase == DroneScanPhase.Ready)
             {
                 started = true;
-                rig.Link.DroneScan(new DroneScanCommandMessage(Own(rig), DroneScanAction.Start, DroneScanKind.None, default));
+                rig.Link.DroneScan(new DroneScanCommandMessage(Own(rig), DroneScanAction.Start, default));
             }
 
             finished = started && rig.Link.Bays.ScanPhase == DroneScanPhase.None && Drones(rig).Count == 0;
@@ -1356,7 +1268,7 @@ public sealed class DroneScanTests
     // Saved worlds
     // ------------------------------------------------------------------------------------------------------------
 
-    /// <summary>A world saved with one detailed and one survey result of two rocks of one sector, closed, and the bytes of each result.</summary>
+    /// <summary>A world saved with two results of two rocks of one sector, closed, and the bytes of each result.</summary>
     private static (MemoryWorld Folder, GameContent Content, uint Owner, byte[][] Saved) SavedWithScans()
     {
         var content = Content();
@@ -1371,8 +1283,8 @@ public sealed class DroneScanTests
         var rocks = rig.Rocks.Sector(sector);
         var first = RichRock(rig.Rocks, galaxy, sector, 0);
         var second = RichRock(rig.Rocks, galaxy, sector, 1);
-        Assert.True(rig.Server.StoreDroneScan(Record(galaxy, new RockRef(sector, first), rocks.Asteroids[first], DroneScanKind.Detailed, owner, tick - 2)));
-        Assert.True(rig.Server.StoreDroneScan(Record(galaxy, new RockRef(sector, second), rocks.Asteroids[second], DroneScanKind.Survey, owner, tick - 1)));
+        Assert.True(rig.Server.StoreDroneScan(Record(galaxy, new RockRef(sector, first), rocks.Asteroids[first], owner, tick - 2)));
+        Assert.True(rig.Server.StoreDroneScan(Record(galaxy, new RockRef(sector, second), rocks.Asteroids[second], owner, tick - 1)));
         var saved = new List<byte[]>();
         foreach (var record in rig.Server.DroneScanKnowledge(owner)) saved.Add(Bytes(record));
         Assert.Equal(2, saved.Count);
@@ -1386,9 +1298,7 @@ public sealed class DroneScanTests
         var (folder, content, owner, saved) = SavedWithScans();
         var snapshot = folder.Decode();
         Assert.Equal(2, snapshot.DroneScanCount);
-        Assert.Equal(22, WorldSnapshotCodec.Version);
-        Assert.Equal(DroneScanKind.Detailed, snapshot.DroneScans[0].Kind);
-        Assert.Equal(DroneScanKind.Survey, snapshot.DroneScans[1].Kind);
+        Assert.Equal(23, WorldSnapshotCodec.Version);
         var first = folder.Bytes!;
 
         using (var rig = new SaveRig(folder, content))
@@ -1421,7 +1331,7 @@ public sealed class DroneScanTests
             var small = Pick(rig, 20f, clear: true);
             Stand(rig, small, 150f);
             owner = Owner(rig);
-            Assert.Equal(DroneReply.ScanSent, Ask(rig, DroneScanKind.Survey, small.Rock, out _));
+            Assert.Equal(DroneReply.ScanSent, Ask(rig, small.Rock, out _));
             TickUntil(rig, () => rig.Link.Bays.ScanPhase == DroneScanPhase.Ready, Rules.MoveSeconds, "ready");
             Command(rig, DroneScanAction.Start);
             TickUntil(rig, () => rig.Server.DroneScanKnowledge(owner).Length == 1, 10, "the result");
@@ -1469,7 +1379,7 @@ public sealed class DroneScanTests
         snapshot.DroneScans[0] = first;
 
         // A record that breaks the structure does not even encode.
-        snapshot.DroneScans[0].Kind = DroneScanKind.None;
+        snapshot.DroneScans[0].Radius = 0;
         Assert.Throws<InvalidDataException>(() => WorldSnapshotCodec.Encode(snapshot));
         snapshot.DroneScans[0] = first;
 
@@ -1510,7 +1420,7 @@ public sealed class DroneScanTests
         Refuses(world => world.DroneScans[0].Owner = 999_999, "an owner the world has not got");
         Refuses(world => world.DroneScans[0].RecordedTick = world.NextWorldTick, "a result of the save's own moment");
         Refuses(world => { world.DroneScans[1].Sector = world.DroneScans[0].Sector; world.DroneScans[1].Index = world.DroneScans[0].Index; }, "a rock twice");
-        Refuses(world => world.DroneScans[0].Kind = DroneScanKind.None, "no kind");
+        Refuses(world => world.DroneScans[0].Radius = 0, "a rock of no size");
 
         // And the untouched save still opens.
         new SaveRig(folder, content).Dispose();

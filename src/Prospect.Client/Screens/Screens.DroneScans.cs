@@ -10,8 +10,8 @@ using Prospect.Game.World;
 namespace Prospect.Client.Screens;
 
 /// <summary>
-/// The drone scans in the interface: the target panel's scan block and the drone result it shows in place of a
-/// module's, and the detailed scan's hologram over its rock. Everything shown is what the server sent
+/// The drone scan in the interface: the target panel's scan block and the drone result it shows in place of a
+/// module's, and the hologram over its rock. Everything shown is what the server sent
 /// (<see cref="SessionSnapshot.DroneScans"/>, <see cref="BayView"/>): a request goes through
 /// <see cref="PlayerInputBridge"/> and the server decides. Nothing here allocates.
 /// </summary>
@@ -20,10 +20,10 @@ internal sealed partial class ScreenHost
     private readonly ScanHologramState _hologramState = new();
     private readonly ScanHologram _hologramTarget = new();
     private readonly ScanHologram _hologramScan = new();
-    private string _surveyKey = "", _detailedKey = "", _hologramKey = "";
+    private string _droneScanKey = "", _hologramKey = "";
     private int _scanKeysVersion = -1;
 
-    /// <summary>Whether the detailed scan's hologram shows. A session choice, never saved.</summary>
+    /// <summary>Whether the drone scan's hologram shows. A session choice, never saved.</summary>
     internal bool ScanHologramOn => _hologramState.On;
 
     private static ModuleLook.DroneScanLook ScanLook => ModuleLook.Current.DroneScan;
@@ -43,15 +43,14 @@ internal sealed partial class ScreenHost
                 return bindings.Length == 0 ? "UNBOUND" : DroneScanUi.ShortKey(bindings[0].DisplayName.ToUpperInvariant());
             }
 
-            _surveyKey = Name(_app.Actions, InputAction.SurveyRock);
-            _detailedKey = Name(_app.Actions, InputAction.DetailedScan);
+            _droneScanKey = Name(_app.Actions, InputAction.DroneScan);
             _hologramKey = Name(_app.Actions, InputAction.ToggleScanHologram);
         }
 
         _hologramState.Observe(snapshot.DroneScans, ScannableRock(world), ScanRockOf(snapshot.Bays));
     }
 
-    /// <summary>The drone scan keys and the hologram's key. They work where the module keys do.</summary>
+    /// <summary>The drone scan key and the hologram's key. They work where the module keys do.</summary>
     private void HandleDroneScanKeys(PlayerInputBridge bridge, SessionSnapshot snapshot, WorldView world)
     {
         DroneScanUi.HandleKeys(_app.Actions, _app.Devices, !_ui.WantsTextInput, snapshot.Bays, world.Own.Id, ScannableRock(world), bridge);
@@ -71,7 +70,7 @@ internal sealed partial class ScreenHost
     {
         var look = ModuleStyle;
         var composition = RockComposition.From(record.AsObservation(), resources);
-        return look.CompositionBarHeight + 6 + look.CompositionRowHeight * Math.Max(1, composition.Rows) + DroneScanUi.RecordFooterHeight(look.DroneScan, record.Kind, _hologramState.On);
+        return look.CompositionBarHeight + 6 + look.CompositionRowHeight * Math.Max(1, composition.Rows) + DroneScanUi.RecordFooterHeight(look.DroneScan, _hologramState.On);
     }
 
     /// <summary>A resolved share the drones found, to a tenth of a percent: they resolve far finer than a scanner module.</summary>
@@ -83,8 +82,7 @@ internal sealed partial class ScreenHost
 
     /// <summary>
     /// What the target panel says of an asteroid the player's drones scanned, in place of a scanner module's analysis:
-    /// the bulk composition at the drones' resolution, who found it, the veins (a band for a survey, a count, the pockets
-    /// and a hologram button for a detailed scan). The mass is a module's and only shows when the player also has one.
+    /// the bulk composition at the drones' resolution, who found it, the veins and pockets it mapped and a hologram button. The mass is a module's and only shows when the player also has one.
     /// Returns the height used, in screen pixels.
     /// </summary>
     private float DrawDroneAnalysis(ImDrawListPtr draw, SessionSnapshot snapshot, RockRef rock, int index, float2 at, float width)
@@ -127,21 +125,14 @@ internal sealed partial class ScreenHost
 
         // Who found it, and how long ago: the drones' own tier colour, as a module's quality shows on its analysis.
         var tier = look.Tier(ModuleQuality.AlienTech);
-        var detailed = record.Kind == DroneScanKind.Detailed;
         var lineHeight = Kit.Px(scan.LineHeight);
         var age = ModuleAge.Seconds(record.RecordedTick, snapshot.ServerTick);
-        var label = detailed ? "DETAILED SCAN"u8 : "DRONE SURVEY"u8;
+        var label = "DRONE SCAN"u8;
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(at.X, y + Kit.Px(2)), tier.Rgb, label);
         var ageText = Kit.F($"FOUND {ModuleAge.Value(age):0} {ModuleAge.Unit(age)} AGO");
         var ageWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, ageText).X;
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(at.X + width - ageWidth, y + Kit.Px(2)), Theme.TextMute, ageText);
         y += lineHeight;
-
-        if (!detailed)
-        {
-            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, new float2(at.X, y + Kit.Px(2)), Theme.TextDim, DroneScanUi.VeinHintWords(record.VeinHint), width);
-            return y + lineHeight - at.Y;
-        }
 
         DroneScanUi.Pockets(record, out var pockets, out var unstable);
         var veins = (int)record.Map.VeinCount;
@@ -187,13 +178,11 @@ internal sealed partial class ScreenHost
     // The scan buttons
     // ---------------------------------------------------------------------------------------------------------------
 
-    private string KeyOf(DroneScanKind kind) => kind == DroneScanKind.Detailed ? _detailedKey : _surveyKey;
-
     /// <summary>
-    /// The block of the target panel that sends the flown hull's drones to scan the targeted rock, as the scan keys do:
-    /// a survey and a detailed scan button; while the hull's scan is of this rock a status button (MOVING 2/4, SCAN
+    /// The block of the target panel that sends the flown hull's drones to scan the targeted rock, as the scan key does:
+    /// a drone scan button; while the hull's scan is of this rock a status button (MOVING 2/4, SCAN
     /// (READY) which orders it, SCANNING with its time) beside CANCEL; and under them a line for the server's answer or
-    /// a hint. A pointer captured by flight presses nothing, so the keys do the same.
+    /// a hint. A pointer captured by flight presses nothing, so the key does the same.
     /// </summary>
     private void DrawDroneScanButtons(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, RockRef rock, float2 at, float width)
     {
@@ -209,15 +198,13 @@ internal sealed partial class ScreenHost
         var bridge = Bridge;
         if (idle)
         {
-            if (ModuleButton("##scansurvey"u8, new float2(at.X, y), half, Kit.F($"{_surveyKey}  SURVEY WITH DRONES"), true, Theme.Accent) && bridge is not null)
-                DroneScanUi.Press(bays, own, DroneScanKind.Survey, rock, bridge);
-            if (ModuleButton("##scandetailed"u8, new float2(at.X + half.X + gap, y), half, Kit.F($"{_detailedKey}  DETAILED SCAN"), true, Theme.Accent) && bridge is not null)
-                DroneScanUi.Press(bays, own, DroneScanKind.Detailed, rock, bridge);
+            if (ModuleButton("##scandrones"u8, new float2(at.X, y), size, Kit.F($"{_droneScanKey}  DRONE SCAN"), true, Theme.Accent) && bridge is not null)
+                DroneScanUi.Press(bays, own, rock, bridge);
         }
         else if (onRock)
         {
             var phase = bays.ScanPhase;
-            var key = KeyOf(bays.ScanKind);
+            var key = _droneScanKey;
             var label = phase switch
             {
                 DroneScanPhase.Moving => Kit.F($"MOVING {bays.ScanInPlace}/{bays.ScanDrones}"),
@@ -258,7 +245,7 @@ internal sealed partial class ScreenHost
         else
         {
             ReadOnlySpan<byte> hint = !onRock && !idle ? default
-                : idle ? "Drones fly round the rock; you order the scan."u8
+                : idle ? "Drones map the rock: bulk, veins and pockets."u8
                 : bays.ScanPhase == DroneScanPhase.Ready ? "Every drone is in place: scan when ready."u8
                 : bays.ScanPhase == DroneScanPhase.Moving ? "Drones are moving into place."u8
                 : default;
@@ -274,7 +261,7 @@ internal sealed partial class ScreenHost
     // ---------------------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// The detailed scan's hologram over the rock targeted (the one selected, in the command view) and over the rock
+    /// The drone scan's hologram over the rock targeted (the one selected, in the command view) and over the rock
     /// the hull's scan is of, while it is on: veins in their ore's colour, pockets as circles, the heat map as dots on
     /// the surface, each dimmer on the far side of the rock. Drawn in the flight and command views from the record
     /// alone and the rock's pose; allocation-free (fixed buffers, <see cref="ScanHologram"/>).
@@ -291,7 +278,7 @@ internal sealed partial class ScreenHost
     private void DrawScanHologramOf(ImDrawListPtr draw, SessionSnapshot snapshot, WorldView world, RockRef rock, ScanHologram hologram, float alpha)
     {
         var index = snapshot.DroneScans.Find(rock);
-        if (index < 0 || snapshot.DroneScans.Records[index].Kind != DroneScanKind.Detailed || !world.TryGetRockPose(rock, out var position, out var rotation, out _)) return;
+        if (index < 0 || !world.TryGetRockPose(rock, out var position, out var rotation, out _)) return;
         var look = ScanLook;
         if (!hologram.Build(snapshot.DroneScans.Records[index], world.HologramView, position, rotation, look)) return;
         var resources = snapshot.Galaxy!.Resources;

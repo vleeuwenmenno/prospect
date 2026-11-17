@@ -512,7 +512,7 @@ public sealed class DroneFetchTests
         broken[1 + 4 + 8 + 4 + 3] = 2;
         reader = new NetReader(broken.AsSpan(1));
         Assert.False(BayMessage.TryRead(ref reader, out _));
-        Assert.Equal(70u, ProtocolInfo.Version);
+        Assert.Equal(71u, ProtocolInfo.Version);
         Assert.Equal(43, (int)MessageId.DroneSettings);
     }
 
@@ -532,7 +532,7 @@ public sealed class DroneFetchTests
         }
 
         var saved = folder.Decode();
-        Assert.Equal(22, WorldSnapshotCodec.Version);
+        Assert.Equal(23, WorldSnapshotCodec.Version);
         var flagged = 0;
         for (var i = 0; i < saved.HullCount; i++)
             if (saved.Hulls[i].AutoPickup) { flagged++; Assert.True(saved.Hulls[i].Bays > 0); }

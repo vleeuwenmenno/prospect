@@ -432,10 +432,6 @@ internal static class Program
                     options.RockScrapeDistance = scrapeDistance;
                     i++;
                     break;
-                case "--drone-scan" when hasValue && args[i + 1] is "survey" or "detailed":
-                    options.DroneScan = args[i + 1] == "survey" ? Prospect.Game.World.DroneScanKind.Survey : Prospect.Game.World.DroneScanKind.Detailed;
-                    i++;
-                    break;
                 case "--drone-scan-camera" when hasValue && TryParseScanCamera(args[i + 1], out var scanCamera):
                     options.DroneScanCamera = scanCamera;
                     i++;

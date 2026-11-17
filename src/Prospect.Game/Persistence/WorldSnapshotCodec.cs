@@ -28,7 +28,7 @@ namespace Prospect.Game.Persistence;
 public static partial class WorldSnapshotCodec
 {
     /// <summary>The layout's version. A save with any other is refused; there are no migrations yet.</summary>
-    public const int Version = 22;
+    public const int Version = 23;
     internal const int ChartBytes = 4 + 12 + 8;
 
     /// <summary>"PWS1": tells a save from any other bytes before its version is believed.</summary>
@@ -424,7 +424,7 @@ public static partial class WorldSnapshotCodec
 
         var promised = (long)designCount * (4 + SHA256.HashSizeInBytes) + (long)owners * OwnerBytes + (long)hulls * HullFixedBytes
             + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)tanks * sizeof(double) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes + (long)cargoCount * CargoRecordBytes + (long)freeCount * FreeContainerBytes + (long)bayCount * BayBytes + (long)binCount * OreBinBytes
-            + (long)editedRocks * EditedRockBytes + (long)rockEdits * RockEditCodec.ScrapeOnBytes + (long)droneScans * DroneScanCodec.HeadBytes;
+            + (long)editedRocks * EditedRockBytes + (long)rockEdits * RockEditCodec.ScrapeOnBytes + (long)droneScans * DroneScanCodec.MinBytes;
         if (promised > reader.Remaining)
         {
             error = "the save names more than it holds";
