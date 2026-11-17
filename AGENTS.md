@@ -1093,5 +1093,5 @@ pickup, or `--open edit-cargo --capture ...` for reach guidance (both close the 
 0.3 s). Keep `agent.prospect` hidden as for other captures.
 At speed: add `--coast <m/s>` (0–400; scripted, unsaved private game: dampeners off, the server sets the own hull
 flying along its nose at 2 s) and `--sector -5,0,0` (no rocks), with `--look 60 --look-height 2 --zoom 1.5`; the
-ship is rated 212 m/s, so for 240 raise `speedPerRootAcceleration` in a copy's `blocks.json` to 70. Each
+ship is rated 211 m/s, so for 240 raise `speedPerRootAcceleration` in a copy's `blocks.json` to 70. Each
 capture prints the container's offset from the own hull and the own speed.

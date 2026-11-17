@@ -550,7 +550,7 @@ Shipped designs, tanks full, measured by `PropulsionTests`:
 
 | Design | Forward | Braking, sideways, up, down | Engines at full thrust | Boosting whenever the drive allows | One thruster direction at full |
 | --- | --- | --- | --- | --- | --- |
-| Prospector (the one starting ship) | 12.5 m/s² | braking 9.7, others 6.7 m/s² | 83 min | 34 min | braking 62 min, others 83 min |
+| Prospector (the one starting ship) | 12.4 m/s² | braking 9.5, others 6.6 m/s² | 83 min | 34 min | braking 62 min, others 83 min |
 | Drone | 11.6 m/s² | braking 5.8, others 2.9 m/s² | no tanks: electric | no tanks | no tanks |
 
 Boost, measured with the battery full and the drive never overheating (`PropulsionTests`, `PowerFlowTests`):
@@ -567,7 +567,7 @@ With mounts, same mass, thrust and burn as with thruster blocks, so the shipped 
 
 | Design | Blocks | Mounts | Where | Hull points |
 | --- | --- | --- | --- | --- |
-| Prospector | 38 | 78: 52 cold gas, 4 hot, 2 ion thrusters, 6 scanners, 2 tractor beams | braking on the racks' fronts (16), sideways on their outer sides (12 each), up under the gyros (12), down on the deck (12) | 16,340 |
+| Prospector | 39 | 78: 52 cold gas, 4 hot, 2 ion thrusters, 6 scanners, 2 tractor beams | braking on the racks' fronts (16), sideways on their outer sides (12 each), up under the gyros (12), down on the deck (12) | 16,740 |
 | Drone | 14 (was 15) | 24 ion thrusters | four each on the top and bottom, right and left, eight on the front (top and bottom blocks) | 500 (was 490) |
 
 - The ships are more compact, so they turn a little differently (drone 38, 45, 40 deg/s; was 39, 43, 45). The
