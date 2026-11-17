@@ -82,6 +82,25 @@ and the mining rules will be refined by playing.
 - Cracks should look natural: rough, uneven break faces, not flat planes. Refined after the first build.
 - Anything discrete (which bricks exist, ore counts) uses `DetMath` or comes from the server.
 
+### Drone settings
+
+- Clicking the DRONES chip opens a small popup: one Launch/Recall button and checkboxes for what drones pick up
+  on their own: "Pick up cargo" now, "Pick up ores" once ore chunks exist (R4).
+- The keys (`.` launch, `,` recall, `/` fetch) keep working.
+
+### Mining lasers and action groups
+
+- A mining laser is aimed and fired like a weapon: the pointer aims, left mouse fires.
+- Lasers and weapons belong to action groups 1 to 9 and 0. A group shows only when a part is assigned to it.
+- The number keys toggle groups on and off; several can be on at once.
+- While any group is on, left mouse fires every group that is on. With all off, left mouse aligns to view as today.
+- A part's group is set per mount in the build menu and saved with the design. The Ship window (`I`) lists the
+  groups with their keys and parts, and can change a group without a rebuild.
+
+### Detailed scans by drones
+
+- D3 builds both drone scan levels as decided above: the group scan and the detailed scan (veins, pockets, heat map).
+
 ### Built to be extended
 
 - Every new mechanic is a set of parts: data in `content/`, shared rules in `Prospect.Game`, a client view.
