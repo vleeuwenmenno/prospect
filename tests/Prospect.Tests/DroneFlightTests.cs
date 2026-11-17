@@ -26,6 +26,28 @@ public sealed class DroneFlightTests
         return rig;
     }
 
+    /// <summary>
+    /// True once every drone out is on a <see cref="OrderTask.Hold"/> order and near the place it holds: a fetch that is
+    /// over parks its drones at their hold points instead of docking them.
+    /// </summary>
+    private static bool Parked(SaveRig rig)
+    {
+        var drones = Drones(rig);
+        if (drones.Count == 0) return false;
+        var orders = rig.Get<TaskOrder[]>("_orders");
+        var count = rig.Get<int>("_orderCount");
+        var parked = 0;
+        for (var i = 0; i < count; i++)
+        {
+            if (orders[i].Task != OrderTask.Hold || !drones.Contains(orders[i].Actor.Index)) continue;
+            var state = rig.Hulls.State(orders[i].Base.Index);
+            var place = state.Position + HullRotation.Rotate(orders[i].Point, state.Orientation);
+            if (rig.Hulls.State(orders[i].Actor.Index).Position.RelativeTo(place).LengthSquared() > 4f) return false;
+            parked++;
+        }
+        return parked == drones.Count;
+    }
+
     private static List<int> Drones(SaveRig rig)
     {
         var found = new List<int>();
@@ -103,7 +125,7 @@ public sealed class DroneFlightTests
         Fetch(rig, id);
         var sequence = 1u;
         var delivered = -1;
-        for (var t = 0; t < 60 * 90 && (delivered < 0 || Drones(rig).Count > 0); t++)
+        for (var t = 0; t < 60 * 90 && (delivered < 0 || !Parked(rig)); t++)
         {
             Coast(rig, sequence++);
             rig.Tick();
@@ -112,7 +134,7 @@ public sealed class DroneFlightTests
         Assert.InRange((rig.Hulls.State(pod.Index).Velocity - forward * 10).Length(), 0, 0.5f);
         Assert.True(delivered >= 0, "the drone handed the container to the beam");
         Assert.InRange(delivered / 60f, 0, 45);
-        Assert.Empty(Drones(rig));
+        Assert.True(Parked(rig), "the drone parked at its hold point instead of docking");
         Assert.Equal(DroneReply.Delivered, rig.Link.Bays.Reply);
     }
 
@@ -169,9 +191,9 @@ public sealed class DroneFlightTests
         var id = Place(rig, content, new Vector3(150, -40, 60), size: 3);
         var contacts = CountContacts(rig);
         Fetch(rig, id);
-        for (var t = 0; t < 60 * 90 && (Containers(rig).Find(id) >= 0 || Drones(rig).Count > 0); t++) rig.Tick();
+        for (var t = 0; t < 60 * 90 && (Containers(rig).Find(id) >= 0 || !Parked(rig)); t++) rig.Tick();
         Assert.Equal(-1, Containers(rig).Find(id));
-        Assert.Empty(Drones(rig));
+        Assert.True(Parked(rig));
         Assert.Equal(0, contacts.Drones());
         Assert.Equal(0, contacts.Hull());
     }
@@ -188,7 +210,7 @@ public sealed class DroneFlightTests
         var contacts = CountContacts(rig);
         Fetch(rig, id);
         var stowed = -1;
-        for (var t = 0; t < 60 * 120 && Drones(rig).Count + (Containers(rig).Find(id) >= 0 ? 1 : 0) > 0; t++)
+        for (var t = 0; t < 60 * 120 && (Containers(rig).Find(id) >= 0 || !Parked(rig)); t++)
         {
             rig.Tick();
             if (stowed < 0 && Containers(rig).Find(id) < 0) stowed = t;
@@ -197,7 +219,7 @@ public sealed class DroneFlightTests
         Assert.InRange(stowed / 60f, 0, 60);
         Assert.Equal(1, rig.Hulls.BlockStates.Cargo(rig.Hulls.Info(pod.Index).BlockState).Length);
         Assert.Equal(0, contacts.Hull());
-        Assert.Empty(Drones(rig));
+        Assert.True(Parked(rig));
     }
 
     [Fact]

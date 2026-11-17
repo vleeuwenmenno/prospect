@@ -439,8 +439,12 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `Target`; a slow drone is never given a target under the arrival distance), so drones keep up with a moving hull or
   body with no wire change. On its way a drone keeps `separationMetres` from its hull's other drones
   (`DroneSteering.Apart`), goes round its own hull's sphere plus `clearanceMetres` (`DroneSteering.Around`) and round
-  its load to a place on the far side. Any drone coming home first flies to its own slot beside its bay's hold point
-  (`HomeSlot`, recall phase `RecallFromAfar`), and only one drone of a bay lines up at a time (`LaneTaken`).
+  its load to a place on the far side. A fetch that is over parks its drones: `EndFetch` puts every drone that was on
+  it back on `OrderTask.Hold` at the place a launch gives it (`ToHold`), whether the load was delivered, dropped,
+  refused or timed out, so they stay out and wait for the next container or chunk. They dock only when they are called
+  home: a recall (`,`, the popup's button), a jump or the loss of the base hull (`ToRecall`). Any drone called home
+  flies to its own slot beside its bay's hold point first (`HomeSlot`, recall phase `RecallFromAfar`), and only one
+  drone of a bay lines up at a time (`LaneTaken`).
   Tests: `DroneFlightTests` (one per cause: moving hull, light load, crossing, far side, docking) and
   `DroneSteeringTests`; rules and numbers in `docs/roadmap/drones-mining.md`, "Drone flight as built". Wire: protocol 66, `DroneCommandMessage.Subject`,
   `BayView.Fetching`, replies 11–20. Interface: `FetchContainer` (`/`) on the hovered free container
@@ -461,8 +465,9 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   containers a tick from a rotating cursor and starts a fetch through `StartFetch`, the one body of the manual `/`
   fetch: never a second path. Skips containers a tractor or drones have, the owner may not take (`MayPickup`), out of
   range or sensor sight (`Covered`), reached by the hull's own beam (`TractorSimulation.Reaches`), or refused lately
-  (four-slot `AutoSkip`, `autoPickupRetrySeconds`). One fetch a hull at a time; a manual recall pauses it
-  (`autoPickupPauseSeconds`), a manual launch ends the pause. The second checkbox, "Pick up ores", is in
+  (four-slot `AutoSkip`, `autoPickupRetrySeconds`). One fetch a hull at a time, counted by drones on a fetch order, so
+  a fetch that is over frees the next at once and the drones holding station go before any more are launched; a manual
+  recall pauses it (`autoPickupPauseSeconds`), a manual launch ends the pause. The second checkbox, "Pick up ores", is in
   "Ore collection (R4)". Tests:
   `DroneFetchTests` (auto pickup), `DronePopupTests`. Capture: `tools/prepare_drone_fetch_capture.py`, then
   `--open cargo --jettison 5 --drone-autopickup 3 --drone-popup` (scripted runs only); `--drone-ores <s>` turns

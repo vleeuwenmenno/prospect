@@ -595,9 +595,9 @@ public sealed partial class ServerHost
             case OrderTask.Recall:
                 return Recall(ref order, page);
             case OrderTask.Fetch:
-                return Fetch(ref order, page);
+                return Fetch(ref order);
             case OrderTask.FetchOre:
-                return FetchOre(ref order, page);
+                return FetchOre(ref order);
             case OrderTask.Scan:
                 return ScanOrder(ref order, page);
             default:

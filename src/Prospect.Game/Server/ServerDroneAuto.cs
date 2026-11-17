@@ -29,7 +29,8 @@ public sealed partial class ServerHost
         var info = _hulls.Info(hull.Index);
         if (info.Wreck || _hulls.State(hull.Index).Jump != JumpPhase.None) return;
 
-        // One fetch at a time: the next starts once the drones of the last are home or have delivered.
+        // One fetch at a time: the next starts once the drones of the last have delivered and parked (a fetch that is
+        // over leaves them holding station, so a fetch that comes next takes them where they are instead of launching).
         if (page.FetchPending > 0 || FetchingDrones(hull, index) > 0) return;
 
         var rules = _content.Drones;

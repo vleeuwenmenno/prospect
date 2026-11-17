@@ -85,11 +85,11 @@ public sealed partial class ServerHost
     }
 
     /// <summary>A drone fetching an ore chunk: the container fetch's flight, beside the chunk.</summary>
-    private bool FetchOre(ref TaskOrder order, int page)
+    private bool FetchOre(ref TaskOrder order)
     {
         var index = _chunks.Find((uint)order.Subject);
         var held = index >= 0 && _chunks.Items[index].FetchHull == order.Base.Packed;
-        return FetchBody(ref order, page, held, held ? _chunks.Items[index].Position : default, held ? _chunks.Items[index].Velocity : default,
+        return FetchBody(ref order, held, held ? _chunks.Items[index].Position : default, held ? _chunks.Items[index].Velocity : default,
             held ? OreChunks.Half(_content.Mining, _chunks.Items[index].Mass) * 1.7320508f : 0);
     }
 
@@ -159,7 +159,7 @@ public sealed partial class ServerHost
         }
     }
 
-    /// <summary>Lets a fetched chunk go where it is and calls its drones home, telling the owner why.</summary>
+    /// <summary>Lets a fetched chunk go where it is and parks its drones, telling the owner why.</summary>
     private void DropOreFetch(ref OreChunk item, HullHandle hull, DroneReply reply)
     {
         var id = item.Id;
@@ -189,7 +189,8 @@ public sealed partial class ServerHost
         var design = _content.Designs[info.Design];
         if (design.Hoppers.Length == 0 || design.Bins.Length == 0) return;
 
-        // One fetch at a time, of a container or of a chunk: the next starts once the drones of the last are home.
+        // One fetch at a time, of a container or of a chunk: the next starts once the drones of the last have delivered
+        // and parked (a fetch that is over leaves them holding station, not back in a bay).
         if (page.FetchPending > 0 || FetchingDrones(hull, index) > 0) return;
 
         var rules = _content.Drones;

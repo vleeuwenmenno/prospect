@@ -119,6 +119,12 @@ Built: the popup, "Pick up cargo" and "Pick up ores" (R4a).
 - One fetch at a time per hull. A refused container is left alone for `autoPickupRetrySeconds` (20; four are
   remembered per hull), so an impossible container never nags. The refusal is told to the owner like a manual one.
 - A manual recall holds auto pickup off for `autoPickupPauseSeconds` (30), or until the next manual launch.
+- Decided: a fetch that ends parks its drones. Every drone that was on it goes back to holding station at its hold
+  point, the same Hold order and place a launch gives (`ToHold`), and does not dock. That holds whether the load was
+  delivered, dropped, refused or timed out, and whether the drones were holding station before the fetch or were
+  launched for it. Only a recall (`,`, the popup's button), a jump, the loss of the base hull and whatever else already
+  ends drones still call them home. With "Pick up cargo" or "Pick up ores" on, the next fetch takes the parked drones
+  first, before it launches more from a bay (`AssignCarriers`).
 - Turning it off stops new fetches; a fetch under way finishes (recall cancels it).
 - Wire: protocol 67, reliable message 43 `DroneSettingsMessage` (hull, flag; own rate limit, `commandSeconds`),
   `BayView.AutoPickup` in message 40, which the checkbox reads back, so a lost click shows as an unchanged box.
@@ -213,7 +219,8 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
      the mass, never above 0.6 of the weakest holder's push (`carryFollowShare`), at most 20 m/s. Drones holding
      station go first, then the bays launch the rest.
    - Range 3 km from the ship (`fetchRangeMetres`). Claims, pickup delay and keep-claim are the tractor's rules.
-   - A lost carrier, a ship that jumps, a recall or a 600 s time-out drops the container where it is.
+   - A lost carrier, a ship that jumps, a recall or a 600 s time-out drops the container where it is. A fetch that is
+     over parks its drones at their hold points rather than docking them, so the next one starts with them already out.
    - Interface: `/` on the hovered or targeted container, the target panel's button, "N FETCHING" on the chip.
    - Gaps: drones have no battery limit beyond D1's power use (no endurance figure); no avoidance of rocks (only of
      their own hull and of each other, see "Drone flight"); a ship with no
@@ -321,6 +328,9 @@ Fixed 2026-11-17 after play showed drones wandering, losing loads and slow. Each
   (`DroneSteering.Around`, `DroneFetch.CarryGoal`); a drone goes round its load to a place on the far side.
 - Drones coming home met at one hold point and the hatch. Fix: each waits at its own slot beside the hold point
   (never on the hatch's line) and one at a time lines up (`LaneTaken`).
+- A fetch that was over called its drones home, so every container cost a docking and a launch before the next one
+  could go out. Fix: `EndFetch` parks them at their hold points (`ToHold`) and the next fetch takes them where they
+  are; only a recall, a jump or the loss of the base ship brings them in.
 - Slow: the work drone had two ion thrusters a side (3 m/s²). It now has four (5.3 m/s²).
 
 ### Numbers (headless, shipped ship, command to delivered)
@@ -328,7 +338,7 @@ Fixed 2026-11-17 after play showed drones wandering, losing loads and slow. Each
 - Container 150 m out: 32–33 s before, 26–27 s after.
 - 500 kg chunk 47 m off a rock: 45 s and 361 m of path before, 13 s and 55 m after.
 - Container straight below the ship: never delivered before (232 hull contacts), 32.5 s after.
-- Ship coasting at 10 m/s: drones never docked in 400 s before, docked 6–7 s after delivery after.
+- Ship coasting at 10 m/s: drones never docked in 400 s before; now they hold station again after the delivery.
 - Two drones launched together: 1,391 ticks touching before, none after. Drops: none before or after.
 
 ### Not built, known limits
