@@ -165,7 +165,7 @@ public sealed class BuildDraftTests
         Assert.True(export.Ok, export.Problem);
         Assert.Equal([placed[2], placed[0], placed[1]], export.Design!.Mounts.ToArray());
         Assert.Equal(export.Bytes, DesignBytes.Encode(export.Design));
-        Assert.Equal(placed.Sum(mount => mount.Type.Mass) + 9f, export.Design.Flight.Mass, 3);
+        Assert.Equal(placed.Sum(mount => mount.Type.Mass * FaceMounts.Units(mount)) + 9f, export.Design.Flight.Mass, 3);
         var again = BuildDraft.FromBlueprint(export.Design, Content);
         Assert.Equal(export.Bytes, again.Export().Bytes);
 
@@ -227,11 +227,11 @@ public sealed class BuildDraftTests
         Assert.Equal(DraftEdit.Done, draft.AddMount(3, BlockFacing.Up, 3, 3, cold));
         Assert.Equal(DraftEdit.Done, draft.Merge([3, 1]));
         Assert.Equal(new GridSize(3, 1, 1), draft.Boxes[1].Size);
-        Assert.Equal([placed[0], placed[1], placed[2], new DesignMount(1, BlockFacing.Up, 3, 23, cold)], Mounts());
+        Assert.Equal([placed[0], placed[1], placed[2], new DesignMount(1, BlockFacing.Up, 3, 23, cold, Size: 2)], Mounts());
         Assert.True(draft.Export().Ok);
         Assert.True(draft.Undo());
         Assert.Equal(3, Mounts().Count(mount => mount.Parent == 1) + Mounts().Count(mount => mount.Parent == 3));
-        Assert.Equal(new DesignMount(3, BlockFacing.Up, 3, 3, cold), Mounts()[^1]);
+        Assert.Equal(new DesignMount(3, BlockFacing.Up, 3, 3, cold, Size: 2), Mounts()[^1]);
 
         // A pasted block brings its mounts, each on the copy; one with no room where the copy lands is left behind.
         Assert.Equal(DraftEdit.Done, draft.Paste([draft.Boxes[1]], new GridSize(0, 3, 0), [placed[0] with { Parent = 0 }, placed[1] with { Parent = 0 }]));
@@ -621,17 +621,17 @@ public sealed class BuildDraftTests
         Assert.Equal(0, skipped);
         var mounts = draft.Mounts.ToArray();
         // On the right plate at the place asked, and its z copy on the same plate; the x copies on the left plate.
-        Assert.Contains(new DesignMount(1, BlockFacing.Up, 1, 2, cold), mounts);
-        Assert.Contains(new DesignMount(1, BlockFacing.Up, 5, 2, cold), mounts);
-        Assert.Contains(new DesignMount(2, BlockFacing.Up, 1, 4, cold), mounts);
-        Assert.Contains(new DesignMount(2, BlockFacing.Up, 5, 4, cold), mounts);
+        Assert.Contains(new DesignMount(1, BlockFacing.Up, 1, 2, cold, Size: 2), mounts);
+        Assert.Contains(new DesignMount(1, BlockFacing.Up, 5, 2, cold, Size: 2), mounts);
+        Assert.Contains(new DesignMount(2, BlockFacing.Up, 1, 4, cold, Size: 2), mounts);
+        Assert.Contains(new DesignMount(2, BlockFacing.Up, 5, 4, cold, Size: 2), mounts);
         Assert.Equal(4, mounts.Length);
         Assert.True(draft.Undo());
         Assert.Empty(draft.Mounts.ToArray());
 
         // Across x a side face turns to the opposite side.
         Assert.Equal(DraftEdit.Done, draft.AddMountMirrored(1, BlockFacing.Right, 3, 3, cold, MirrorAxes.X, out _));
-        Assert.Contains(new DesignMount(2, BlockFacing.Left, 3, 3, cold), draft.Mounts.ToArray());
+        Assert.Contains(new DesignMount(2, BlockFacing.Left, 3, 3, cold, Size: 2), draft.Mounts.ToArray());
 
         // With no mirrored block to carry the copy, it is left out and counted; the part itself is placed.
         var lone = Draft(Box("core", new GridSize(0, 0, 0), One), Box("hull", new GridSize(1, 0, 0), One));
@@ -794,7 +794,7 @@ public sealed class BuildDraftTests
     public void SplittingATankMakesOneCellPiecesAsOneUndoStepAndCarriesTheMountsThatStillFit()
     {
         var cold = Content.Blocks.Get("coldGasThruster");
-        var side = cold.Mount!.Side;
+        var side = cold.Mount!.SideOf(cold.Mount.DefaultSize);
         var draft = Draft(Box("core", new GridSize(0, 0, 0), One), Tank("bipropellantTank", new GridSize(1, 0, 0), new GridSize(3, 1, 1)));
         // On the top face, counted along x from the tank's low corner (V): in the first cell, in the second, and
         // across the cut between the first two. And one on the +x end.

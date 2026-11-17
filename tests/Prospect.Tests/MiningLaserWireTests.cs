@@ -14,7 +14,7 @@ public sealed class MiningLaserWireTests
     [Fact]
     public void TheProtocolIsAtVersion71AndTheNewMessagesHaveTheirOwnIds()
     {
-        Assert.Equal(71u, ProtocolInfo.Version);
+        Assert.Equal(72u, ProtocolInfo.Version);
         Assert.Equal(44, (byte)MessageId.LaserAim);
         Assert.Equal(45, (byte)MessageId.SetActionGroup);
         Assert.Equal(46, (byte)MessageId.LaserBeams);

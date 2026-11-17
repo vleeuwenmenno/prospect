@@ -262,6 +262,19 @@ public sealed class TankModelTests
             if (design.Types[b].Tank != FuelKind.None)
                 BlockSet.Remove(alive, b);
         var without = DamageMesh.Build(design, alive, default, 400000, 0.2f)!;
-        Assert.Equal(0, Painted(without.Original));
+
+        // What paint is left is not a vessel's: the caps of the cold gas arrays on the blocks the hull still has.
+        var caps = 0;
+        for (var m = 0; m < design.Mounts.Length; m++)
+        {
+            if (design.Types[design.Mounts[m].Parent].Tank != FuelKind.None)
+                continue;
+            var vertices = new List<MeshVertex>();
+            var indices = new List<uint>();
+            if (PropulsionModels.AddMount(design, m, Look, vertices, indices, null))
+                caps += Painted(indices.Select(i => vertices[(int)i]));
+        }
+
+        Assert.Equal(caps, Painted(without.Original));
     }
 }

@@ -113,9 +113,12 @@ Fuel is kept tank by tank: thrust draws from every tank of its fuel in proportio
 that is destroyed loses what it held. Nothing refuels a ship yet: only a first spawn starts with full tanks. An edit
 keeps the fuel of every tank that is still there and a new tank starts empty; a repair restores blocks, not fuel,
 so a tank it builds again is empty; a ship built new from the drone starts empty. A design has at most 255 tanks. Engines and both
-thruster kinds have low-poly models of their own: an engine fills its block flush, a thruster is a pod on a faceted plate
-(a cold gas pod has four nozzles), in flight and in the ship editor (placed parts and mounts, and the ghost). They show what they fire: an engine ignites with a few sparks and
-opens a wide, soft, blue-violet vacuum plume, a hot thruster a small one with an orange core, a cold gas pod a
+thruster kinds have low-poly models of their own: an engine fills its block flush, a hot thruster is a pod on a faceted plate,
+and a cold gas thruster is an array: a stepped grey plate with orange corner caps and a cyan slot in each side, carrying
+one, two by two or three by three short flared nozzle cups, whichever size it was placed in. Thrust, fuel burn, power
+draw and mass follow the nozzle count (25 kN a nozzle; the two by two array is what the old single thruster was). The cyan
+bands on its cups brighten while it fires. Models show in flight and in the ship editor (placed parts and mounts, and the ghost). They show what they fire: an engine ignites with a few sparks and
+opens a wide, soft, blue-violet vacuum plume, a hot thruster a small one with an orange core, every nozzle of a cold gas array a
 faint, streaked cone of expanding gas lit by the star that bursts as its valve opens and clears when it closes, and an
 ion part (a flat grid in a short ring) a faint, steady blue-violet glow with a thin straight beam; boost makes plumes longer and
 brighter without burning out to white, for every hull in view. Tanks have low-poly models too: an open frame of beams
@@ -320,10 +323,16 @@ are never blocked. The editor works in space, around your ship:
   Engines and tanks take any size. Engines and thrusters are under **Thrust**, tanks under **Tanks**.
 - **Thrusters mount on faces.** With a cold gas or hot thruster chosen, the ghost is only the thruster, on the
   face under the pointer, snapped to tenths of a cell, with a line the way it points: out of that face. A click
-  mounts it; four fit a one-cell face. It has no size and no turn, so `S` and `R` do nothing for it. A middle
+  mounts it; four fit a one-cell face. It has no turn, so `R` does nothing for it, and only a cold gas array has a
+  size. A middle
   click selects it, Delete removes it, and copying it picks it as the part to place. It belongs to its block: a
   moved block takes its thrusters along, a deleted one takes them with it in the same undo step, and a block put
   where a thruster stands removes that thruster in the same step. A turned block drops its thrusters.
+- **A cold gas array has three sizes:** 1 x 1, 2 x 2 or 3 x 3 nozzles (0.2, 0.4 or 0.6 of a cell wide). While placing,
+  choose with the **ARRAY SIZE** buttons in the details panel or step with `S`; the ghost, the part card's figures and
+  the footprint follow. A placed one is resized with the same buttons when selected, or with **Size** in its
+  right-click menu: it keeps its middle, is one undo step, and a size with no room on the face is off. Older designs
+  load every cold gas thruster as a 2 x 2 array, so they fly as they did. The Prospector carries only 2 x 2 arrays.
 
 - **Wedges.** Part shape Box or Wedge sits under the part list, with the size, the shape and the sizing and
   turning keys. A wedge fills half its box, with half the box's figures; the part cards show them. A selected
@@ -491,7 +500,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   other hull. It carries every part a ship can take: 45 blocks (boxes and wedges) and 80 mounted parts, 192.6 t,
   7 x 4 x 10 m. Rated 205 m/s (409 boosting), turning 68 to 119 degrees a second. Two generators make 12 MW against
   6.8 MW idle (twelve cells of gyros, six scanners), four batteries hold 240 MJ, one shield emitter gives 1,500 points.
-  Fuel: 2,000 kg bipropellant (two engines), 450 kg nitrogen (52 cold gas thrusters), 300 kg hydrazine (four hot
+  Fuel: 2,000 kg bipropellant (two engines), 450 kg nitrogen (52 cold gas arrays of 2 x 2 nozzles), 300 kg hydrazine (four hot
   thrusters); the ion drive and ion thrusters need none. Two 2 x 2 x 2 cargo racks (128 units, up to XXL containers),
   a tractor beam over each, a drone bay (four drones) opening upward, the passive sensor and sector scanner, two of
   each scan module, a hyperspace drive, an ore hopper on the stern deck (intake up, in view of both tractor beams)

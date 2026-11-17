@@ -82,6 +82,29 @@ internal struct PartFigures
         Ore = a.Ore + b.Ore,
     };
 
+    /// <summary>
+    /// These figures counted <paramref name="units"/> times: what a mounted part placed larger than one unit adds
+    /// (<see cref="FaceMounts.Units"/>), as <see cref="BoxHullSums"/> counts it.
+    /// </summary>
+    public readonly PartFigures Times(int units) => new()
+    {
+        Mass = Mass * units,
+        Hull = Hull * units,
+        Thrust = Thrust * units,
+        Torque = Torque * units,
+        PowerOutput = PowerOutput * units,
+        PowerDraw = PowerDraw * units,
+        Energy = Energy * units,
+        Shield = Shield * units,
+        Recharge = Recharge * units,
+        Cargo = Cargo * units,
+        Crew = Crew * units,
+        FtlPower = FtlPower * units,
+        FuelBurn = FuelBurn * units,
+        FuelCapacity = FuelCapacity * units,
+        Ore = Ore * units,
+    };
+
     /// <summary>The figure a part of a role is chosen for, which the merge preview compares.</summary>
     public readonly float Main(PartRole role) => role switch
     {

@@ -11,11 +11,12 @@ internal static class DesignBytes
     /// Version 3 added each block's facing, one byte after its shape. Version 4 adds the parts mounted on block
     /// faces after the blocks: a count, then for each its type, parent block, face and place on the face, in the
     /// order of <see cref="FaceMounts.Compare"/>. Version 5 adds each mount's action group, one byte after its place.
+    /// Version 6 adds each mount's size (<see cref="DesignMount.Size"/>), one byte after its group.
     /// </summary>
-    internal const int Version = 5;
+    internal const int Version = 6;
 
-    /// <summary>The fewest bytes a mount takes: a one-byte name with its length, the parent, the face, two positions and the group.</summary>
-    private const int MinMountBytes = 2 + 4 + 1 + 2 + 2 + 1;
+    /// <summary>The fewest bytes a mount takes: a one-byte name with its length, the parent, the face, two positions, the group and the size.</summary>
+    private const int MinMountBytes = 2 + 4 + 1 + 2 + 2 + 1 + 1;
 
     /// <summary>The fewest bytes a block takes: a one-byte name with its length, six integers, a shape and a facing.</summary>
     private const int MinBlockBytes = 2 + 24 + 1 + 1;
@@ -41,7 +42,7 @@ internal static class DesignBytes
         foreach (ref readonly var mount in design.Mounts)
         {
             Text(writer, mount.Type.Id);
-            writer.Write(mount.Parent); writer.Write((byte)mount.Face); writer.Write(checked((ushort)mount.U)); writer.Write(checked((ushort)mount.V)); writer.Write(mount.Group);
+            writer.Write(mount.Parent); writer.Write((byte)mount.Face); writer.Write(checked((ushort)mount.U)); writer.Write(checked((ushort)mount.V)); writer.Write(mount.Group); writer.Write(mount.Size);
         }
         return stream.ToArray();
     }
@@ -90,7 +91,9 @@ internal static class DesignBytes
             var v = reader.UShort();
             var group = reader.Byte();
             if (!ActionGroups.Allowed(type, group)) throw new InvalidDataException("A mount's action group is not one its part may have.");
-            mounts[i] = new DesignMount(parent, face, u, v, type, group);
+            var units = reader.Byte();
+            if (!FaceMounts.SizeAllowed(type, units)) throw new InvalidDataException("A mount's size is not one its part is made in.");
+            mounts[i] = new DesignMount(parent, face, u, v, type, group, units);
         }
         if (reader.Left != 0) throw new InvalidDataException("Trailing design bytes.");
         // Checked before the design is evaluated or its shield built: it costs one pass over the boxes.

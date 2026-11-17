@@ -15,7 +15,41 @@ namespace Prospect.Game.World;
 /// <c>blocks.json</c>): 4 for the thrusters, which became mounts in version 5, and 5 for the module scanners, which
 /// became mounts in version 6. A file of that version or older names the part as a block and is converted on load.
 /// </param>
-public sealed record MountSpec(int Side, int Depth, string LegacyBlock, int LastBlockVersion = 4);
+public sealed record MountSpec(int Side, int Depth, string LegacyBlock, int LastBlockVersion = 4)
+{
+    /// <summary>
+    /// The sizes the part may be placed in (<c>"sizes"</c> in <c>blocks.json</c>), rising: a part of size n is a
+    /// square of n by n units (a cold gas array's nozzles), <see cref="Side"/> times n on a side, and every figure of
+    /// its type counts n times n. A part that names none has the one size 1: the type's figures are the part's.
+    /// </summary>
+    public IReadOnlyList<int> Sizes { get; init; } = [1];
+
+    /// <summary>
+    /// The size a part has where none is named (<c>"defaultSize"</c>): in a design file that lists no size, in an old
+    /// file converted on load, and the size the editor first offers.
+    /// </summary>
+    public int DefaultSize { get; init; } = 1;
+
+    /// <summary>The largest size a part of any type may have: a size is one byte, and a square of 15 units is ample.</summary>
+    public const int MaxSize = 15;
+
+    /// <summary>True for a part placed in more than one size.</summary>
+    public bool Sizable => Sizes.Count > 1;
+
+    /// <summary>Whether a part of this type may have <paramref name="size"/>. Allocates nothing.</summary>
+    public bool Allows(int size)
+    {
+        for (var i = 0; i < Sizes.Count; i++)
+            if (Sizes[i] == size) return true;
+        return false;
+    }
+
+    /// <summary>The side of the square a part of <paramref name="size"/> covers on its face, in tenths of a cell.</summary>
+    public int SideOf(int size) => Side * size;
+
+    /// <summary>The largest side a part of this type covers, in tenths of a cell.</summary>
+    public int LargestSide => SideOf(Sizes[Sizes.Count - 1]);
+}
 
 /// <summary>
 /// One part mounted on a face of a block. <paramref name="Parent"/> is the block's index in the design,
@@ -24,8 +58,11 @@ public sealed record MountSpec(int Side, int Depth, string LegacyBlock, int Last
 /// along the axes <c>(axis + 1) % 3</c> and <c>(axis + 2) % 3</c>. A mount has no state of its own: a hull has it
 /// exactly while it has the parent block. <paramref name="Group"/> is the part's action group
 /// (<see cref="ActionGroups"/>): 1 to 10, or 0 for none; only a groupable part (a mining laser) has one.
+/// <paramref name="Size"/> is how many units the part is on a side (<see cref="MountSpec.Sizes"/>): 1 for every part
+/// but one placed larger, such as a cold gas array of 2 by 2 or 3 by 3 nozzles. Its square is the type's side times
+/// the size, and its thrust, burn, power and mass are the type's times the size squared (<see cref="FaceMounts.Units"/>).
 /// </summary>
-public readonly record struct DesignMount(int Parent, BlockFacing Face, int U, int V, BlockType Type, byte Group = 0);
+public readonly record struct DesignMount(int Parent, BlockFacing Face, int U, int V, BlockType Type, byte Group = 0, byte Size = 1);
 
 /// <summary>
 /// The geometry and the rules of face mounts, shared by design files, received designs and the editor's drafts.
@@ -45,6 +82,21 @@ public static class FaceMounts
     /// </summary>
     public const int MaxDepth = 2;
 
+    /// <summary>The side of the square a mount covers on its face, in tenths of a cell: its type's side times its size.</summary>
+    public static int Side(in DesignMount mount) => mount.Type.Mount!.SideOf(mount.Size);
+
+    /// <summary>
+    /// How many times a mount counts its type's figures: its size squared, the nozzles of a cold gas array. One for
+    /// every part of size 1.
+    /// </summary>
+    public static int Units(in DesignMount mount) => mount.Size * mount.Size;
+
+    /// <summary>The size a part of <paramref name="type"/> has where none is named; 1 for a type that is no mount.</summary>
+    public static byte DefaultSize(BlockType? type) => (byte)(type?.Mount?.DefaultSize ?? 1);
+
+    /// <summary>Whether a part of <paramref name="type"/> may have <paramref name="size"/>: the one rule of a mount's size.</summary>
+    public static bool SizeAllowed(BlockType? type, int size) => type?.Mount is { } spec && spec.Allows(size);
+
     /// <summary>
     /// The box a mount fills, on the integer block edges times <see cref="PerCell"/>: a block covers
     /// <c>[At, At + Size)</c> times ten there. Each span needs three slots.
@@ -52,6 +104,7 @@ public static class FaceMounts
     public static void Box(in DesignBox parent, in DesignMount mount, Span<int> low, Span<int> high)
     {
         var spec = mount.Type.Mount!;
+        var side = spec.SideOf(mount.Size);
         var n = Facings.Axis(mount.Face);
         var a = (n + 1) % 3;
         var b = (n + 2) % 3;
@@ -67,9 +120,9 @@ public static class FaceMounts
         }
 
         low[a] = Of(parent.At, a) * PerCell + mount.U;
-        high[a] = low[a] + spec.Side;
+        high[a] = low[a] + side;
         low[b] = Of(parent.At, b) * PerCell + mount.V;
-        high[b] = low[b] + spec.Side;
+        high[b] = low[b] + side;
     }
 
     /// <summary>
@@ -78,12 +131,13 @@ public static class FaceMounts
     /// </summary>
     public static bool OnFace(in DesignBox parent, in DesignMount mount)
     {
-        if (mount.Type?.Mount is not { } spec || !Facings.IsValid(mount.Face) || !BlockShapes.IsFullFace(parent.Shape, (int)mount.Face))
+        if (mount.Type?.Mount is not { } spec || !spec.Allows(mount.Size) || !Facings.IsValid(mount.Face) || !BlockShapes.IsFullFace(parent.Shape, (int)mount.Face))
             return false;
+        var side = spec.SideOf(mount.Size);
         var n = Facings.Axis(mount.Face);
         return mount.U >= 0 && mount.V >= 0
-            && mount.U + spec.Side <= Of(parent.Size, (n + 1) % 3) * PerCell
-            && mount.V + spec.Side <= Of(parent.Size, (n + 2) % 3) * PerCell;
+            && mount.U + side <= Of(parent.Size, (n + 1) % 3) * PerCell
+            && mount.V + side <= Of(parent.Size, (n + 2) % 3) * PerCell;
     }
 
     /// <summary>Whether a box in tenths shares volume with a block. Touching does not. A wedge counts as its whole box.</summary>
@@ -100,7 +154,8 @@ public static class FaceMounts
     }
 
     /// <summary>
-    /// Whether one mount has room: its parent is there, its square lies on a whole face of it, no block covers the
+    /// Whether one mount has room: its parent is there, its size is one its type may have
+    /// (<see cref="DraftEdit.NoSize"/> otherwise), its square lies on a whole face of it, no block covers the
     /// box it fills and no other mount shares volume with it. <paramref name="ignore"/> names a mount to pass over
     /// (the one being asked about, when it is in the list). Allocates nothing.
     /// </summary>
@@ -108,6 +163,8 @@ public static class FaceMounts
     {
         if ((uint)mount.Parent >= (uint)blocks.Length)
             return DraftEdit.NoSuchBlock;
+        if (mount.Type?.Mount is { } own && !own.Allows(mount.Size))
+            return DraftEdit.NoSize;
         if (!OnFace(blocks[mount.Parent], mount))
             return DraftEdit.OffFace;
         Span<int> low = stackalloc int[3];
@@ -141,11 +198,13 @@ public static class FaceMounts
         if (c == 0) c = ((byte)a.Face).CompareTo((byte)b.Face);
         if (c == 0) c = a.V.CompareTo(b.V);
         if (c == 0) c = a.U.CompareTo(b.U);
-        return c != 0 ? c : string.CompareOrdinal(a.Type.Id, b.Type.Id);
+        if (c == 0) c = string.CompareOrdinal(a.Type.Id, b.Type.Id);
+        return c != 0 ? c : a.Size.CompareTo(b.Size);
     }
 
     /// <summary>
-    /// Holds a design's mounts to the rules: a mount type each, within the content's count, each on a whole open
+    /// Holds a design's mounts to the rules: a mount type each, of a size the type may have, within the content's
+    /// count, each on a whole open
     /// face of a block that is there, none sharing volume with a block or another mount. Refuses with the first
     /// that breaks one.
     /// </summary>
@@ -166,6 +225,8 @@ public static class FaceMounts
                     break;
                 case DraftEdit.NoSuchBlock:
                     throw new InvalidDataException($"{source}: mount {i}: there is no block {mount.Parent} to mount it on");
+                case DraftEdit.NoSize:
+                    throw new InvalidDataException($"{source}: mount {i}: a {mount.Type.Name} is not made in size {mount.Size}");
                 case DraftEdit.OffFace:
                     throw new InvalidDataException($"{source}: mount {i}: it does not fit on that face of block {mount.Parent}");
                 default:

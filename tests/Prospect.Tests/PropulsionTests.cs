@@ -847,12 +847,12 @@ public sealed class PropulsionTests
     [Fact]
     public void ALargeTankAtALowThrottleStillFallsByWhatIsBurnt()
     {
-        // 64 cells of nitrogen, 9,600 kg, and one cold gas thruster at a tenth of its throttle: 1.25e-5 kg a tick.
+        // 64 cells of nitrogen, 9,600 kg, and one two by two cold gas array at a tenth of its throttle: 1.25e-5 kg a tick.
         // In single precision that is less than half a unit in the tank's last place, and the tank would never
         // fall. Kept in double precision it falls by what is burnt.
         var design = Design(
             [Box("hull", 1, 0, 0), Box("nitrogenTank", 2, 0, 0, size: new GridSize(4, 4, 4))],
-            [Mount("coldGasThruster", 7, BlockFacing.Down)]);
+            [Mount("coldGasThruster", 7, BlockFacing.Down) with { Size = 2 }]);
         using var hulls = new HullStore();
         var field = new HullField(hulls, [design]);
         var hull = hulls.Create(1, 0, design, Double3.Zero).Index;
@@ -1124,12 +1124,12 @@ public sealed class PropulsionTests
             design.Write(stream);
             var again = Parse(System.Text.Encoding.UTF8.GetString(stream.ToArray()));
             Assert.Equal(design.Blocks.ToArray(), again.Blocks.ToArray());
-            Assert.Contains("\"version\":7", System.Text.Encoding.UTF8.GetString(stream.ToArray()));
+            Assert.Contains("\"version\":8", System.Text.Encoding.UTF8.GetString(stream.ToArray()));
         }
 
         Assert.Contains("Unknown block facing", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 4, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\", \"facing\": \"forward\" }] }")).Message);
-        Assert.Contains("unsupported design version 8", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 8, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\" }] }")).Message);
-        Assert.Equal(7, BoxDesign.FormatVersion);
+        Assert.Contains("unsupported design version 9", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 9, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\" }] }")).Message);
+        Assert.Equal(8, BoxDesign.FormatVersion);
     }
 
     [Fact]
@@ -1141,7 +1141,7 @@ public sealed class PropulsionTests
             Box("engine", 4, 0, 0, BlockFacing.Up, new GridSize(1, 4, 4)),
             Box("hull", 5, 0, 0, BlockFacing.Down));
         var bytes = DesignBytes.Encode(design);
-        Assert.Equal(5, DesignBytes.Version);
+        Assert.Equal(6, DesignBytes.Version);
         var decoded = DesignBytes.Decode(bytes, SHA256.HashData(bytes), Content);
         Assert.Equal(design.Boxes.ToArray(), decoded.Boxes.ToArray());
         Assert.Equal(design.Flight, decoded.Flight);
@@ -1201,7 +1201,7 @@ public sealed class PropulsionTests
         var design = Parse(File5(At(1, "up", 5, 14) + ", " + At(1, "up", 0, 0) + ", " + At(0, "left", 3, 3, "hotThruster")));
         Assert.Equal(2, design.Blocks.Length);
         Assert.Equal(
-            [new DesignMount(0, BlockFacing.Left, 3, 3, Content.Blocks.Get("hotThruster")), new DesignMount(1, BlockFacing.Up, 0, 0, Content.Blocks.Get("coldGasThruster")), new DesignMount(1, BlockFacing.Up, 5, 14, Content.Blocks.Get("coldGasThruster"))],
+            [new DesignMount(0, BlockFacing.Left, 3, 3, Content.Blocks.Get("hotThruster")), new DesignMount(1, BlockFacing.Up, 0, 0, Content.Blocks.Get("coldGasThruster"), Size: 2), new DesignMount(1, BlockFacing.Up, 5, 14, Content.Blocks.Get("coldGasThruster"), Size: 2)],
             design.Mounts.ToArray());
         design.MountsOf(1, out var start, out var end);
         Assert.Equal((1, 3), (start, end));
@@ -1225,10 +1225,10 @@ public sealed class PropulsionTests
         var swapped = (byte[])bytes.Clone();
         var cold = "coldGasThruster"u8;
         var first = bytes.AsSpan().IndexOf(cold);
-        var second = first + cold.Length + 10 + 1;
+        var second = first + cold.Length + 11 + 1;
         Assert.True(bytes.AsSpan(second).StartsWith(cold));
-        bytes.AsSpan(second + cold.Length, 10).CopyTo(swapped.AsSpan(first + cold.Length));
-        bytes.AsSpan(first + cold.Length, 10).CopyTo(swapped.AsSpan(second + cold.Length));
+        bytes.AsSpan(second + cold.Length, 11).CopyTo(swapped.AsSpan(first + cold.Length));
+        bytes.AsSpan(first + cold.Length, 11).CopyTo(swapped.AsSpan(second + cold.Length));
         Assert.Contains("Noncanonical", Assert.Throws<InvalidDataException>(() => DesignBytes.Decode(swapped, SHA256.HashData(swapped), Content)).Message);
 
         // What a file or a sender may not do.
@@ -1248,7 +1248,7 @@ public sealed class PropulsionTests
         Assert.Equal(2, Parse(File5(At(1, "up", 0, 0) + ", " + At(1, "up", 4, 0))).Mounts.Length);
         var coldGas = Content.Blocks.Get("coldGasThruster");
         DesignBox[] corner = [new(new GridSize(0, 0, 0), One, Content.Blocks.Get("core")), new(new GridSize(1, 1, 0), One, Content.Blocks.Get("hull"))];
-        DesignMount[] meeting = [new(0, BlockFacing.Right, 6, 3, coldGas), new(1, BlockFacing.Down, 3, 0, coldGas)];
+        DesignMount[] meeting = [new(0, BlockFacing.Right, 6, 3, coldGas, Size: 2), new(1, BlockFacing.Down, 3, 0, coldGas, Size: 2)];
         Assert.Contains("in its way", Assert.Throws<InvalidDataException>(() => new BoxDesign("T", 1, corner, Content.Blocks.Limits, "received design", mounts: meeting)).Message);
         meeting[0] = meeting[0] with { U = 4 };
         Assert.Equal(2, new BoxDesign("T", 1, corner, Content.Blocks.Limits, "received design", mounts: meeting).Mounts.Length);
@@ -1296,11 +1296,13 @@ public sealed class PropulsionTests
         var old = Parse("{ \"version\": 4, " + head + "{ \"at\": [1, 0, 0], \"type\": \"coldGasThruster\", \"facing\": \"right\" }] }");
         Assert.Equal(new DesignBox(new GridSize(1, 0, 0), One, plating), old.Blocks[1]);
         Assert.Equal(
-            [new DesignMount(1, BlockFacing.Right, 0, 0, cold), new DesignMount(1, BlockFacing.Right, 5, 0, cold), new DesignMount(1, BlockFacing.Right, 0, 5, cold), new DesignMount(1, BlockFacing.Right, 5, 5, cold)],
+            [new DesignMount(1, BlockFacing.Right, 0, 0, cold, Size: 2), new DesignMount(1, BlockFacing.Right, 5, 0, cold, Size: 2), new DesignMount(1, BlockFacing.Right, 0, 5, cold, Size: 2), new DesignMount(1, BlockFacing.Right, 5, 5, cold, Size: 2)],
             old.Mounts.ToArray());
         var sums = new BoxHullSums(old);
         sums.Evaluate(sums.Intact, Content.Rules, out var flight, out _);
-        Assert.Equal(cold.Thrust * 4 / flight.Mass, flight.Push(BlockFacing.Left), 4);
+        // Four arrays of two by two nozzles: what the one-cell block of thrusters pushed.
+        Assert.Equal(cold.Thrust * 4 * 4 / flight.Mass, flight.Push(BlockFacing.Left), 4);
+        Assert.Equal(400f / flight.Mass, flight.Push(BlockFacing.Left), 4);
 
         // Versions before facings: the thruster faced back. A sized one carries four a cell of its face.
         var wide = Parse("{ \"version\": 2, " + head + "{ \"at\": [0, 0, 1], \"type\": \"hotThruster\", \"size\": [2, 1, 3] }] }");

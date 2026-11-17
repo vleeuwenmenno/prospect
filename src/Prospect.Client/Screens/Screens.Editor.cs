@@ -649,7 +649,9 @@ internal sealed partial class ScreenHost
             if (!_palette.ShowsCard(tuning, types, i))
                 continue;
             shown++;
-            DrawPartCard(i, type, figures[i], tuning.Compact(type), type.Module.Family != ModuleFamily.None || type.Tractor is not null || type.Laser is not null || type.Bay is not null ? Kit.Px(ModuleCardHeight) : cardHeight, hull, editor);
+            // A part made in several sizes shows what it adds at the size it would be placed in.
+            var units = type.Mount is { Sizable: true } ? editor.MountSizeOf(type) : 1;
+            DrawPartCard(i, type, units == 1 ? figures[i] : figures[i].Times(units * units), tuning.Compact(type), type.Module.Family != ModuleFamily.None || type.Tractor is not null || type.Laser is not null || type.Bay is not null ? Kit.Px(ModuleCardHeight) : cardHeight, hull, editor);
             Kit.Space(Theme.Space1);
         }
 
@@ -664,10 +666,12 @@ internal sealed partial class ScreenHost
         var size = editor.PartSize;
         if (editor.PartIsMount)
         {
-            // A part that mounts has one size and no shape, and points out of the face it is put on.
+            // A part that mounts has no shape and points out of the face it is put on; only one made in several
+            // sizes (a cold gas array) is sized, with the buttons in the details panel or the sizing key.
             var spec = content.Blocks.Types[editor.Part].Mount!;
-            ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"MOUNTS ON A FACE: {spec.Side / (float)FaceMounts.PerCell:0.#} x {spec.Side / (float)FaceMounts.PerCell:0.#} CELL"), width);
-            ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, "NO SIZE, NO TURN"u8, width);
+            var side = spec.SideOf(editor.MountSize) / (float)FaceMounts.PerCell;
+            ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"MOUNTS ON A FACE: {side:0.#} x {side:0.#} CELL"), width);
+            ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, spec.Sizable ? Kit.F($"{editor.MountSize} x {editor.MountSize} NOZZLES, NO TURN") : "NO SIZE, NO TURN"u8, width);
             ClippedLine(_ui.Mono, Theme.FontCaption, ExhaustOrange, "POINTS OUT OF ITS FACE"u8, width);
         }
         else
@@ -1235,12 +1239,17 @@ internal sealed partial class ScreenHost
             }
             else
             {
+                // A part placed larger counts its type's figures once for each unit.
+                var units = FaceMounts.Units(mount);
                 ClippedLine(_ui.Mono, Theme.FontCaption, ExhaustOrange, FacingText(mount.Face), width);
-                ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"{mount.Type.Thrust:0.#} KN   {mount.Type.FuelBurn:0.####} KG/S   {mount.Type.Mass:0.###} T"), width);
+                if (mount.Type.Mount is { Sizable: true })
+                    ClippedLine(_ui.Mono, Theme.FontCaption, Theme.Text, Kit.F($"{mount.Size} x {mount.Size} NOZZLES"), width);
+                ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"{mount.Type.Thrust * units:0.#} KN   {mount.Type.FuelBurn * units:0.####} KG/S   {mount.Type.Mass * units:0.###} T"), width);
             }
             if (editor.IsMissing(mount.Parent))
                 Paragraph(Theme.Bad, "The ship has lost the block this sits on. Repair rebuilds both."u8, width);
             DrawGroupSelector(editor, width);
+            DrawSizeSelector(editor, width);
             Kit.Space(Theme.Space2);
             if (EditorButton("##placemore"u8, "Place more of these"u8, new float2(width, Kit.Px(26)), editor.CanEdit))
                 editor.CopySelection();
@@ -1259,6 +1268,7 @@ internal sealed partial class ScreenHost
                 ? Kit.F($"Click a face to place {part}, or drag a card onto the ship. Middle click a block to select it; Shift adds.")
                 : "Click or middle click a block to select it; Shift adds or removes one."u8, width);
             DrawTankFuelChoice(editor, content, width);
+            DrawMountSizeChoice(editor, width);
             if (editor.Clipboard.Length > 0)
             {
                 Kit.Space(Theme.Space1);

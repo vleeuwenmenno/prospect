@@ -1296,6 +1296,8 @@ internal sealed partial class WorldView
                 continue;
             var design = _designs[hull.Design];
             var thrustSlot = _thrust.Observe(hull);
+            // Lights that brighten with thrust (a cold gas array's bands) are told what the hull fires with its instance.
+            var thrustGlow = _thrust.Glow(snapshot.Content, hull.Thrust);
             // While the editor is open the draft is drawn in the ship's place, block by block, without its shield.
             if (_editShown && hull.Id == Editor.Hull && Editor.Draft is { } draft && Editor.Source is { } source)
             {
@@ -1337,12 +1339,16 @@ internal sealed partial class WorldView
             {
                 var mesh = _damage.Get(hull.Id, hull.Revision, design, hull.Blocks.Span, hull.Visual, snapshot.Content.Rules.DentMaxDepth);
                 var instance = MeshTransform(position, orientation, Vector3.One, design.Color, material, stretch);
+                instance.RockMarks = thrustGlow;
                 if (mesh is not null && _scene.AddDamage(frameIndex, mesh, instance, detail)) { DrawnDents += hull.Visual.Count; continue; }
                 DamageFallbacks++;
             }
             if (visual.Intact)
             {
+                var before = candidateCount;
                 Add(ref candidateCount, hull.Design, position, orientation, 1f, design.Color, material, stretch);
+                if (candidateCount > before)
+                    _candidates[before].Instance.RockMarks = thrustGlow;
                 continue;
             }
 
@@ -1367,8 +1373,10 @@ internal sealed partial class WorldView
                     var mount = design.MountOffsets[m];
                     mount.Z *= stretch;
                     var mountAt = position + Vector3.Transform(mount, orientation);
+                    var mountInstance = MeshTransform(mountAt, orientation, Vector3.One, design.Color, material, stretch);
+                    mountInstance.RockMarks = thrustGlow;
                     if (_partModels.TryGet(design.Mounts[m].Type, BlockShape.Box, design.MountHalfExtents[m], design.Mounts[m].Face, design.BlockSize, out var mountModel)
-                        && _scene.AddTriangles(frameIndex, mountModel, MeshTransform(mountAt, orientation, Vector3.One, design.Color, material, stretch)))
+                        && _scene.AddTriangles(frameIndex, mountModel, mountInstance))
                         continue;
                     Add(ref candidateCount, _cubeMesh, mountAt, orientation, design.MountHalfExtents[m] * 2f, design.Color, material, stretch);
                 }
@@ -3775,15 +3783,19 @@ internal sealed partial class WorldView
     /// engine on top of the ship's core, turned a quarter about y so that it faces right, as the pointer and
     /// <c>R</c> would leave it. With <paramref name="mount"/> (<c>--open edit-mount</c>) it holds the ghost of a
     /// cold gas thruster mounted on that face instead; with <paramref name="ion"/> (<c>--open edit-ion</c>) the engine
-    /// is an ion drive.
+    /// is an ion drive. <paramref name="mountSize"/> (<c>--mount-size</c>) is the size the mounted ghost is held in;
+    /// 0 keeps the part's default.
     /// </summary>
-    internal void HoldGhostForCapture(bool mount = false, bool ion = false, bool rings = false)
+    internal void HoldGhostForCapture(bool mount = false, bool ion = false, bool rings = false, int mountSize = 0)
     {
         _captureGhost = true;
         _captureRings = rings;
         _captureMount = mount;
         _captureIon = ion;
+        _captureMountSize = mountSize;
     }
+
+    private int _captureMountSize;
 
     /// <summary>
     /// For a capture (<c>--open edit-tank</c> and the like): from now on the editor holds the ghost of a part of type
@@ -4085,6 +4097,8 @@ internal sealed partial class WorldView
                 if (_capturePart is not null ? types[i].Id != _capturePart : types[i].Mount is null || types[i].Fuel != FuelKind.Nitrogen || EditorTuningCompact(types[i]))
                     continue;
                 Editor.ChoosePart(i);
+                if (_captureMountSize > 0)
+                    Editor.SetMountSize(_captureMountSize);
                 _captureGhostTurned = true;
                 break;
             }
@@ -4105,6 +4119,17 @@ internal sealed partial class WorldView
 
             if (best >= 0)
                 Editor.SetHover(new DraftHit(best, 2, boxes[best].At, 0f, EditorGeometry.Middle(boxes[best]) + new Vector3(0.22f, boxes[best].Size.Y * 0.5f, 0.2f)));
+
+            // A capture that names a size (--mount-size) is about the part: the camera closes on the ghost once.
+            if (_captureMountSize > 0 && !_captureFocused && Editor.HasMountGhost && Editor.Source is { } source && (uint)Editor.GhostMount.Parent < (uint)boxes.Length)
+            {
+                EditorGeometry.MountBounds(boxes[Editor.GhostMount.Parent], Editor.GhostMount, out var low, out var high);
+                _editPanGoal = EditorGeometry.ToHull((low + high) * 0.5f, source.Pivot, source.BlockSize);
+                _editDistanceGoal = 2.2f * source.BlockSize;
+                _editFocusing = true;
+                _captureFocused = true;
+            }
+
             return;
         }
 
@@ -4563,8 +4588,12 @@ internal sealed partial class WorldView
                 if (!Editor.BeginBlockResize(true))
                     return false;
             }
-            else if (control || pointerOverUi || !_devices.KeyPressed(GlfwKey.S)
-                || !((Editor.Placing && Editor.BeginPartSizing()) || Editor.BeginBlockResize(false)))
+            else if (control || pointerOverUi || !_devices.KeyPressed(GlfwKey.S))
+                return false;
+            // A part that mounts has no face to drag: the key steps it to its next size (a cold gas array's).
+            else if (Editor.Placing && Editor.PartIsMount && Editor.CycleMountSize())
+                return false;
+            else if (!((Editor.Placing && Editor.BeginPartSizing()) || Editor.BeginBlockResize(false)))
                 return false;
             _sizeVersion = Editor.Draft!.Version;
         }

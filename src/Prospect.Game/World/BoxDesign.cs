@@ -168,9 +168,11 @@ public sealed class BoxDesign
 
     /// <summary>
     /// The version <see cref="Write"/> writes: 2 added sizes, 3 shapes, 4 facings, 5 face mounts for thrusters, 6 for
-    /// module scanners and 7 a mount's action group (<c>"group"</c>, written only when set; older files have none).
+    /// module scanners, 7 a mount's action group (<c>"group"</c>, written only when set; older files have none) and
+    /// 8 a mount's size (<c>"size"</c>, written for a part made in several sizes; a mount that names none, in a
+    /// file of any version, has its type's <see cref="MountSpec.DefaultSize"/>).
     /// </summary>
-    public const int FormatVersion = 7;
+    public const int FormatVersion = 8;
 
     /// <summary>
     /// Loads legacy unit cells, version 2 boxes, version 3 shapes, version 4 facings, version 5 face mounts or version
@@ -273,7 +275,15 @@ public sealed class BoxDesign
                             group = listedGroup.GetInt32();
                             if (!ActionGroups.Valid(group)) throw new FormatException($"action group {group} is not 0 to {ActionGroups.Count}");
                         }
-                        mounts.Add(new DesignMount(entry.GetProperty("on"u8).GetInt32(), Facings.Parse(entry.GetProperty("face"u8).GetString()), place[0].GetInt32(), place[1].GetInt32(), catalog.Get(entry.GetProperty("type"u8).GetString()!), (byte)group));
+                        var mounted = catalog.Get(entry.GetProperty("type"u8).GetString()!);
+                        int units = FaceMounts.DefaultSize(mounted);
+                        if (entry.TryGetProperty("size"u8, out var listedSize))
+                        {
+                            if (version < 8) throw new FormatException("a mount's size requires version 8");
+                            units = listedSize.GetInt32();
+                            if (units is < 1 or > MountSpec.MaxSize) throw new FormatException($"size {units} is not 1 to {MountSpec.MaxSize}");
+                        }
+                        mounts.Add(new DesignMount(entry.GetProperty("on"u8).GetInt32(), Facings.Parse(entry.GetProperty("face"u8).GetString()), place[0].GetInt32(), place[1].GetInt32(), mounted, (byte)group, (byte)units));
                     }
                     catch (Exception e) when (e is InvalidDataException or InvalidOperationException or KeyNotFoundException or FormatException or OverflowException)
                     { throw new InvalidDataException($"{source}: mount {at}: {e.Message}", e); }
@@ -313,7 +323,7 @@ public sealed class BoxDesign
                 {
                     var width = FaceMounts.Of(blocks[block].Size, (Facings.Axis(face) + 1) % 3) * FaceMounts.PerCell;
                     var height = FaceMounts.Of(blocks[block].Size, (Facings.Axis(face) + 2) % 3) * FaceMounts.PerCell;
-                    var mount = new DesignMount(block, face, (width - spec.Side) / 2, (height - spec.Side) / 2, type);
+                    var mount = new DesignMount(block, face, (width - spec.Side) / 2, (height - spec.Side) / 2, type, Size: FaceMounts.DefaultSize(type));
                     if (FaceMounts.Check(blocks, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(mounts), mount) != DraftEdit.Done)
                         continue;
                     mounts.Add(mount);
@@ -326,17 +336,20 @@ public sealed class BoxDesign
                 continue;
             }
 
+            // An old thruster block's parts are of the type's default size: for a cold gas array that is the two by
+            // two that pushes what the old single thruster did, so the ship flies as it did.
             var n = Facings.Axis(facing);
-            var across = FaceMounts.PerCell / spec.Side;
+            var side = spec.SideOf(spec.DefaultSize);
+            var across = FaceMounts.PerCell / side;
             var pitch = FaceMounts.PerCell / across;
-            var inset = (pitch - spec.Side) / 2;
+            var inset = (pitch - side) / 2;
             var columns = FaceMounts.Of(blocks[block].Size, (n + 1) % 3) * across;
             var rows = FaceMounts.Of(blocks[block].Size, (n + 2) % 3) * across;
             for (var row = 0; row < rows; row++)
             {
                 for (var column = 0; column < columns && mounts.Count < limits.MaxMounts; column++)
                 {
-                    var mount = new DesignMount(block, facing, column * pitch + inset, row * pitch + inset, type);
+                    var mount = new DesignMount(block, facing, column * pitch + inset, row * pitch + inset, type, Size: (byte)spec.DefaultSize);
                     if (FaceMounts.Check(blocks, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(mounts), mount) == DraftEdit.Done)
                         mounts.Add(mount);
                 }
@@ -467,7 +480,9 @@ public sealed class BoxDesign
         foreach (var mount in _mounts)
         {
             _mountStart[mount.Parent + 1]++;
-            double m = mount.Type.Mass;
+            // A part placed larger weighs its type's mass once for each unit (BoxHullSums.MountFigures).
+            var units = FaceMounts.Units(mount);
+            var m = units == 1 ? mount.Type.Mass : (double)mount.Type.Mass * units;
             if (!double.IsFinite(m) || m <= 0) throw new InvalidDataException($"{source}: mounts: mass outside numeric range");
             var centre = MountMiddle(mount);
             mass += m; x += m * centre.X; y += m * centre.Y; z += m * centre.Z;
@@ -498,7 +513,7 @@ public sealed class BoxDesign
     public static Vector3 MountSize(in DesignMount mount)
     {
         var spec = mount.Type.Mount!;
-        var size = new Vector3(spec.Side / (float)FaceMounts.PerCell);
+        var size = new Vector3(spec.SideOf(mount.Size) / (float)FaceMounts.PerCell);
         size[Facings.Axis(mount.Face)] = spec.Depth / (float)FaceMounts.PerCell;
         return size;
     }
@@ -561,6 +576,7 @@ public sealed class BoxDesign
             w.WriteStartObject(); w.WriteString("type"u8, m.Type.Id); w.WriteNumber("on"u8, m.Parent); w.WriteString("face"u8, Facings.Name(m.Face));
             w.WriteStartArray("at"u8); w.WriteNumberValue(m.U); w.WriteNumberValue(m.V); w.WriteEndArray();
             if (m.Group != ActionGroups.None) w.WriteNumber("group"u8, m.Group);
+            if (m.Type.Mount is { Sizable: true }) w.WriteNumber("size"u8, m.Size);
             w.WriteEndObject();
         }
         w.WriteEndArray(); w.WriteEndObject();

@@ -127,14 +127,14 @@ public sealed class MountGroupTests
         using var stream = new MemoryStream();
         design.Write(stream);
         var text = Encoding.UTF8.GetString(stream.ToArray());
-        Assert.Contains("\"version\":7", text);
+        Assert.Contains($"\"version\":{BoxDesign.FormatVersion}", text);
         Assert.Contains("\"group\":5", text);
         Assert.DoesNotContain("\"group\":0", text);
         var again = BoxDesign.Read(stream.ToArray(), Content.Blocks, "again.json");
         Assert.Equal(mounts.OrderBy(mount => mount, Comparer<DesignMount>.Create(FaceMounts.Compare)), again.Mounts.ToArray());
 
         // A file of version 6 had no groups: one that names one is refused, as is a group outside 0 to 10 and one on a part that has none.
-        var older = text.Replace("\"version\":7", "\"version\":6");
+        var older = text.Replace($"\"version\":{BoxDesign.FormatVersion}", "\"version\":6");
         Assert.Contains("version 7", Assert.Throws<InvalidDataException>(() => BoxDesign.Read(Encoding.UTF8.GetBytes(older), Content.Blocks, "old.json")).Message);
         var wide = text.Replace("\"group\":5", "\"group\":11");
         Assert.Throws<InvalidDataException>(() => BoxDesign.Read(Encoding.UTF8.GetBytes(wide), Content.Blocks, "wide.json"));

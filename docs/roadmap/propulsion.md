@@ -14,12 +14,13 @@
 - **Built:** tank models: round vessels in an open frame ("Decided: tank models" below).
 - **Built:** tanks, sensors and scanners are never slanted ("Decided: parts never slanted" below).
 - **Built:** the module scanners mount on faces too ("Decided: scanners mount" below).
-- Protocol 65, save layout 18, design encoding 4, design file version 6, evaluator 18.
+- **Built:** the cold gas thruster is an array placed in three sizes ("Decided: cold gas arrays" below).
+- Protocol 72, save layout 23, design encoding 6, design file version 8, evaluator 21.
 
 ## Decided: parts
 
 - Thrusters are replaced by two kinds:
-  - **Cold gas thrusters** (`coldGasThruster`): small to medium. They puff compressed nitrogen.
+  - **Cold gas thruster arrays** (`coldGasThruster`): small to medium, in three sizes. They puff compressed nitrogen.
   - **Hot thrusters** (`hotThruster`): bigger and stronger, small rocket engines that push the hull sideways.
 - **Engines** (`engine`) are the large main drives.
 - Engines are **rotatable** to face any of the six directions and push only the opposite way. A thruster mounts
@@ -263,8 +264,8 @@ Built. Rules live in `FlightModel.Step`; `PropulsionTests`, `PowerFlowTests` and
     - A faceted base plate over the whole footprint, corners cut, top edge bevelled, bolted at its four corners.
     - A small octagonal housing on the plate, with a valve box at its side.
     - One to four nozzles on the housing's front: `perCell` per cell of the footprint, at most two a side.
-    - Cold gas: a quad of small nozzles. Microthruster: one. Hot thruster: one small engine (seam, pipes, collar with
-      brackets, bell). Ion thruster: one grid emitter.
+    - Microthruster: one. Hot thruster: one small engine (seam, pipes, collar with brackets, bell). Ion thruster:
+      one grid emitter. A cold gas thruster is not a pod but an array ("Decided: cold gas arrays").
   - Ion parts (`grid` in the entry, bars each way) end in an emitter instead of a bell: a short faceted ring on the
     body (`nozzleLength` exit radii high, `lip` thick), a dark disc a little below its rim and a grid of thin bars on
     it. An ion drive's body is the engine's mount block and octagonal housing. No collar.
@@ -392,8 +393,9 @@ Built. Rules live in `FaceMounts`; `PropulsionTests`, `BuildDraftTests` and `Edi
 - A mount names **its block** (design index), **the face** (one of six) and **where on the face** it is.
 - Positions are whole **tenths of a cell**, from the face's low corner: `at: [u, v]` along the axes after the
   face's own (`(axis + 1) % 3`, then `(axis + 2) % 3`).
-- Its footprint is a square: `side` and `depth` in tenths, per type. Cold gas 0.4 x 0.4, hot 0.5 x 0.5, both
-  0.2 deep. Four of either fit a one-cell face.
+- Its footprint is a square: `side` and `depth` in tenths, per type. Hot 0.5 x 0.5, a cold gas array 0.2, 0.4 or
+  0.6 a side by its size ("Decided: cold gas arrays"), all 0.2 deep. Four hot thrusters or four 2 x 2 arrays fit a
+  one-cell face.
 - A mount is never deeper than 0.2 cell: the shield stands 0.3 off the blocks, so a mount is always inside it.
 
 ### It points out of its face, and no other way
@@ -478,7 +480,7 @@ Placing and picking:
 
 - A thruster card places a mount. The ghost is only the thruster's model and box outline, on the face under the
   pointer, snapped to tenths, with its exhaust line. Green where it has room, red with the reason where not.
-- `S` and `R` do nothing for it. The part list says so.
+- `R` does nothing for it, and `S` only steps the size of a cold gas array. The part list says so.
 - Select it with a middle click (Shift adds), delete it with Delete, undo with Ctrl+Z.
 - Copying a block copies what is mounted on it. Copying a thruster alone picks it as the part to place.
 
@@ -504,6 +506,62 @@ And the rest:
 - Its nozzle is in the hull's nozzle list under its block, so plumes are lit and lost with the block.
 - Check with `--open edit-mount` and `--thrust` captures (`AGENTS.md`).
 
+## Decided: cold gas arrays
+
+Built. Rules live in `FaceMounts` and `MountSpec`; the model in `PropulsionModels.ColdGas.cs`. `MountSizeTests` holds them.
+
+### Sizes
+
+- A cold gas thruster is an **array** of nozzles, placed in one of three sizes: 1 x 1, 2 x 2 or 3 x 3.
+- Footprint: 0.2 cell a nozzle, so 0.2, 0.4 or 0.6 of a cell a side. Always 0.2 deep.
+- Thrust, fuel burn, power draw and mass follow the **nozzle count**. The figures in `blocks.json` are one nozzle's.
+- Why 2 x 2 is the old thruster: the old pod already had four nozzles on a 0.4 footprint. A 2 x 2 array has the old
+  footprint and, to the bit, the old thrust, burn, power and mass. So one nozzle is a quarter of the old mount.
+- The size is a general mount capability: `"sizes"` and `"defaultSize"` in a type's `mount` entry. Only thrust parts
+  may have it. Today only `coldGasThruster` does.
+
+### What a design must hold to
+
+- `FaceMounts.Check` is still the one rule. It refuses a size the part is not made in, a footprint that hangs over
+  the face, and one that shares volume with a block or another mount.
+- An edit that leaves an array without room takes it away in the same undo step, as for any mount.
+- Mirrored copies have the size of the original.
+
+### Files and bytes
+
+- Design file version 8: `"size": 3` on a mount. Written for a part made in several sizes.
+- A mount that names no size has its type's `defaultSize`: 2 for the array. So **files of every older version load
+  and fly as they did**. Converted thruster blocks of versions 1 to 4 carry 2 x 2 arrays, four a cell.
+- Canonical bytes version 6: one byte a mount, after its action group.
+- Old saved worlds and old servers are refused untouched: encoding 6, evaluator 21, protocol 72.
+
+### Editor
+
+- While placing: the **ARRAY SIZE** buttons in the details panel, or `S` to step to the next size. The ghost, the
+  footprint line and the part card's figures follow. The choice is kept for the next array.
+- A placed one: the same buttons when it is selected, or **Size** in its right-click menu.
+  - It keeps its middle, moved in from an edge it would hang over. One undo step. Never mirrored.
+  - A size with no room on its face is off ("FACE TOO SMALL", "NO ROOM").
+- Copying a placed array picks it to place in the size it has.
+
+### Model and lights
+
+- A stepped grey plate with cut corners: orange caps on the corners, one cyan slot in each side.
+- On it, short dark flared cups in a grid, one a nozzle, the same size on every array. Ribs between the units.
+- Each cup has a cyan band round its foot and another inside its mouth.
+- **The bands brighten while that array fires.** They read `HullView.Thrust`, as the plumes do: the hull's mesh
+  instance is told which way its arrays fire. Idle, the foot band glows faintly and the mouth is dark.
+- Every nozzle has its own entry in the design's nozzle list, so every cup shows its own puff.
+- Figures are the `array` entry of `coldGasThruster` in `content/visuals/propulsion.json`, validated on load.
+- Check with `--open edit-mount --mount-size 1|2|3` and `--thrust left` captures (`AGENTS.md`).
+
+### Not done
+
+- The Prospector keeps its 52 arrays at 2 x 2: that is its old layout, and its balance is pinned by tests.
+- The drone's `microthruster` has one size.
+- The lights of an array on a hull drawn block by block (lost blocks, far away) follow thrust too; the editor's
+  draft and ghost never fire.
+
 ## Decided: provisional figures
 
 All in `content/blocks/blocks.json`. Tunable; change them there, never in code.
@@ -516,10 +574,13 @@ All in `content/blocks/blocks.json`. Tunable; change them there, never in code.
 | Mount | Thrust each | Fuel | Burn each at full thrust | Power at full thrust | Mass | Footprint |
 | --- | --- | --- | --- | --- | --- | --- |
 | `hotThruster` | 160 kN | hydrazine | 0.015 kg/s | 0.1 MW | 0.75 t | 0.5 x 0.5 x 0.2 cell |
-| `coldGasThruster` | 100 kN | nitrogen | 0.0075 kg/s | 0.0375 MW | 0.45 t | 0.4 x 0.4 x 0.2 cell |
+| `coldGasThruster`, per nozzle | 25 kN | nitrogen | 0.001875 kg/s | 0.009375 MW | 0.1125 t | 0.2 x 0.2 x 0.2 cell |
+| the same as a 2 x 2 array | 100 kN | nitrogen | 0.0075 kg/s | 0.0375 MW | 0.45 t | 0.4 x 0.4 x 0.2 cell |
+| the same as a 3 x 3 array | 225 kN | nitrogen | 0.016875 kg/s | 0.084375 MW | 1.0125 t | 0.6 x 0.6 x 0.2 cell |
 | `microthruster` | 7.5 kN | nitrogen | 0.00075 kg/s | 0.0075 MW | 0.0375 t | 0.4 x 0.4 x 0.2 cell |
 
-- A mount is a quarter of what a one-cell thruster block was, in every figure: four on a face are that block.
+- A hot thruster, or a 2 x 2 cold gas array, is a quarter of what a one-cell thruster block was, in every figure:
+  four on a face are that block.
 - No shipped block has a `maxSide` now. The field stays.
 
 | Tank | Holds per cell | Mass |
@@ -567,7 +628,7 @@ With mounts, same mass, thrust and burn as with thruster blocks, so the shipped 
 
 | Design | Blocks | Mounts | Where | Hull points |
 | --- | --- | --- | --- | --- |
-| Prospector | 41 | 80: 52 cold gas, 4 hot, 2 ion thrusters, 6 scanners, 2 tractor beams, 2 mining lasers | braking on the racks' fronts (16), sideways on their outer sides (12 each), up under the gyros (12), down on the deck (12) | 17,540 |
+| Prospector | 41 | 80: 52 cold gas arrays (all 2 x 2), 4 hot, 2 ion thrusters, 6 scanners, 2 tractor beams, 2 mining lasers | braking on the racks' fronts (16), sideways on their outer sides (12 each), up under the gyros (12), down on the deck (12) | 17,540 |
 | Drone | 14 (was 15) | 24 ion thrusters | four each on the top and bottom, right and left, eight on the front (top and bottom blocks) | 500 (was 490) |
 
 - The ships are more compact, so they turn a little differently (drone 38, 45, 40 deg/s; was 39, 43, 45). The

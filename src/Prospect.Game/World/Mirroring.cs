@@ -95,19 +95,20 @@ public static class Mirroring
 
     /// <summary>
     /// A mounted part mirrored across the planes of <paramref name="mask"/>, given its parent box and that box
-    /// mirrored the same way. The face flips on a mirrored axis and its square is reflected across the face. The
+    /// mirrored the same way. The face flips on a mirrored axis and its square is reflected across the face; its size and
+    /// action group stay. The
     /// result's <see cref="DesignMount.Parent"/> is left as it was: the caller knows where the mirrored parent is.
     /// </summary>
     public static DesignMount Mount(in DesignBox parent, in DesignBox mirroredParent, in DesignMount mount, int mask, GridSize centre2)
     {
-        var spec = mount.Type.Mount!;
+        var side = FaceMounts.Side(mount);
         var n = Facings.Axis(mount.Face);
         int a = (n + 1) % 3, b = (n + 2) % 3;
         return mount with
         {
             Face = Facing(mount.Face, mask),
-            U = Across(parent.At, mirroredParent.At, mount.U, spec.Side, a, mask, centre2),
-            V = Across(parent.At, mirroredParent.At, mount.V, spec.Side, b, mask, centre2),
+            U = Across(parent.At, mirroredParent.At, mount.U, side, a, mask, centre2),
+            V = Across(parent.At, mirroredParent.At, mount.V, side, b, mask, centre2),
         };
     }
 

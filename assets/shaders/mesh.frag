@@ -13,6 +13,8 @@ layout(location = 0) out vec4 outColor;
 layout(location = 7) flat in uvec4 markMask;
 layout(location = 8) flat in vec4 oreFigures;
 layout(location = 9) flat in float crystal;
+// How much of its full colour a light that follows thrust gains now (mesh.vert); 0 for every other light.
+layout(location = 10) flat in float thrustLit;
 struct RockMark { vec4 centerRadius; vec4 normalScorch; vec4 glow; };
 layout(std430, set = 0, binding = 3) readonly buffer RockMarks { RockMark marks[]; } rock;
 
@@ -153,7 +155,10 @@ void main()
     else if (paint.r >= 0.0 && metal < -1.5)
     {
         // Emissive paint (such as a tractor turret's recessed lens): glows softly regardless of star angle.
-        vec3 glow = mix(paint, albedo, 0.08) * 1.9;
+        // A light that follows thrust (a cold gas array's bands) gains its own hue at full strength, times thrustLit,
+        // while its nozzle fires: a band that is all but dark at idle still lights up.
+        vec3 hue = paint / max(max(paint.r, paint.g), max(paint.b, 1.0 / 31.0));
+        vec3 glow = (mix(paint, albedo, 0.08) + hue * thrustLit) * 1.9;
         outColor = vec4(glow, color.a > 1.5 ? 0.5 : color.a > 0.5 ? 0.375 : 0.25);
         return;
     }

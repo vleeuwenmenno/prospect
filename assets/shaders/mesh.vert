@@ -29,12 +29,17 @@ layout(location = 6) flat out vec3 paint;
 // have a length of 1.25 (OreChunkModels).
 layout(location = 8) flat out vec4 oreFigures;
 layout(location = 9) flat out float crystal;
+// A light that brightens with thrust (a cold gas array's bands): how much of its full colour it gains now, 0 while its
+// nozzle is idle. Such a facet's normal is 5.5 or over long (PropulsionModels.Lit) and points the way the nozzle does;
+// on a hull, rockMarks carries which way its cold gas nozzles fire, in the hull's frame, and the gain at full thrust.
+layout(location = 10) flat out float thrustLit;
 
 void main()
 {
     int slot = int((tint.a + 0.5) * 0.25);
     bool ore = tint.a > 0.02 && tint.a < 0.125;
-    markMask = ore ? uvec4(0u) : uvec4(rockMarks);
+    bool hull = tint.a - 4.0 * float(slot) > 0.5;
+    markMask = ore || hull ? uvec4(0u) : uvec4(rockMarks);
     oreFigures = ore ? rockMarks : vec4(0.0);
     vec4 p = vec4(position, 1.0);
     worldPosition = vec3(dot(row0, p), dot(row1, p), dot(row2, p));
@@ -49,7 +54,14 @@ void main()
     float tag = length(normal);
     metal = tag > 1.5 && tag < 3.25 ? tag - 2.0 : (tag >= 4.5 ? -2.0 : -1.0);
     paint = vec3(-1.0);
-    if (tag >= 4.5)
+    thrustLit = 0.0;
+    if (tag >= 5.5)
+    {
+        float code = floor((tag - 5.5) * 32768.0);
+        paint = vec3(floor(code / 1024.0), mod(floor(code / 32.0), 32.0), mod(code, 32.0)) / 31.0;
+        thrustLit = hull ? rockMarks.w * max(dot(rockMarks.xyz, normal / tag), 0.0) : 0.0;
+    }
+    else if (tag >= 4.5)
     {
         float code = floor((tag - 4.5) * 32768.0);
         paint = vec3(floor(code / 1024.0), mod(floor(code / 32.0), 32.0), mod(code, 32.0)) / 31.0;

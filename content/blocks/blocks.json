@@ -139,7 +139,7 @@
     "battery": { "name": "Battery", "mass": 3.0, "hull": 150, "energyStorage": 60 },
     "engine": { "name": "Engine", "mass": 3.5, "hull": 200, "thrust": 800, "powerDraw": 1.0, "fuel": "bipropellant", "fuelBurn": 0.2 },
     "hotThruster": { "name": "Hot thruster", "mass": 0.75, "hull": 0, "thrust": 160, "powerDraw": 0.1, "fuel": "hydrazine", "fuelBurn": 0.015, "mount": { "side": 5, "depth": 2, "legacyBlock": "hull" } },
-    "coldGasThruster": { "name": "Cold gas thruster", "mass": 0.45, "hull": 0, "thrust": 100, "powerDraw": 0.0375, "fuel": "nitrogen", "fuelBurn": 0.0075, "mount": { "side": 4, "depth": 2, "legacyBlock": "hull" } },
+    "coldGasThruster": { "name": "Cold gas array", "mass": 0.1125, "hull": 0, "thrust": 25, "powerDraw": 0.009375, "fuel": "nitrogen", "fuelBurn": 0.001875, "mount": { "side": 2, "depth": 2, "legacyBlock": "hull", "sizes": [1, 2, 3], "defaultSize": 2 } },
     "ionDrive": { "name": "Ion drive", "mass": 2.0, "hull": 150, "thrust": 100, "powerDraw": 3.0, "ion": true },
     "ionThruster": { "name": "Ion thruster", "mass": 0.3, "hull": 0, "thrust": 12.5, "powerDraw": 0.375, "ion": true, "mount": { "side": 4, "depth": 2, "legacyBlock": "hull" } },
     "bipropellantTank": { "name": "Bipropellant tank", "boxOnly": true, "mass": 3.0, "hull": 180, "tank": "bipropellant", "fuelCapacity": 1000 },

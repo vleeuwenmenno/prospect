@@ -50,7 +50,7 @@ public sealed class PropulsionVisualTests
     private static HullDesign Mounted(string type, BlockFacing face) =>
         TestDesigns.Mounted(
             [new DesignBox(new GridSize(0, 0, 0), One, Content.Blocks.Get("core")), new DesignBox(new GridSize(2, 0, 0), One, Content.Blocks.Get("hull"))],
-            [new DesignMount(1, face, 3, 3, Content.Blocks.Get(type))]);
+            [new DesignMount(1, face, 3, 3, Content.Blocks.Get(type), Size: FaceMounts.DefaultSize(Content.Blocks.Get(type)))]);
 
     [Theory]
     [InlineData("hotThruster")]
@@ -92,7 +92,7 @@ public sealed class PropulsionVisualTests
                 Assert.True(Vector3.Dot(cross, new Vector3(a.Normal.X, a.Normal.Y, a.Normal.Z)) > 0, $"{type} {face} triangle {i / 3}");
             }
 
-            // Its nozzles (a quad for a cold gas pod, one for the others) at the outer end of the box, pointing out
+            // Its nozzles (four for a two by two cold gas array, one for the others) at the outer end of the box, pointing out
             // of the face. They are lit and lost with the block it sits on, so that is the block they name.
             Assert.Equal(type == "coldGasThruster" ? 4 : 1, nozzles.Count);
             foreach (var nozzle in nozzles)
@@ -194,7 +194,6 @@ public sealed class PropulsionVisualTests
 
     [Theory]
     [InlineData("hotThruster", 1)]
-    [InlineData("coldGasThruster", 4)]
     [InlineData("microthruster", 1)]
     [InlineData("ionThruster", 1)]
     [InlineData("microIonThruster", 1)]
