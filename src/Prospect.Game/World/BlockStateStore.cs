@@ -49,10 +49,10 @@ public sealed unsafe partial class BlockStateStore : IDisposable
     private const int Classes = ChunkShift - SmallestShift + 1;
 
     /// <summary>
-    /// What sits in front of a state's memory; forty-eight bytes, so what follows stays aligned. After it come the
+    /// What sits in front of a state's memory; fifty-six bytes, so what follows stays aligned. After it come the
     /// alive words, then the sums, then the hit points if the state has them.
     /// </summary>
-    [StructLayout(LayoutKind.Sequential, Size = 48)]
+    [StructLayout(LayoutKind.Sequential, Size = 56)]
     private struct Header
     {
         public int Blocks;
@@ -69,6 +69,10 @@ public sealed unsafe partial class BlockStateStore : IDisposable
         public int CargoCount;
         public int CargoCapacity;
         public uint CargoRevision;
+
+        /// <summary>How many ore bins the design has: what they hold follows the cargo records.</summary>
+        public int Bins;
+        public uint OreRevision;
     }
 
     private struct Slot
@@ -114,15 +118,15 @@ public sealed unsafe partial class BlockStateStore : IDisposable
     public static long BytesFor(HullDesign design, bool hitPoints) =>
         sizeof(Header) + (long)BlockSet.WordCount(design.BlockCount) * sizeof(ulong) + design.Sums.StorageBytes + (hitPoints ? (long)design.BlockCount * sizeof(float) : 0) + (long)design.BlockCount * sizeof(int) + (long)design.Collision.IntactCounts.Length * sizeof(int)
         + TankPadding(design.BlockCount, hitPoints) + (long)design.Tanks.Length * sizeof(double)
-        + (long)CargoCapacityFor(design) * sizeof(HoldContainer);
+        + (long)CargoCapacityFor(design) * sizeof(HoldContainer) + (long)design.Bins.Length * sizeof(OreBin);
 
     // Before the tanks come four bytes for each block's hit points, if kept, four for each loss and four for each
     // of the 2n - 1 collision counts; everything before those is a multiple of eight.
     private static int TankPadding(int blocks, bool hitPoints) => (int)(((hitPoints ? 4L : 3L) * blocks - 1) * sizeof(int) & 7) == 0 ? 0 : 4;
 
     /// <summary>
-    /// Takes the block state of an intact hull of a design: every block alive, none lost, every tank full, and
-    /// the design's intact sums, copied. With <paramref name="hitPoints"/> it also holds each block's hit points,
+    /// Takes the block state of an intact hull of a design: every block alive, none lost, every tank full, every
+    /// ore bin empty, and the design's intact sums, copied. With <paramref name="hitPoints"/> it also holds each block's hit points,
     /// full; a prediction baseline also needs these to reproduce block losses.
     /// </summary>
     public BlockStateHandle Create(HullDesign design, bool hitPoints)
@@ -156,7 +160,7 @@ public sealed unsafe partial class BlockStateStore : IDisposable
 
         var header = (Header*)slot.Memory;
         var tanks = design.Tanks;
-        *header = new Header { Blocks = blocks, Nodes = design.Sums.NodeCount, HasHitPoints = hitPoints ? 1 : 0, Tanks = tanks.Length, CargoCapacity = CargoCapacityFor(design) };
+        *header = new Header { Blocks = blocks, Nodes = design.Sums.NodeCount, HasHitPoints = hitPoints ? 1 : 0, Tanks = tanks.Length, CargoCapacity = CargoCapacityFor(design), Bins = design.Bins.Length };
         BlockSet.Fill(new Span<ulong>(header + 1, words), blocks);
         design.Sums.Intact.CopyTo(SumsOf(header));
         design.Collision.IntactCounts.CopyTo(CollisionCountsOf(header));
@@ -169,6 +173,7 @@ public sealed unsafe partial class BlockStateStore : IDisposable
         var levels = TanksOf(header);
         for (var i = 0; i < tanks.Length; i++)
             levels[i] = tanks[i].Capacity;
+        BinsOf(header).Fill(OreBin.Empty);
         return new BlockStateHandle(index, slot.Generation);
     }
 
@@ -369,6 +374,7 @@ public sealed unsafe partial class BlockStateStore : IDisposable
             TanksOf(header)[tank] = 0.0;
 
         RemoveCargoOf(header, block);
+        RemoveOreOf(header, design, block);
         design.Sums.Lose(SumsOf(header), alive, block);
         design.Collision.Lose(CollisionCountsOf(header), block);
         return true;

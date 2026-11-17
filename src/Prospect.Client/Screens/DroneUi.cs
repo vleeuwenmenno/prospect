@@ -122,8 +122,9 @@ internal static class DroneUi
 /// Escape (<see cref="ScreenHost.BackStep.DronePopup"/>). It belongs to one hull: another hull, or a hull that has
 /// lost its bays, closes it. Like the fuel callout it stays open while the pointer is captured again; it only takes
 /// presses while the pointer is shown, which is when ImGui is given the mouse at all. What its buttons do is
-/// <see cref="DroneUi"/>'s: the same launch and recall as the keys, and the server's own setting for auto pickup, which
-/// the checkbox reads back from <see cref="BayView.AutoPickup"/> rather than keeping a copy of its own.
+/// <see cref="DroneUi"/>'s: the same launch and recall as the keys, and the server's own settings ("Pick up cargo" and
+/// "Pick up ores"), which the checkboxes read back from <see cref="BayView.AutoPickup"/> and
+/// <see cref="BayView.PickUpOres"/> rather than keeping a copy of their own.
 /// </summary>
 internal sealed class DronePopup
 {
@@ -165,7 +166,14 @@ internal sealed class DronePopup
 
     /// <summary>The checkbox flips the server's setting, read from the view: a lost message shows as a box that did not change.</summary>
     public static void ToggleAutoPickup(in BayView view, uint ownHull, PlayerInputBridge bridge) =>
-        bridge.SetDroneAutoPickup(ownHull, !view.AutoPickup);
+        bridge.SetDroneSettings(ownHull, !view.AutoPickup, view.PickUpOres);
+
+    /// <summary>
+    /// The "Pick up ores" checkbox, by the same rule: it flips the server's setting as the view has it and leaves
+    /// "Pick up cargo" as the view has it, since the two travel in one message.
+    /// </summary>
+    public static void ToggleOres(in BayView view, uint ownHull, PlayerInputBridge bridge) =>
+        bridge.SetDroneSettings(ownHull, view.AutoPickup, !view.PickUpOres);
 }
 
 /// <summary>

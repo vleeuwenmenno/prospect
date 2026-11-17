@@ -103,7 +103,8 @@ public sealed class MiningRules
 
 /// <summary>
 /// A loose chunk of ore a mining laser broke off a rock. Server-owned, in a fixed pool of its own
-/// (<see cref="OreChunks"/>), replicated and saved. Ready for the ore hopper (R4): its resource, grade and mass.
+/// (<see cref="OreChunks"/>), replicated and saved: its resource, grade and mass. A tractor beam takes it to an ore
+/// hopper's intake, or drones bring it to the beam; the claim of either is transient and starts over on a load.
 /// </summary>
 public struct OreChunk
 {
@@ -125,14 +126,39 @@ public struct OreChunk
     /// <summary>Tick it broke off and unattended ticks since, as free containers keep them.</summary>
     public long Born, Age;
 
+    /// <summary>
+    /// Transient exclusive tractor claim: the hull (packed handle, zero for none), its tractor mount and the hopper
+    /// block the chunk is led to. Sent, so a client predicts the beam's power and draws it; a load starts over.
+    /// </summary>
+    public uint TractorHull;
+    public int TractorMount, TractorHopper;
+
+    /// <summary>0 while travelling to the point outside the intake, 1 on the glide into it.</summary>
+    public byte TractorStage;
+    public bool TractorPowered;
+
+    /// <summary>Server-only, never sent or saved: the least path left so far (0 = not set) and the ticks without gaining on it.</summary>
+    public float TractorBest;
+    public int TractorIdle;
+
+    /// <summary>Server-only, never sent or saved: the first tick a tractor may take the chunk again after one let it go.</summary>
+    public long RetryTick;
+
+    /// <summary>
+    /// Server-only, never sent or saved: the hull whose drones are fetching the chunk (packed handle, zero for none)
+    /// and the tractor mount they hand it to. While set, no tractor acquires it and no other drones are sent for it.
+    /// </summary>
+    public uint FetchHull;
+    public int FetchMount;
+
     /// <summary>Kilograms of ore in it.</summary>
     public readonly float OreKg => Mass * Grade;
 }
 
 /// <summary>
-/// Fixed storage for loose ore chunks, apart from the containers' pool: chunks carry no cargo payload, claim or
-/// tractor state, and neither the tractor nor the drones look at them until the ore hopper (R4). Stable ids are never
-/// reused within a world. Takes no memory after construction.
+/// Fixed storage for loose ore chunks, apart from the containers' pool: chunks carry no cargo payload and no
+/// player's claim, and go to an ore hopper, never a rack. Stable ids are never reused within a world. Takes no memory
+/// after construction.
 /// </summary>
 public sealed class OreChunks
 {
@@ -189,7 +215,20 @@ public sealed class OreChunks
         _items.AsSpan(items.Length, _count > items.Length ? _count - items.Length : 0).Clear();
         _count = items.Length;
         _next = next;
+        for (var i = 0; i < _count; i++)
+        {
+            ClearTractor(ref _items[i]);
+            ClearFetch(ref _items[i]);
+            _items[i].RetryTick = 0;
+        }
     }
+
+    /// <summary>Drops a chunk's tractor claim: on a load, when the beam lets go, or for a client that cannot see the pulling hull.</summary>
+    public static void ClearTractor(ref OreChunk item)
+    { item.TractorHull = 0; item.TractorMount = 0; item.TractorHopper = 0; item.TractorStage = 0; item.TractorPowered = false; item.TractorBest = 0; item.TractorIdle = 0; }
+
+    /// <summary>Lets go of a chunk drones were fetching: it stays where it is, with the motion it has.</summary>
+    public static void ClearFetch(ref OreChunk item) { item.FetchHull = 0; item.FetchMount = 0; }
 
     /// <summary>Removes one chunk without changing any surviving identity.</summary>
     public void Remove(int index)
@@ -304,6 +343,10 @@ public sealed class OreChunkSimulation
             for (var h = 0; h < field.Hulls.Slots && budget > 0; h++)
             {
                 if (!field.Hulls.IsAliveAt(h)) continue;
+                // A chunk the hull's own tractor is leading into a hopper passes the hull's blocks, as a held
+                // container does; drones carrying one never knock it away. Rocks and other hulls still hit it.
+                if (c.TractorPowered && c.TractorHull == field.Hulls.HandleAt(h).Packed) continue;
+                if (c.FetchHull != 0 && field.Hulls.Info(h).WorkDrone) continue;
                 ref var state = ref field.Hulls.State(h);
                 if (state.Jump == JumpPhase.Tunnel) continue;
                 var design = field.Designs[field.Hulls.Info(h).Design];

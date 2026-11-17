@@ -1026,6 +1026,8 @@ internal sealed partial class ScreenHost
         PartRole.Cargo => Kit.F($"{f.Cargo:0.#} u CARGO"),
         PartRole.Tractor => "AUTOMATIC CARGO PICKUP"u8,
         PartRole.Laser => "CUTS ROCK"u8,
+        PartRole.Bin => Kit.F($"HOLDS {f.Ore:0} KG OF ONE ORE"),
+        PartRole.Hopper => "TAKES ORE CHUNKS INTO THE BINS"u8,
         PartRole.Crew => Kit.F($"{f.Crew:0} CREW"),
         PartRole.Drive => Kit.F($"CHARGES AT {f.FtlPower:0.#} MW"),
         PartRole.Core => Kit.F($"DRAWS {f.PowerDraw:0.##} MW"),
@@ -1918,6 +1920,8 @@ internal sealed partial class ScreenHost
         PartRole.Tractor => "Tractor beam: pulls containers into reachable racks"u8,
         PartRole.Laser => "Mining laser: cuts rock while its action group fires"u8,
         PartRole.Bay => "Drone bay: drones leave and dock through its hatch"u8,
+        PartRole.Bin => "Ore bin: holds one ore at a time"u8,
+        PartRole.Hopper => "Ore hopper: its intake face takes ore chunks"u8,
         PartRole.Crew => "Crew quarters"u8,
         _ => "Structure and armour"u8,
     };

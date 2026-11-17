@@ -55,4 +55,31 @@ public static class TractorPath
         guide = new TractorGuide(slot, staging, exit, half, TractorReach.Half(box, cell).Length() * 2);
         return true;
     }
+
+    /// <summary>
+    /// The path of an ore chunk of half edge <paramref name="half"/> that <paramref name="mount"/> leads into the
+    /// intake of <paramref name="hopper"/>: to a point outside the intake face, in line with its middle along the face
+    /// normal and clear of it by the chunk's half edge and <paramref name="margin"/>, then straight in until the
+    /// chunk's centre is a half edge (at most half the hopper's depth) inside the face, where the hopper takes it.
+    /// False when the mount does not see the intake.
+    /// </summary>
+    public static bool TryGuideIntake(HullDesign design, ReadOnlySpan<ulong> alive, int mount, int hopper, float half, float margin, out TractorGuide guide)
+    {
+        guide = default;
+        var boxes = design.Boxes; var cell = design.BlockSize;
+        if (!TractorReach.Intake(boxes, design.Mounts, alive, cell, mount, hopper, out _)) return false;
+        var box = boxes[hopper];
+        var side = box.Facing;
+        var axis = Facings.Axis(side); var sign = Facings.Sign(side);
+        var middle = TractorReach.Middle(box, cell); var extent = TractorReach.Half(box, cell);
+        var plane = middle[axis] + sign * extent[axis];
+        var slot = middle;
+        slot[axis] = plane - sign * Math.Min(half, extent[axis]);
+        var staging = middle;
+        staging[axis] = plane + sign * (half + margin);
+        var exit = TractorReach.Emitter(boxes, design.Mounts[mount], cell)
+            + Facings.Vector(design.Mounts[mount].Face) * (half * 1.75f + margin);
+        guide = new TractorGuide(slot, staging, exit, new Vector3(half), extent.Length() * 2);
+        return true;
+    }
 }

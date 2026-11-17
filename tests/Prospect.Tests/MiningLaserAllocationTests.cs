@@ -220,7 +220,8 @@ public sealed class MiningLaserAllocationTests
         world.PublishLasers(snapshot, 300);
         Assert.Equal((OreChunks.Capacity, 20L), (snapshot.OreChunkCount, snapshot.OreChunkTick));
         BinaryPrimitives.WriteInt64LittleEndian(chunks.AsSpan(1, 8), 30);
-        BitConverter.GetBytes(float.NaN).CopyTo(chunks, OreChunkMessage.HeaderBytes + OreChunkMessage.RecordBytes - 8);
+        // A grade that is no number: grade and mass are followed by the eight bytes of the tractor's claim.
+        BitConverter.GetBytes(float.NaN).CopyTo(chunks, OreChunkMessage.HeaderBytes + OreChunkMessage.RecordBytes - 16);
         reader = new NetReader(chunks.AsSpan(1));
         world.OnOreChunks(ref reader);
         world.PublishLasers(snapshot, 300);

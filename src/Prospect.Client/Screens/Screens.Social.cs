@@ -169,6 +169,21 @@ internal sealed partial class ScreenHost
     /// <summary>Opens the Ship window in interface mode. Used by <c>--open info</c>, for captures.</summary>
     public void OpenShipWindow() => OpenPane(SocialPane.Ship);
 
+    /// <summary>
+    /// Opens the Ship window pinned, so it shows in flight, and keeps it scrolled to its ORE section. Used by
+    /// <c>--open ore --ore-window</c>, for captures: the bins fill while the lasers cut.
+    /// </summary>
+    public void OpenShipWindowOnOre()
+    {
+        OpenPane(SocialPane.Ship);
+        Pane(SocialPane.Ship).Pinned = true;
+        CloseWorkspace();
+        _shipScrollToOre = true;
+    }
+
+    // Set only by a scripted run: the Ship window's ORE heading is kept at the top of its scroll area.
+    private bool _shipScrollToOre;
+
     /// <summary>Opens the workspace on the Friends window.</summary>
     public void OpenFriends()
     {

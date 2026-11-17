@@ -48,9 +48,10 @@
 ## Ship window
 
 - Key `I` (`ShipInfo`, D-pad up), or the Ship top bar tab. Starts closed; pinnable like Charts. Replaces the old data sheet.
-- Shows the stats of the ship flown, in sections: identity, flight, power, fuel, shield, cargo, drones, modules. A section with nothing to show is left out.
+- Shows the stats of the ship flown, in sections: identity, flight, power, fuel, shield, cargo, ore, drones, modules. A section with nothing to show is left out.
+- ORE (a hull with ore bins): what the bins hold of what they can, then a row a bin: its ore, grade, kilograms and capacity, in the ore's colour; an empty bin says so. Read from `HullView.Ore`, which the server sends for the hull flown only; any other hull shows its bins' count and capacity. The Ore Cargo window is not built.
 - Every figure is the hull's published sheet (`HullView.Stats`), its design's blocks, or the flown hull's live state. Nothing is worked out in the window.
-- Fuel, battery, shield now and cargo carried are told only for the hull flown. The rest show for any hull.
+- Fuel, battery, shield now, cargo carried and ore held are told only for the hull flown. The rest show for any hull.
 - In the command view it follows the first selected hull; with only an asteroid selected it shows that asteroid's survey (scan findings only).
 - Not shown: minutes of fuel at full thrust (no shared figure yet); fuel time is at the current burn.
 - Sections are a fixed list (`ShipSheet.Section`, drawn in `DrawShipRows`). A new section is one more entry and one draw call.

@@ -28,7 +28,7 @@ namespace Prospect.Game.Persistence;
 public static partial class WorldSnapshotCodec
 {
     /// <summary>The layout's version. A save with any other is refused; there are no migrations yet.</summary>
-    public const int Version = 21;
+    public const int Version = 22;
     internal const int ChartBytes = 4 + 12 + 8;
 
     /// <summary>"PWS1": tells a save from any other bytes before its version is believed.</summary>
@@ -41,6 +41,9 @@ public static partial class WorldSnapshotCodec
     /// <summary>One drone bay: drones inside, ticks left on its rebuild.</summary>
     internal const int BayBytes = 1 + 4;
 
+    /// <summary>One ore bin: the wire's record (ore, kilograms, grade).</summary>
+    internal const int OreBinBytes = OreBinsMessage.RecordBytes;
+
     /// <summary>A hull's record without its dents, lost blocks, hit points and tanks.</summary>
     internal const int HullFixedBytes =
         8 + 4 + 1 + 1 + 8 + 16 // entity, owner, design, flags, damage tick
@@ -49,7 +52,8 @@ public static partial class WorldSnapshotCodec
         + 4 + 1 + 4 + 8 + DentBytes // dent version and count, spark
         + 4 + 4 + 8 // blocks, losses, hit total
         + 4 + 4 // tanks and cargo
-        + 4 + 1; // drone bays, auto pickup
+        + 4 + 1 // drone bays, auto pickup
+        + 1 + 4; // ore pickup, ore bins
 
     /// <summary>Everything before the catalogue's designs, at its longest.</summary>
     internal const int HeaderBound =
@@ -58,7 +62,7 @@ public static partial class WorldSnapshotCodec
         + 1 + WorldSettings.Capacity * (1 + WorldSettingCatalog.MaxIdLength + 4)
         + 8 + 8 + 4 + 8
         + 5 + byte.MaxValue
-        + 8 * 4 + 4 + 4 + SavedCargoRules.WireBytes + 8 + 8 + 4;
+        + 8 * 4 + 4 + 4 + 4 + SavedCargoRules.WireBytes + 8 + 8 + 4;
 
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
@@ -68,7 +72,7 @@ public static partial class WorldSnapshotCodec
         long size = 4 + 4 + 4 + 4 + ContentIdentity.WireSize + 16 + 1 + Utf8.GetByteCount(snapshot.Name) + 8 + 8 + 12 + 1;
         for (var i = 0; i < snapshot.SettingCount; i++)
             size += 1 + snapshot.SettingIds[i].Length + 4;
-        size += 8 + 8 + 4 + 8 + 5 + snapshot.StartingFleet.Length + 8 * 4 + 4 + 4 + SavedCargoRules.WireBytes + 8 + 8 + RockEditBytes(snapshot) + 4;
+        size += 8 + 8 + 4 + 8 + 5 + snapshot.StartingFleet.Length + 8 * 4 + 4 + 4 + 4 + SavedCargoRules.WireBytes + 8 + 8 + RockEditBytes(snapshot) + 4;
         for (var i = 0; i < snapshot.DroneScanCount; i++)
             size += DroneScanCodec.Size(snapshot.DroneScans[i]);
         for (var i = 0; i < snapshot.DesignCount; i++)
@@ -76,7 +80,7 @@ public static partial class WorldSnapshotCodec
         size += (long)snapshot.OwnerCount * OwnerBytes;
         for (var i = 0; i < snapshot.HullCount; i++)
             size += HullFixedBytes + snapshot.Hulls[i].Visual.Count * DentBytes;
-        size += (long)snapshot.LossCount * sizeof(int) + (long)snapshot.BlockCount * sizeof(float) + (long)snapshot.TankCount * sizeof(double) + (long)snapshot.CargoCount * CargoRecordBytes + (long)snapshot.BayCount * BayBytes;
+        size += (long)snapshot.LossCount * sizeof(int) + (long)snapshot.BlockCount * sizeof(float) + (long)snapshot.TankCount * sizeof(double) + (long)snapshot.CargoCount * CargoRecordBytes + (long)snapshot.BayCount * BayBytes + (long)snapshot.BinCount * OreBinBytes;
         return size + MiningBytes(snapshot) + (long)snapshot.FreeContainerCount * FreeContainerBytes + (long)snapshot.RockCount * RockBytes + (long)snapshot.ChartCount * ChartBytes + (long)snapshot.ModuleObservationCount * ModuleObservationBytes;
     }
 
@@ -154,6 +158,7 @@ public static partial class WorldSnapshotCodec
         writer.WriteInt32(snapshot.ModuleObservationCount);
         writer.WriteInt32(snapshot.CargoCount);
         writer.WriteInt32(snapshot.BayCount);
+        writer.WriteInt32(snapshot.BinCount);
         snapshot.CargoRules.Write(ref writer);
         writer.WriteInt32(snapshot.FreeContainerCount);
         writer.WriteUInt32(snapshot.NextContainerId);
@@ -224,6 +229,10 @@ public static partial class WorldSnapshotCodec
                 writer.WriteInt32(snapshot.BayRebuild[hull.BayStart + b]);
             }
             writer.WriteByte(hull.AutoPickup ? (byte)1 : (byte)0);
+            writer.WriteByte(hull.PickUpOres ? (byte)1 : (byte)0);
+            writer.WriteInt32(hull.Bins);
+            foreach (ref readonly var bin in snapshot.OreBins.AsSpan(hull.BinStart, hull.Bins))
+                OreBinsMessage.WriteRecord(ref writer, bin);
         }
 
         for (var i = 0; i < snapshot.RockCount; i++)
@@ -379,6 +388,7 @@ public static partial class WorldSnapshotCodec
         var observations = reader.ReadInt32();
         var cargoCount = reader.ReadInt32();
         var bayCount = reader.ReadInt32();
+        var binCount = reader.ReadInt32();
         var cargoRules = SavedCargoRules.Read(ref reader);
         var freeCount = reader.ReadInt32();
         var nextContainer = reader.ReadUInt32();
@@ -400,6 +410,7 @@ public static partial class WorldSnapshotCodec
         // Every count against its limit and against the bytes left, before a single array is taken for it.
         if ((uint)freeCount > FreeContainers.Capacity || designCount < 1 || pod >= designCount || drone >= designCount || workDrone >= designCount
             || bayCount < 0 || bayCount > blocks || bayCount > (long)hulls * DroneBayRules.MaxBays
+            || binCount < 0 || binCount > blocks || binCount > (long)hulls * OreBins.MaxBins
             || (uint)owners > (uint)limits.MaxOwners || (uint)hulls > (uint)limits.MaxHulls || (uint)blocks > (uint)limits.MaxBlocks
             || (uint)losses > (uint)blocks || (uint)tanks > (uint)blocks || (uint)rocks > (uint)limits.MaxRocks || charts < 0 || charts > limits.MaxCharts
             || observations < 0 || observations > limits.MaxModuleObservations
@@ -412,7 +423,7 @@ public static partial class WorldSnapshotCodec
         }
 
         var promised = (long)designCount * (4 + SHA256.HashSizeInBytes) + (long)owners * OwnerBytes + (long)hulls * HullFixedBytes
-            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)tanks * sizeof(double) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes + (long)cargoCount * CargoRecordBytes + (long)freeCount * FreeContainerBytes + (long)bayCount * BayBytes
+            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)tanks * sizeof(double) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes + (long)cargoCount * CargoRecordBytes + (long)freeCount * FreeContainerBytes + (long)bayCount * BayBytes + (long)binCount * OreBinBytes
             + (long)editedRocks * EditedRockBytes + (long)rockEdits * RockEditCodec.ScrapeOnBytes + (long)droneScans * DroneScanCodec.HeadBytes;
         if (promised > reader.Remaining)
         {
@@ -591,6 +602,23 @@ public static partial class WorldSnapshotCodec
             if (autoPickup > 1 || (autoPickup == 1 && hull.Bays == 0))
             { error = "a hull's auto pickup is set without a drone bay"; return false; }
             hull.AutoPickup = autoPickup == 1;
+            var pickUpOres = reader.ReadByte();
+            if (pickUpOres > 1 || (pickUpOres == 1 && hull.Bays == 0))
+            { error = "a hull's ore pickup is set without a drone bay"; return false; }
+            hull.PickUpOres = pickUpOres == 1;
+            hull.BinStart = result.BinCount;
+            hull.Bins = reader.ReadInt32();
+            if ((uint)hull.Bins > OreBins.MaxBins || hull.Bins > hull.Blocks || hull.Bins > binCount - result.BinCount)
+            { error = "a hull's ore bins exceed the saved bounds"; return false; }
+            for (var b = 0; b < hull.Bins; b++)
+            {
+                // Structure only: what a bin of this hull's design may hold is the server's to judge at restore.
+                var bin = OreBinsMessage.ReadRecord(ref reader);
+                if (bin.Kg == 0 ? bin.Resource != -1 || bin.Grade != 0
+                    : !(bin.Kg > 0) || !double.IsFinite(bin.Kg) || bin.Resource < 0 || bin.Resource >= Galaxy.MaxResources || !(bin.Grade > 0 && bin.Grade <= 1))
+                { error = "a saved ore bin is malformed"; return false; }
+                result.OreBins[result.BinCount++] = bin;
+            }
             if (!reader.IsValid)
             {
                 error = "the save ends inside a hull";

@@ -33,6 +33,12 @@ public enum OrderTask : byte
 
     /// <summary>The same for the detailed scan, which maps veins and pockets.</summary>
     DetailedScan = 5,
+
+    /// <summary>
+    /// <see cref="Fetch"/> for a loose ore chunk: <see cref="TaskOrder.Subject"/> is the chunk, and the group carries
+    /// it to the base hull's tractor beam, which leads it into an ore hopper.
+    /// </summary>
+    FetchOre = 6,
 }
 
 /// <summary>Phases shared by the scan tasks.</summary>

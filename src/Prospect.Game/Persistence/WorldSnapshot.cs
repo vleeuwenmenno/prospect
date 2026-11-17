@@ -190,6 +190,14 @@ public struct SavedHull
     /// says otherwise is refused.
     /// </summary>
     public bool AutoPickup;
+
+    /// <summary>Whether the hull's drones fetch loose ore chunks on their own; only a hull with bays may have it on.</summary>
+    public bool PickUpOres;
+
+    /// <summary>
+    /// Where this hull's ore bins begin in <see cref="WorldSnapshot.OreBins"/>, and how many: every bin of its design.
+    /// </summary>
+    public int BinStart, Bins;
 }
 
 /// <summary>
@@ -226,6 +234,7 @@ public sealed class WorldSnapshot
         TankFuel = new double[blocks];
         BayStocked = new byte[Math.Min(blocks, checked(hulls * DroneBayRules.MaxBays))];
         BayRebuild = new int[BayStocked.Length];
+        OreBins = new OreBin[Math.Min(blocks, checked(hulls * World.OreBins.MaxBins))];
         Cargo = new HoldContainer[checked(hulls * BlockStateStore.MaxContainers)];
         Rocks = new RockDelta[rocks];
         Charts = new SectorChart[charts];
@@ -350,6 +359,14 @@ public sealed class WorldSnapshot
     public readonly byte[] BayStocked;
     public readonly int[] BayRebuild;
     public int BayCount;
+
+    /// <summary>
+    /// What every saved hull's ore bins hold, hull after hull, each hull's in the order of its design's bins. A bin is
+    /// a block, so the room for every hull's blocks is room for every hull's bins. The first <see cref="BinCount"/>
+    /// are meaningful.
+    /// </summary>
+    public readonly OreBin[] OreBins;
+    public int BinCount;
 
     /// <summary>
     /// The asteroids that were pushed, in the order they first were, with the tick each motion starts at. The

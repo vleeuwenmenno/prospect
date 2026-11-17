@@ -166,6 +166,32 @@ internal sealed partial class ScreenHost
                 ShipRow(draw, width, "Carried"u8, Kit.F($"{cargoMass / 1000.0:0.0} t"));
         }
 
+        // Raw ore: each bin's ore, grade and kilograms against what the bin holds. Told only for the hull flown; any
+        // other hull shows what its bins could hold.
+        if (ShipSheet.Shows(ShipSheet.Section.Ore, stats, design, hull.IsOwn))
+        {
+            ShipSection(draw, width, "ORE"u8);
+            if (_shipScrollToOre)
+                ImGui.SetScrollHereY(0f);
+            var bins = design.Bins;
+            if (!hull.IsOwn)
+                ShipRow(draw, width, "Bins"u8, Kit.F($"{bins.Length}, {ShipSheet.OreCapacity(design) / 1000.0:0.0} t"));
+            else
+            {
+                var held = hull.Ore.Span;
+                var resources = snapshot.Content.Galaxy.Resources;
+                ShipRow(draw, width, "Held"u8, Kit.F($"{ShipSheet.OreHeld(held) / 1000.0:0.00} / {ShipSheet.OreCapacity(design) / 1000.0:0.0} t"));
+                for (var i = 0; i < bins.Length; i++)
+                {
+                    if (i >= held.Length || held[i].IsEmpty || (uint)held[i].Resource >= (uint)resources.Length)
+                        ShipRow(draw, width, Kit.F($"Bin {i + 1}: empty"), Kit.F($"0 / {bins[i].Capacity:0} kg"), Theme.TextMute);
+                    else
+                        ShipRow(draw, width, Kit.F($"Bin {i + 1}: {resources[held[i].Resource].Name}, {held[i].Grade * 100f:0} %"),
+                            Kit.F($"{held[i].Kg:0} / {bins[i].Capacity:0} kg"), StarColor(resources[held[i].Resource].Color));
+                }
+            }
+        }
+
         if (ShipSheet.Shows(ShipSheet.Section.Drones, stats, design, hull.IsOwn))
         {
             ShipSection(draw, width, "DRONES"u8);

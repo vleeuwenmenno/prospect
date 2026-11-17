@@ -234,7 +234,7 @@ public sealed class HullDesignTests
         Assert.Equal(pod.Cells.Length, stats.Blocks);
         Assert.Equal(mass, stats.Mass, 3);
         Assert.Equal(hull, stats.HullPoints, 3);
-        Assert.Equal(new Vector3(7, 3, 10), stats.Size);
+        Assert.Equal(new Vector3(7, 4, 10), stats.Size);
 
         // Two engines and four hot thrusters face back and push forward; cold gas thrusters push every other way, and
         // the ion drive in the nose and the ion thrusters beside the braking thrusters face front, so they brake too.

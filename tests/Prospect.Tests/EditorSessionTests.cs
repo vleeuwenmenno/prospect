@@ -117,6 +117,45 @@ public sealed class EditorSessionTests
         Assert.Null(rig.Server.Fault);
     }
 
+    [Fact]
+    public void ABeamStowsAnOreChunkThroughTheRealServerAndTheClientIsToldTheBinsAndFliesTheirMass()
+    {
+        using var rig = new Rig(clients: 1, joined: 1, oreFixture: true, sectorKm: 80);
+        var h = Rig.Index(rig.Own(0));
+        var design = rig.Content.Pod;
+        Assert.Equal(2, design.Bins.Length);
+        // The bins are told empty with the hull.
+        Assert.True(rig.Until(() => rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Ore.Length == 2));
+        Assert.True(rig.Snap(0).OwnOre[0].IsEmpty);
+
+        var position = rig.Hulls.State(h).Position + new Vector3(.5f, 7, .5f)
+            - (design.CenterOfMass + new Vector3(.5f)) * design.BlockSize;
+        var chunks = rig.Field<OreChunks>("_chunks");
+        Assert.True(chunks.Add(rig.Content, new OreChunk
+        { Position = position, Orientation = Quaternion.Identity, Resource = 1, Grade = 0.25f, Mass = 600 }, out _));
+
+        // The client sees the chunk and the beam that holds it, and predicts the hull with the beam's power.
+        Assert.True(rig.Until(() => rig.Snap(0).OreChunkCount == 1 && rig.Snap(0).OreChunks[0].TractorPowered, 600));
+        Assert.Equal(rig.Own(0), rig.Snap(0).OreChunks[0].TractorHull);
+        Assert.Equal(rig.Own(0), chunks.Items[0].TractorHull);
+        rig.Step(20);
+        Assert.True(rig.Snap(0).Hulls[rig.Snap(0).OwnHull].Power.Tractor > 0);
+
+        // The hopper takes it; the client is told the bin and weighs the ore as the server does.
+        Assert.True(rig.Until(() => chunks.Items.IsEmpty, 1800));
+        Assert.True(rig.Until(() => rig.Snap(0).OwnOre[0].Kg == 600, 120));
+        var snapshot = rig.Snap(0);
+        var own = snapshot.Hulls[snapshot.OwnHull];
+        Assert.Equal((600.0, 1, 0.25f), (own.Ore.Span[0].Kg, own.Ore.Span[0].Resource, own.Ore.Span[0].Grade));
+        Assert.True(own.Ore.Span[1].IsEmpty);
+        Assert.True(snapshot.OwnOreTick > 0);
+        // The chunk set travels every few ticks: the empty one that withdraws the chunk follows shortly.
+        Assert.True(rig.Until(() => rig.Snap(0).OreChunkCount == 0, 30));
+        Assert.Equal(design.Flight.Mass + 0.6f, rig.Hulls.Flight(h).Mass, 3);
+        Assert.Equal(rig.Hulls.Flight(h).Mass, own.Stats.Mass, 3);
+        Assert.Null(rig.Server.Fault);
+    }
+
     [Theory]
     [InlineData(JettisonMode.Abandon)]
     [InlineData(JettisonMode.KeepClaim)]
@@ -670,7 +709,7 @@ public sealed class EditorSessionTests
         private readonly StepClock _time = new();
 
         /// <summary>A server with a link for every client; the first <paramref name="joined"/> join at once.</summary>
-        internal Rig(int clients = 2, int joined = 2, int quiet = 1, int peerWait = 1, int ready = 5, int commit = 0, int uploads = 2, int? catalogueSpare = null, int maxShips = 16, int? sectorKm = null, bool debugFill = false, bool wreckFixture = false, bool tractorFixture = false)
+        internal Rig(int clients = 2, int joined = 2, int quiet = 1, int peerWait = 1, int ready = 5, int commit = 0, int uploads = 2, int? catalogueSpare = null, int maxShips = 16, int? sectorKm = null, bool debugFill = false, bool wreckFixture = false, bool tractorFixture = false, bool oreFixture = false)
         {
             _files.Write("net/editor.json", $$"""{ "maxOwnedShips": {{maxShips}}, "quietSeconds": {{quiet}}, "uploads": {{uploads}}, "uploadSeconds": 5, "readySeconds": {{ready}}, "peerWaitSeconds": {{peerWait}}, "commitSeconds": {{commit}} }""");
             if (catalogueSpare is { } spare)
@@ -688,6 +727,16 @@ public sealed class EditorSessionTests
                     {"at":[-1,0,0],"type":"gyro"}, {"at":[0,0,1],"type":"ionDrive"},
                     {"at":[0,0,-1],"type":"sensor"}, {"at":[1,0,0],"type":"hull"},
                     {"at":[2,0,0],"type":"hull"}, {"at":[3,1,0],"type":"hull"}],
+                  "mounts":[{"on":0,"face":"up","at":[2,2],"type":"tractorBeam"}] }
+                """);
+            if (oreFixture) _files.Write("ships/command_pod.json", """
+                { "version":7, "name":"Mining pod", "class":"ship", "blockSize":1, "color":[0.34,0.37,0.42],
+                  "blocks":[
+                    {"at":[0,0,0],"type":"core"}, {"at":[0,-1,0],"type":"generator"}, {"at":[0,-2,0],"type":"battery"},
+                    {"at":[-1,0,0],"type":"gyro"}, {"at":[0,0,1],"type":"ionDrive"},
+                    {"at":[0,0,-1],"type":"sensor"}, {"at":[1,0,0],"type":"hull"},
+                    {"at":[2,0,0],"type":"oreHopper","facing":"up"},
+                    {"at":[0,-3,0],"type":"oreBin"}, {"at":[0,-4,0],"type":"oreBin"}],
                   "mounts":[{"on":0,"face":"up","at":[2,2],"type":"tractorBeam"}] }
                 """);
             Content = wreckFixture ? WreckageTests.Content() : _files.Load();

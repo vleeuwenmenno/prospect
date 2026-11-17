@@ -36,7 +36,7 @@ Use the Makefile, not raw `dotnet` commands.
 | --- | --- |
 | `make setup` | First run on a machine: system packages for the OS (Vulkan; MoltenVK on macOS), the .NET SDK into `~/.dotnet`, restore. `make doctor` checks the toolchain and GPU. |
 | `make check` | Formatting, warnings-as-errors build and all tests. Must pass before work is called done. Takes about two minutes. |
-| `make bench` | Release benchmarks: an empty scene, resizing (`--bench-resize`), then editor cargo, Fuel menu, fuel-on-apply and mirror ghosts (four measured seconds each, after four seconds for scripted edits and workers to settle). Then, on the build as it is (the shipped ship carries tractor beams, racks and a drone bay), 25 s of cargo: jettison, drift, tractor pull and stow (`--open cargo --jettison 5`); it also fails unless the container was seen loose and is back in the hold. Then 25 s of drones: launch, hold station, recall and dock (`--open drones --drone-recall 12`); it also fails unless a drone was seen out and the bay is full again. Then 30 s of a detailed drone scan (`--open drone-scan --drone-scan detailed`); it also fails unless the result arrived. Then 14 s of a rock being scraped thirty passes (`--open rock-scrape`): edits, bricks and patch rebuilds on every thread; it also fails unless all 480 edits came back from the server and the patch was rebuilt and is drawn. Last, again on the shipped build (its two lasers in group 1 face forward), 16 s of a laser cutting a 199 m rock (`--open laser`); it also fails unless a beam was seen, eight scrapes came back and a chunk broke off. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
+| `make bench` | Release benchmarks: an empty scene, resizing (`--bench-resize`), then editor cargo, Fuel menu, fuel-on-apply and mirror ghosts (four measured seconds each, after four seconds for scripted edits and workers to settle). Then, on the build as it is (the shipped ship carries tractor beams, racks and a drone bay), 25 s of cargo: jettison, drift, tractor pull and stow (`--open cargo --jettison 5`); it also fails unless the container was seen loose and is back in the hold. Then 25 s of drones: launch, hold station, recall and dock (`--open drones --drone-recall 12`); it also fails unless a drone was seen out and the bay is full again. Then 30 s of a detailed drone scan (`--open drone-scan --drone-scan detailed`); it also fails unless the result arrived. Then 14 s of a rock being scraped thirty passes (`--open rock-scrape`): edits, bricks and patch rebuilds on every thread; it also fails unless all 480 edits came back from the server and the patch was rebuilt and is drawn. Last, again on the shipped build (its two lasers in group 1 face forward), 16 s of a laser cutting a 199 m rock (`--open laser`); it also fails unless a beam was seen, eight scrapes came back and a chunk broke off. Then 20 s of ore collection (`--open ore`): the same cut with the tractor beams leading chunks into the hopper; it also fails unless a beam held a chunk and a bin holds ore. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
 | `make bench-scans` | Release benchmark with each module scan type repeating (gas, asteroid, locator), on a copy of the build whose scans and cooldowns are short (`tools/prepare_scan_bench.py`; the shipped ship carries every scanner). Fails on any managed allocation on any thread, or under five completed scans. Run it after touching module scans, their server worker or the module interface. |
 | `make bench-gas` | Release benchmark inside gas clouds (ordinary from inside, pilot and command view, huge, lightning; cold and a pair reported only). Fails under 144 fps or on any managed allocation. Run it after touching the gas shaders or how gas is drawn. |
 | `make run ARGS="..."` | The client. `make server` is the dedicated server. |
@@ -180,7 +180,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   new pose toward the aim found before (`LaserAim`, `RockRay.First`) and cuts through `ScrapeRock` only, strokes
   chained so the wire sends 9 B a scrape. Ore: `MiningRules.ScrapeKg` shared out by `RockInterior.Sample` at the
   cut's deepest point, per laser and ore, a chunk at `chunks.oreKg`. Figures: `content/rules/mining.json` (shared,
-  identity). Chunks are `OreChunks` (fixed 256, their own pool: neither tractor nor drone reads it until R4) and
+  identity). Chunks are `OreChunks` (fixed 256, their own pool; how they are taken in is "Ore collection (R4)") and
   `OreChunkSimulation` (bounded contacts, no damage); `OreChunkMessage` 47 every 6 ticks by `Covered`; beams
   `LaserBeamsMessage` 46 unreliable each tick by `MaySeeHull`, held 6 ticks on the client, which predicts its own
   laser draw from them (`ClientWorld.Lasers.cs`). Save codec 20 (`WorldSnapshotCodec.Mining.cs`, `RestoreMining`).
@@ -200,6 +200,48 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `nearMetres` of the flown hull) when nothing more urgent (reply, scan, fetch, rebuild) is shown. Never place a mark a second
   way. Check with `--open laser` (capture at 8 s and 14 s; `--look 0 --look-to 180 --capture-count 5 --capture-every 1.2` from
   9 s swings the camera for edge arrows; `--hover-chunk` rests the pointer on the first chunk in view). Tests: `OreChunkMarkTests`.
+- **Ore collection (R4):** chunks go into ore bins through an ore hopper, led there by a tractor beam.
+  - Blocks (`blocks.json`, Storage): `oreBin` (`BlockType.OreCapacity`, `oreKgPerCubicMetre`: capacity is that times
+    the box's volume) and `oreHopper` (`BlockType.Hopper`). Both box only. `HullDesign.Bins` (`DesignBin`: block,
+    capacity) and `Hoppers` list them in block order; limits `maxBins` 64, `maxHoppers` 16 (`OreBins.MaxBins`).
+  - A hopper's intake is its `DesignBox.Facing`, chosen at placement like a bay's hatch: `BlockType.FacesOut` (bay or
+    hopper) is the one flag `ShipEditor.GhostFacing` and `Mirroring` ask. Never copy the hatch rule.
+  - Bin state is block state (`BlockStateStore.Ore.cs`): one `OreBin` a design bin (kilograms of everything, the ore's
+    index, the mass-weighted grade; empty is resource -1). `OreBins` is the one rule: `Room`, `Add` (bins of that ore
+    first, then empty ones, spill to the next), `Valid` (wire and save), `Transfer` (an edit). `Lose` empties a lost
+    bin. Read bins only through `Bins`, change them only through `AddOre` / `TrySetOre`, which bump `OreRevision`.
+  - Mass: `BoxHullSums.Evaluate` takes the bins beside the hold (`HullDesign.Figures(..., cargo, ore)`), spread through
+    each bin's box. `HullField.Refit` fits again when `OreRevision` moves. Any new call of `Figures` for a hull that
+    flies must pass its bins. `ContentIdentity.EvaluatorVersion` is 20 for this.
+  - Tractor: `TractorSimulation.Ore.cs`. A free mount scans containers first; only a mount that took none looks at
+    chunks, and only on a hull with a hopper and a bin. A chunk is taken when the beam sees it, sees an intake
+    (`TractorReach.Intake`, the rack-face rule on the one face; `ChooseHopper`) and `OreRoom` less what the hull's
+    beams already hold fits the whole chunk. `TractorPath.TryGuideIntake` gives staging outside the face, then the
+    glide in; the deposit is `AddOre` then `Refit`. Budgets: 256 containers and 256 chunks a tick, each scan reserved
+    whole before a mount starts. `OreChunkSimulation` skips a powered held chunk against its own hull. Claim fields
+    on `OreChunk` are transient; `RetryTick`, `TractorBest`, `TractorIdle`, `FetchHull`, `FetchMount` are server only.
+  - Prediction: the client adds `spec.Power(mass)` for each chunk its own beams hold (`ClientWorld.OwnChunkDemand`),
+    as the server's `Plan` does, and weighs the bins it was told (`ClientWorld.Ore.cs`, `ApplyOre`).
+  - Drones: `OrderTask.FetchOre`, in the one executor. `StartOreFetch` (`ServerOre.cs`) and the container fetch share
+    `AssignCarriers`, `FetchBody`, `CarryGroup` and `EndFetch`; `TickOreCarries` hands the chunk to a beam
+    (`TractorSimulation.OreReceiver`), which leads it in. "Pick up ores" is `BayPage.PickUpOres`: `TickAutoOre` calls
+    `StartOreFetch`, never a second path, and skips chunks a beam reaches, with no room, or refused lately.
+    `DroneSettingsMessage` carries both flags; whoever flips one sends the other as `BayView` has it
+    (`DronePopup.ToggleOres`, `PlayerInputBridge.SetDroneSettings`).
+  - Wire: protocol 70. `OreBinsMessage` (51, reliable, the flown hull's bins on change, at most 847 bytes, never in
+    the snapshot); the chunk record carries hull, mount, stage and powered (85 bytes); `BayView.PickUpOres`.
+  - Save: codec 22. Each hull's bins (`WorldSnapshot.OreBins`, `SavedHull.BinStart`/`Bins`) and `PickUpOres`. Load
+    rule: `TrySetOre` (one record a design bin, an ore of this galaxy, at most the capacity, nothing in a lost bin);
+    ore pickup only on a hull with bays. A chunk's claim is not kept: `OreChunks.Restore` clears it.
+  - Edit or repair: `ServerHost.CarryOre` before `RestoreFigures` (`OreBins.Transfer`: overlap first, then `Add`);
+    what finds no room is dumped and logged. The editor does not preview it.
+  - Client: Ship window ORE section (`ShipSheet.Section.Ore`, `HullView.Ore`), cards and roles `PartRole.Bin` /
+    `Hopper`, models `PropulsionModels.BuildHopper` / `BuildBin` (`hopper` and `bin` in `visuals/propulsion.json`),
+    beams to held chunks in `WorldView.DrawTractorBeams`.
+  - Tests: `OreCollectionTests`, `OreModelTests`, the ore test in `EditorSessionTests`, `DefaultShipTests`.
+  - Capture: `--open ore` on the shipped build (the laser view; each capture prints chunks, chunks in a beam and what
+    the bins hold; bins fill in about 40 s). `--ore-window` (captures only, scratch `XDG_CONFIG_HOME`: a pinned window
+    is saved) pins the Ship window on its ORE section. Gaps in `docs/roadmap/drones-mining.md`, "R4 as built".
 - **Debug: scrape rock (temporary, local games only):** `MessageId.RockScrape` (42, `RockScrapeRequest`: rays in the
   rock's frame) through `PlayerInputBridge.DebugScrape`; `ServerHost.DebugScrape` checks `AllowDebugFill`, the
   in-process link, a live flown hull not in transit, the interval (`debug.intervalSeconds`), the radius, and that every
@@ -350,7 +392,8 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   fetch: never a second path. Skips containers a tractor or drones have, the owner may not take (`MayPickup`), out of
   range or sensor sight (`Covered`), reached by the hull's own beam (`TractorSimulation.Reaches`), or refused lately
   (four-slot `AutoSkip`, `autoPickupRetrySeconds`). One fetch a hull at a time; a manual recall pauses it
-  (`autoPickupPauseSeconds`), a manual launch ends the pause. No ore box until R4 (no ore chunks, no stubs). Tests:
+  (`autoPickupPauseSeconds`), a manual launch ends the pause. The second checkbox, "Pick up ores", is in
+  "Ore collection (R4)". Tests:
   `DroneFetchTests` (auto pickup), `DronePopupTests`. Capture: `tools/prepare_drone_fetch_capture.py`, then
   `--open cargo --jettison 5 --drone-autopickup 3 --drone-popup` (scripted runs only). Capture:
   `--open drones` (launch 3 at 1.5 s, recall at `--drone-recall`, default 14 s) and `--open edit-bay` (a bay's ghost
@@ -787,8 +830,9 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   fields to the design file.
 - **The starting ship:** the shipped content gives a player one ship, the Prospector (`content/ships/prospector.json`,
   the `pod` of `fleet.json`), and no starting fleet. It carries every part a ship can take (FTL drives of one kind
-  only: hyperspace), two mining lasers in group 1 among them. `DefaultShipTests` holds that, its tractor reach, bay
-  hatch and lasers (straight ahead within the gimbal and clear of the hull; both firing net -0.8 MW at rest), and
+  only: hyperspace), two mining lasers in group 1 among them, and an ore hopper on the stern deck (intake up, in
+  view of both tractor beams) with four 1 x 1 x 2 ore bins under the keel. `DefaultShipTests` holds that, its tractor
+  reach, the hopper's intake, bay hatch and lasers (straight ahead within the gimbal and clear of the hull; both firing net -0.8 MW at rest), and
   prints its figures (`SHIP` lines); `PowerFlowTests`, `PropulsionTests` and `EditorPanelTests` (its one warning: braking with its ion parts
   overloads, as the drone's strafing does) hold its balance. Its spare power is pinned between 4.8 and 5.45 MW by the
   scan tests (a scan must turn the net flow negative), which is why it has twelve cells of gyros. Ship files are not
@@ -1216,5 +1260,5 @@ pickup, or `--open edit-cargo --capture ...` for reach guidance (both close the 
 0.3 s). Keep `agent.prospect` hidden as for other captures.
 At speed: add `--coast <m/s>` (0–400; scripted, unsaved private game: dampeners off, the server sets the own hull
 flying along its nose at 2 s) and `--sector -5,0,0` (no rocks), with `--look 60 --look-height 2 --zoom 1.5`; the
-ship is rated 209 m/s, so for 240 raise `speedPerRootAcceleration` in a copy's `blocks.json` to 70. Each
+ship is rated 205 m/s, so for 240 raise `speedPerRootAcceleration` in a copy's `blocks.json` to 71. Each
 capture prints the container's offset from the own hull and the own speed.

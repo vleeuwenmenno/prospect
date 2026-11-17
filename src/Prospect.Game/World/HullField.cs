@@ -352,7 +352,8 @@ public sealed class HullField
         ref var info = ref _hulls.Info(index);
         info.FittedRevision = _hulls.Revision(index);
         info.FittedCargoRevision = _hulls.BlockStates.CargoRevision(info.BlockState);
-        _designs[info.Design].Figures(_hulls.BlockStates.Sums(info.BlockState), out _hulls.Flight(index), out _, _hulls.BlockStates.Cargo(info.BlockState));
+        info.FittedOreRevision = _hulls.BlockStates.OreRevision(info.BlockState);
+        _designs[info.Design].Figures(_hulls.BlockStates.Sums(info.BlockState), out _hulls.Flight(index), out _, _hulls.BlockStates.Cargo(info.BlockState), _hulls.BlockStates.Bins(info.BlockState));
         if (info.Wreck) _hulls.Flight(index).MakeWreck();
         _hulls.State(index).Fuel = TankFuel.Total(_hulls.BlockStates.Tanks(info.BlockState), _designs[info.Design].Tanks);
     }
@@ -367,14 +368,16 @@ public sealed class HullField
     {
         ref var info = ref _hulls.Info(index);
         var revision = _hulls.Revision(index);
-        if (revision == info.FittedRevision && info.FittedCargoRevision == _hulls.BlockStates.CargoRevision(info.BlockState))
+        if (revision == info.FittedRevision && info.FittedCargoRevision == _hulls.BlockStates.CargoRevision(info.BlockState)
+            && info.FittedOreRevision == _hulls.BlockStates.OreRevision(info.BlockState))
             return;
 
         info.FittedRevision = revision;
         info.FittedCargoRevision = _hulls.BlockStates.CargoRevision(info.BlockState);
+        info.FittedOreRevision = _hulls.BlockStates.OreRevision(info.BlockState);
         var hadShield = _hulls.Flight(index).ShieldCapacity > 0f;
         var oldCenter = _hulls.Flight(index).CenterOfMass;
-        _designs[info.Design].Figures(_hulls.BlockStates.Sums(info.BlockState), out _hulls.Flight(index), out _, _hulls.BlockStates.Cargo(info.BlockState));
+        _designs[info.Design].Figures(_hulls.BlockStates.Sums(info.BlockState), out _hulls.Flight(index), out _, _hulls.BlockStates.Cargo(info.BlockState), _hulls.BlockStates.Bins(info.BlockState));
         ref var flight = ref _hulls.Flight(index);
         if (info.Wreck) flight.MakeWreck();
         ref var state = ref _hulls.State(index);

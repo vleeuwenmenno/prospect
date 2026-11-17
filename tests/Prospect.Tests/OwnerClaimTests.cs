@@ -269,14 +269,14 @@ public sealed class OwnerClaimTests
         var ownerOffset = original.Length - WorldSnapshotCodec.OwnerBytes;
         for (var i = 0; i < snapshot.HullCount; i++)
             ownerOffset -= WorldSnapshotCodec.HullFixedBytes + snapshot.Hulls[i].Visual.Count * WorldSnapshotCodec.DentBytes;
-        ownerOffset -= snapshot.BlockCount * 4 + snapshot.LossCount * 4 + snapshot.TankCount * 8 + snapshot.RockCount * WorldSnapshotCodec.RockBytes + snapshot.ChartCount * WorldSnapshotCodec.ChartBytes + snapshot.ModuleObservationCount * WorldSnapshotCodec.ModuleObservationBytes + snapshot.CargoCount * WorldSnapshotCodec.CargoRecordBytes + snapshot.FreeContainerCount * WorldSnapshotCodec.FreeContainerBytes + snapshot.BayCount * WorldSnapshotCodec.BayBytes + WorldSnapshotCodec.MiningHeaderBytes + snapshot.OreChunkCount * WorldSnapshotCodec.OreChunkBytes + snapshot.ActionGroupCount * WorldSnapshotCodec.ActionGroupBytes;
+        ownerOffset -= snapshot.BlockCount * 4 + snapshot.LossCount * 4 + snapshot.TankCount * 8 + snapshot.RockCount * WorldSnapshotCodec.RockBytes + snapshot.ChartCount * WorldSnapshotCodec.ChartBytes + snapshot.ModuleObservationCount * WorldSnapshotCodec.ModuleObservationBytes + snapshot.CargoCount * WorldSnapshotCodec.CargoRecordBytes + snapshot.FreeContainerCount * WorldSnapshotCodec.FreeContainerBytes + snapshot.BayCount * WorldSnapshotCodec.BayBytes + snapshot.BinCount * WorldSnapshotCodec.OreBinBytes + WorldSnapshotCodec.MiningHeaderBytes + snapshot.OreChunkCount * WorldSnapshotCodec.OreChunkBytes + snapshot.ActionGroupCount * WorldSnapshotCodec.ActionGroupBytes;
         var duplicate = new byte[original.Length + WorldSnapshotCodec.OwnerBytes];
         original.AsSpan(0, ownerOffset + WorldSnapshotCodec.OwnerBytes).CopyTo(duplicate);
         original.AsSpan(ownerOffset).CopyTo(duplicate.AsSpan(ownerOffset + WorldSnapshotCodec.OwnerBytes));
         var countsOffset = ownerOffset;
         for (var i = 0; i < snapshot.DesignCount; i++)
             countsOffset -= 4 + 32 + snapshot.Designs[i].Length;
-        countsOffset -= 32 + 4 + 4 + SavedCargoRules.WireBytes + 8 + 8 + 4;
+        countsOffset -= 32 + 4 + 4 + 4 + SavedCargoRules.WireBytes + 8 + 8 + 4;
         System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(duplicate.AsSpan(countsOffset), 2);
         var nextOwnerOffset = countsOffset - 5 - snapshot.StartingFleet.Length - 8 - 4;
         System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(duplicate.AsSpan(nextOwnerOffset), 3);

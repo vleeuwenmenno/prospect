@@ -69,6 +69,24 @@ public sealed class BlockType
     public LaserSpec? Laser { get; init; }
 
     /// <summary>
+    /// Kilograms of raw ore an ore bin holds for each cubic metre of its box (<c>"oreKgPerCubicMetre"</c>); zero for
+    /// every block that is no bin. A bin holds one ore at a time (<see cref="OreBin"/>).
+    /// </summary>
+    public float OreCapacity { get; init; }
+
+    /// <summary>
+    /// True for an ore hopper (<c>"hopper": true</c>): a box block with one intake face, its facing, through which
+    /// ore chunks reach the hull's bins.
+    /// </summary>
+    public bool Hopper { get; init; }
+
+    /// <summary>
+    /// True for a block with one open face that must look away from what it is set against: a drone bay's hatch and an
+    /// ore hopper's intake. The face is the block's facing, chosen when it is placed and mirrored with it.
+    /// </summary>
+    public bool FacesOut => Bay is not null || Hopper;
+
+    /// <summary>
     /// True for a block that is always a box and never a wedge (<c>"boxOnly"</c> in <c>blocks.json</c>): tanks, whose
     /// round vessels a slant would cut, and sensors and scanners. <see cref="BoxDesign.ShapeAllowed"/> is the one rule.
     /// </summary>
@@ -351,6 +369,8 @@ public sealed class BlockCatalog
                 Tractor = TractorSpec.Read(block, root),
                 Laser = LaserSpec.Read(block, root),
                 Bay = BaySpec.Read(block, root),
+                OreCapacity = Number(block, "oreKgPerCubicMetre"u8),
+                Hopper = block.TryGetProperty("hopper"u8, out var hopper) && hopper.GetBoolean(),
                 Name = block.GetProperty("name"u8).GetString()!,
                 Mass = block.GetProperty("mass"u8).GetSingle(),
                 Hull = block.GetProperty("hull"u8).GetSingle(),
@@ -423,6 +443,13 @@ public sealed class BlockCatalog
             // A bay is one box with one hatch, its facing: never a mount, a wedge or a part of the drone itself.
             if (type.Bay is not null && (type.Mount is not null || !type.BoxOnly || type.Drone || type.Thrust != 0 || type.Tank != FuelKind.None || type.Cargo != 0 || type.Core))
                 throw new InvalidDataException($"{path}: {type.Id}: a drone bay is a box-only ship block and nothing else");
+
+            // A bin and a hopper are plain box blocks of a ship: neither a mount, a tank, a rack, a bay nor each other.
+            var plain = type.Mount is null && type.BoxOnly && !type.Drone && type.Thrust == 0 && type.Tank == FuelKind.None && type.Cargo == 0 && !type.Core && type.Bay is null;
+            if (!float.IsFinite(type.OreCapacity) || type.OreCapacity < 0 || type.OreCapacity > 1e6f || (type.OreCapacity > 0 && (!plain || type.Hopper)))
+                throw new InvalidDataException($"{path}: {type.Id}: an ore bin is a box-only ship block with a positive finite oreKgPerCubicMetre and nothing else");
+            if (type.Hopper && !plain)
+                throw new InvalidDataException($"{path}: {type.Id}: an ore hopper is a box-only ship block and nothing else");
             if (type.Mount is not { } spec)
                 continue;
             if (spec.Side is < 1 or > FaceMounts.MaxSide || spec.Depth is < 1 or > FaceMounts.MaxDepth)
@@ -640,8 +667,41 @@ public sealed class HullDesign
         for (var i = 0; i < blocks.Length; i++)
             if (blocks[i].Type.Bay is not null) bays.Add(i);
         Bays = [.. bays];
+
+        // The ore bins, in block order: a bin's index here names it wherever what it holds is kept, sent or saved.
+        // What a bin holds when full follows from its volume. The hoppers, in block order, are found the same way.
+        var bins = new List<DesignBin>();
+        var hoppers = new List<int>();
+        var cubic = (double)boxes.BlockSize * boxes.BlockSize * boxes.BlockSize;
+        for (var i = 0; i < blocks.Length; i++)
+        {
+            if (blocks[i].Type.OreCapacity > 0)
+                bins.Add(new DesignBin(i, blocks[i].Type.OreCapacity * cubic * BoxDesign.Volume(blocks[i])));
+            if (blocks[i].Type.Hopper) hoppers.Add(i);
+        }
+        _bins = [.. bins];
+        Hoppers = [.. hoppers];
         Apply(rules);
     }
+
+    private readonly DesignBin[] _bins;
+
+    /// <summary>
+    /// The design's ore bins in block order: which block each is and the kilograms it holds when full. A hull keeps
+    /// what each holds with its block state, in this order. At most <see cref="OreBins.MaxBins"/>.
+    /// </summary>
+    public ReadOnlySpan<DesignBin> Bins => _bins;
+
+    /// <summary>The index in <see cref="Bins"/> of the bin a block is, or -1 for a block that is no bin.</summary>
+    public int BinOf(int block)
+    {
+        for (var i = 0; i < _bins.Length; i++)
+            if (_bins[i].Block == block) return i;
+        return -1;
+    }
+
+    /// <summary>The blocks that are ore hoppers, in block order. At most <see cref="OreBins.MaxHoppers"/>.</summary>
+    public int[] Hoppers { get; }
 
     /// <summary>The blocks that are drone bays, in block order. At most <see cref="DroneBayRules.MaxBays"/>.</summary>
     public int[] Bays { get; }
@@ -851,8 +911,8 @@ public sealed class HullDesign
     /// A hull's flight figures and data sheet read off its sums, in the world the design was evaluated for.
     /// Constant time: this is what a hull is refitted with when it loses blocks.
     /// </summary>
-    public void Figures(ReadOnlySpan<HullSum> sums, out FlightParams flight, out HullStats stats, ReadOnlySpan<HoldContainer> cargo = default) =>
-        Sums.Evaluate(sums, _rules, out flight, out stats, cargo);
+    public void Figures(ReadOnlySpan<HullSum> sums, out FlightParams flight, out HullStats stats, ReadOnlySpan<HoldContainer> cargo = default, ReadOnlySpan<OreBin> ore = default) =>
+        Sums.Evaluate(sums, _rules, out flight, out stats, cargo, ore);
 
     private void Apply(FlightRules rules)
     {

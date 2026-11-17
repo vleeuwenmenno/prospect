@@ -383,12 +383,20 @@ public sealed class PlayerInputBridge
     /// loose containers the owner may take on their own. The server's answer is <see cref="BayView.AutoPickup"/> in
     /// <see cref="SessionSnapshot.Bays"/>. A newer setting replaces one not yet sent.
     /// </summary>
-    public void SetDroneAutoPickup(uint hull, bool on)
+    public void SetDroneAutoPickup(uint hull, bool on) => SetDroneSettings(hull, on, false);
+
+    /// <summary>
+    /// Asks the server for both drone settings of <paramref name="hull"/> at once: whether its drones fetch loose
+    /// containers on their own (<paramref name="autoPickup"/>) and whether they fetch loose ore chunks
+    /// (<paramref name="pickUpOres"/>). Whoever changes one passes the other as the server last reported it
+    /// (<see cref="BayView.AutoPickup"/>, <see cref="BayView.PickUpOres"/>). A newer setting replaces one not yet sent.
+    /// </summary>
+    public void SetDroneSettings(uint hull, bool autoPickup, bool pickUpOres)
     {
         if (hull == 0) return;
         lock (_lock)
         {
-            _droneSettings = new DroneSettingsMessage(hull, on);
+            _droneSettings = new DroneSettingsMessage(hull, autoPickup, pickUpOres);
             _hasDroneSettings = true;
         }
     }

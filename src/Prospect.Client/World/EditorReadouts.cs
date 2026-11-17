@@ -14,6 +14,9 @@ internal struct PartFigures
     /// <summary>Kilograms of fuel a thrust part burns a second at full thrust, and kilograms a tank holds.</summary>
     public float FuelBurn, FuelCapacity;
 
+    /// <summary>Kilograms of raw ore a bin holds, at one cubic metre a cell (every ship's cell).</summary>
+    public float Ore;
+
     /// <summary>
     /// The figures of one block of <paramref name="type"/> whose box holds <paramref name="cells"/> cells. A wedge
     /// fills half of its box and is worked out as the design is (<see cref="BoxDesign.ScaleHalf"/>), crew rounded
@@ -47,6 +50,7 @@ internal struct PartFigures
             FtlPower = Scaled("ftlPower", type.FtlPower),
             FuelBurn = Scaled("fuelBurn", type.FuelBurn),
             FuelCapacity = Scaled("fuelCapacity", type.FuelCapacity),
+            Ore = type.OreCapacity * cells,
         };
     }
 
@@ -75,6 +79,7 @@ internal struct PartFigures
         FtlPower = a.FtlPower + b.FtlPower,
         FuelBurn = a.FuelBurn + b.FuelBurn,
         FuelCapacity = a.FuelCapacity + b.FuelCapacity,
+        Ore = a.Ore + b.Ore,
     };
 
     /// <summary>The figure a part of a role is chosen for, which the merge preview compares.</summary>
@@ -86,6 +91,7 @@ internal struct PartFigures
         PartRole.Storage => Energy,
         PartRole.Shield => Shield,
         PartRole.Cargo => Cargo,
+        PartRole.Bin => Ore,
         PartRole.Crew => Crew,
         PartRole.Drive => FtlPower,
         PartRole.Tank => FuelCapacity,

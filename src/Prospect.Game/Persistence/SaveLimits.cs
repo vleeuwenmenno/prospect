@@ -77,6 +77,9 @@ public sealed record SaveLimits
         + (long)MaxOwners * WorldSnapshotCodec.OwnerBytes
         + (long)MaxHulls * (WorldSnapshotCodec.HullFixedBytes + VisualDamageState.Capacity * WorldSnapshotCodec.DentBytes)
         + (long)MaxBlocks * (sizeof(float) + sizeof(int) + sizeof(double))
+        // A block is a tank or an ore bin, never both, and a hull has only so many bins: each adds what its record is
+        // longer than a tank's.
+        + Math.Min((long)MaxBlocks, (long)MaxHulls * OreBins.MaxBins) * (WorldSnapshotCodec.OreBinBytes - sizeof(double))
         + (long)MaxRocks * WorldSnapshotCodec.RockBytes
         + (long)MaxEditedRocks * WorldSnapshotCodec.EditedRockBytes + (long)MaxRockEdits * RockEditCodec.ScrapeBytes
         + (long)MaxHulls * BlockStateStore.MaxContainers * WorldSnapshotCodec.CargoRecordBytes;
@@ -97,6 +100,7 @@ public sealed record SaveLimits
         + (long)MaxDesigns * (SHA256.HashSizeInBytes + 64)
         + (long)MaxOwners * System.Runtime.CompilerServices.Unsafe.SizeOf<SavedOwner>()
         + (long)MaxHulls * System.Runtime.CompilerServices.Unsafe.SizeOf<SavedHull>()
+        + Math.Min((long)MaxBlocks, (long)MaxHulls * OreBins.MaxBins) * System.Runtime.CompilerServices.Unsafe.SizeOf<OreBin>()
         + (long)MaxBlocks * (sizeof(float) + sizeof(int) + sizeof(double))
         + (long)MaxRocks * System.Runtime.CompilerServices.Unsafe.SizeOf<RockDelta>()
         + (long)MaxEditedRocks * (System.Runtime.CompilerServices.Unsafe.SizeOf<RockRef>() + sizeof(int))

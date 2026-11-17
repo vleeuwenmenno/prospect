@@ -31,7 +31,7 @@ internal sealed partial class ClientWorld
         if (!_blocks.TrySetCargo(_ownBlocks, _content, _hold.AsSpan(0, _holdCount))) return;
         _appliedHoldSerial = _holdSerial;
         _appliedHoldTick = _holdTick;
-        OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats, _blocks.Cargo(_ownBlocks));
+        OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats, _blocks.Cargo(_ownBlocks), _blocks.Bins(_ownBlocks));
     }
 
     /// <summary>Copies own cargo into snapshot-owned storage; nothing is exposed for remote hulls.</summary>

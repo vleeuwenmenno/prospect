@@ -269,6 +269,12 @@ internal sealed class AppOptions
 
     /// <summary>Scripted runs only (<c>--drone-popup</c>): opens the drone settings popup over the DRONES chip once the chip is there.</summary>
     public bool DronePopup { get; set; }
+
+    /// <summary>
+    /// Captures only (<c>--ore-window</c>, with <c>--open ore</c>): pins the Ship window on its ORE section, where the
+    /// bins fill. Not for the benchmark: a pinned window is saved with the settings.
+    /// </summary>
+    public bool OreWindow { get; set; }
     public bool CargoSample { get; set; }
     /// <summary>Capture only: <c>--cargo-wide</c> loads a rack with one container of each resource and jettisons several.</summary>
     public bool CargoWide { get; set; }
@@ -751,7 +757,7 @@ internal sealed class App : IDisposable
                 ScriptedRamSpeed = _options.RamSpeed,
                 ScriptedCoastSpeed = _options.CoastSpeed,
                 // The drone scan and laser captures only need the hull put above the rock: the scrape's placement, with no scraping.
-                ScriptedRockScrapeRadius = Devices.Muted && _options.OpenView is "rock-scrape" or "drone-scan" or "laser" or "laser-command" ? _options.RockScrapeRadius : null,
+                ScriptedRockScrapeRadius = Devices.Muted && _options.OpenView is "rock-scrape" or "drone-scan" or "laser" or "laser-command" or "ore" ? _options.RockScrapeRadius : null,
                 ScriptedRockScrapeStandoff = _options.RockScrapeStandoff,
                 ScriptedRockScrapeRest = Devices.Muted && _options.OpenView == "rock-scrape" ? _options.RockScrapeRest : null,
                 ScriptedExhaustShield = Devices.Muted ? _options.OpenView switch { "exhaust-shield" => 1, "exhaust-shield-cold" => 2, _ => 0 } : 0,
@@ -1232,7 +1238,7 @@ internal sealed class App : IDisposable
         _window.SetFullscreen(monitor, new int2(mode.Width, mode.Height), mode.RefreshRate);
     }
 
-    private bool _benchmarkSawChunk, _benchmarkSawBeam;
+    private bool _benchmarkSawChunk, _benchmarkSawBeam, _benchmarkSawChunkPull;
     private int _laserEditsSeen;
     private bool _dronesLaunched, _dronesRecalled, _benchmarkSawDrones, _dronesHome, _droneFetchSent, _benchmarkSawFetch, _droneAutoSent, _dronePopupRequested;
     private int _dronesOut;
@@ -1479,9 +1485,11 @@ internal sealed class App : IDisposable
             {
                 // Nothing to open: the pilot view is the capture, and ScriptDroneScan drives the scan.
             }
-            else if (view is "laser" or "laser-command")
+            else if (view is "laser" or "laser-command" or "ore")
             {
                 // The pilot view: the server puts the hull over a rock, and the scripted group fires from --fire-at on.
+                // A capture of the ore view may pin the Ship window on its ORE section, where the bins fill.
+                if (view == "ore" && _options.OreWindow) _screens.OpenShipWindowOnOre();
             }
             else if (view == "rock-scrape")
             {
@@ -1766,7 +1774,7 @@ internal sealed class App : IDisposable
         World.CaptureCoast = Devices.Muted && Session is not null && _options.CoastSpeed is not null;
         // The laser fixtures look along the nose unless told otherwise: the hull is turned onto the rock, and the aim
         // is the view's centre.
-        if ((_options.LookDegrees ?? (_options.OpenView is "laser" or "laser-command" ? 0f : null)) is { } look && Session is not null)
+        if ((_options.LookDegrees ?? (_options.OpenView is "laser" or "laser-command" or "ore" ? 0f : null)) is { } look && Session is not null)
         {
             if (_options.LookToDegrees is { } lookTo)
             {
@@ -1782,7 +1790,7 @@ internal sealed class App : IDisposable
         if (_options.Zoom is { } zoom && Session is not null)
             World.ChaseZoom = zoom;
         World.ScriptedAlignLock = Devices.Muted && Session is not null && _options.AlignLock;
-        var fireGroup = _options.FireGroup ?? (_options.OpenView is "laser" or "laser-command" ? 1 : null);
+        var fireGroup = _options.FireGroup ?? (_options.OpenView is "laser" or "laser-command" or "ore" ? 1 : null);
         World.ScriptedHoverChunk = Devices.Muted && _options.HoverChunk;
         World.ScriptedFireGroup = Devices.Muted && Session is not null && fireGroup is { } group && _sinceSplash >= _options.FireAt ? group : 0;
         if (Devices.Muted && _options.OpenView == "laser-command" && snapshot is not null && World.TryOwnCut(snapshot, out var laserCut))
@@ -1796,6 +1804,8 @@ internal sealed class App : IDisposable
             _laserEditsSeen = Math.Max(_laserEditsSeen, World.RockEditsKnown);
             _benchmarkSawChunk |= snapshot.OreChunkCount > 0;
             _benchmarkSawBeam |= snapshot.LaserBeamCount > 0;
+            for (var c = 0; c < snapshot.OreChunkCount && !_benchmarkSawChunkPull; c++)
+                _benchmarkSawChunkPull = snapshot.OreChunks[c].TractorHull != 0;
         }
         World.ScriptedAlignClick = Devices.Muted && Session is not null && _options.AlignAt is { } alignAt
             ? _sinceSplash >= alignAt && _sinceSplash < alignAt + 0.15f : null;
@@ -1890,7 +1900,13 @@ internal sealed class App : IDisposable
                     if (_options.DroneFetchSeconds is not null && snapshot is not null)
                         Console.WriteLine($"capture drones: fetching {snapshot.Bays.Fetching}, reply {snapshot.Bays.Reply} ({snapshot.Bays.ReplyCount}), since splash {_sinceSplash:F1} s");
                 }
-                if (_options.OpenView is "laser" or "laser-command" && snapshot is not null)
+                if (_options.OpenView == "ore" && snapshot is not null)
+                {
+                    var pulled = 0;
+                    for (var c = 0; c < snapshot.OreChunkCount; c++) if (snapshot.OreChunks[c].TractorHull != 0) pulled++;
+                    Console.WriteLine($"capture {_capturesTaken:D2} ore at {_sinceSplash:F1}s: chunks {snapshot.OreChunkCount} ({pulled} in a beam), bins hold {ShipSheet.OreHeld(World.Own.Ore.Span):F0} kg of {ShipSheet.OreCapacity(snapshot.Content.Designs[World.Own.Design]):F0} kg, mass {World.Own.Stats.Mass:F2} t");
+                }
+                if (_options.OpenView is "laser" or "laser-command" or "ore" && snapshot is not null)
                     Console.WriteLine($"capture {_capturesTaken:D2} laser: groups on {World.ActionGroupsOn}, firing {World.LasersFiring}, beams {snapshot.LaserBeamCount}, edits {World.RockEditsKnown}, chunks {snapshot.OreChunkCount}, energy {World.Own.Energy:F1}, own speed {World.Own.Velocity.Length():F2} m/s");
                 if (_options.OpenView == "rock-scrape")
                 {
@@ -1946,6 +1962,8 @@ internal sealed class App : IDisposable
                 // again and again inside the measurement: a run that scraped nothing cannot pass.
                 // The laser fired, cut the rock through the real aim and freed at least one chunk inside the run.
                 "laser" or "laser-command" => _benchmarkSawBeam && _laserEditsSeen >= 8 && _benchmarkSawChunk,
+                // The lasers freed chunks, a beam took at least one to the hopper, and its ore is in a bin.
+                "ore" => _benchmarkSawBeam && _benchmarkSawChunk && _benchmarkSawChunkPull && ShipSheet.OreHeld(World.Own.Ore.Span) > 0,
                 "rock-scrape" => World.RockScrapeAsked && World.RockEditsKnown >= 16 * _options.RockScrapePasses && World.RockPatchWork.Built >= 2 && World.RockPatchesDrawn == 1,
                 "edit-cargo" => World.Editor.CanEdit && World.Editor.LiveCargo.Length == World.CaptureCargoSampleCount && World.Editor.CargoRack >= 0,
                 "edit-menu" => World.Editor.Menu.IsOpen && World.Editor.Menu.Sub == EditorMenuSub.Fuel,
@@ -1962,8 +1980,10 @@ internal sealed class App : IDisposable
                 Console.WriteLine("  Editor fixture       FAIL: the requested fixture did not reach its prepared state");
                 ExitCode = 1;
             }
-            if (_options.OpenView is "laser" or "laser-command")
+            if (_options.OpenView is "laser" or "laser-command" or "ore")
                 Console.WriteLine($"  Mining laser         beam seen {_benchmarkSawBeam}, {_laserEditsSeen} edits, chunk seen {_benchmarkSawChunk}");
+            if (_options.OpenView == "ore")
+                Console.WriteLine($"  Ore collection       chunk in a beam {_benchmarkSawChunkPull}, bins hold {ShipSheet.OreHeld(World.Own.Ore.Span):F0} kg");
             if (_options.OpenView == "rock-scrape")
                 Console.WriteLine($"  Rock scrape          {World.RockEditsKnown} edits, patch built {World.RockPatchWork.Built} times (last {World.RockPatchWork.Milliseconds:F1} ms, {World.RockPatchWork.Vertices} vertices)");
             Console.WriteLine($"  World drawing        skipped in {WorldFramesSkipped} frames since the start (the map hid it)");

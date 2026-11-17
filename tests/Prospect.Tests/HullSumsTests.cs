@@ -684,7 +684,7 @@ public sealed class HullSumsTests
             var design = blocks == 150_000 ? TestDesigns.Station : TestDesigns.Mixed(blocks, 3);
             var growth = design.Sums.NodeCount * 24;
             Assert.Equal(sumBytes + growth, design.Sums.StorageBytes);
-            var holdBytes = 16 + design.CargoCapacity * 40L + (design.Tanks.Length == 0 ? 4 : 0);
+            var holdBytes = 24 + design.CargoCapacity * 40L + (design.Tanks.Length == 0 ? 4 : 0);
             Assert.Equal(predicted + growth + holdBytes, BlockStateStore.BytesFor(design, hitPoints: false));
             Assert.Equal(decided + growth + holdBytes, BlockStateStore.BytesFor(design, hitPoints: true));
             Console.WriteLine($"SUMS {blocks} blocks: sums {sumBytes} B a hull; block state {predicted} B predicted, {decided} B decided; design keeps {design.Sums.DesignBytes} B for evaluation");

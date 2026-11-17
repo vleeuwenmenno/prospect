@@ -49,11 +49,31 @@ public sealed partial class ServerHost
             if (BlockSet.Has(alive, design.Bays[b])) best = Math.Max(best, design.Types[design.Bays[b]].Bay!.CarryKg);
         var most = Math.Min(rules.MaxCarriers, rules.MaxPerPlayer);
         if (best * most < mass) return DroneReply.TooHeavy;
-        var mount = _tractors.Receiver(_containers, _content, _field, hull.Index, item, rules.HandoverMetres, free: false, CargoScratch, out var why, out _);
+        var mount = _tractors.Receiver(_containers, _content, _field, hull.Index, item, rules.HandoverMetres, free: false, CargoScratch, out var why, out _, _chunks);
         if (mount < 0)
             return why switch { FetchRefusal.NoRoom => DroneReply.NoRoom, FetchRefusal.TooHeavy => DroneReply.TooHeavy, _ => DroneReply.NoTractor };
 
-        // Carriers: drones holding station first, then drones inside bays whose hatch is open, until they lift it.
+        var reply = AssignCarriers(viewer, hull, page, id, mass, FreeContainers.Half(_content.Cargo, item.Size), OrderTask.Fetch, out carriers);
+        if (reply != DroneReply.Fetching) return reply;
+        ref var target = ref _containers.At(index);
+        target.FetchHull = hull.Packed;
+        target.FetchMount = mount;
+        return DroneReply.Fetching;
+    }
+
+    /// <summary>
+    /// Puts enough of a hull's drones on <paramref name="task"/> orders (a fetch of a container or of an ore chunk) to
+    /// lift <paramref name="mass"/> kilograms: drones holding station first, then drones inside bays whose hatch is
+    /// open. <see cref="DroneReply.Fetching"/> with how many carry it, or <see cref="DroneReply.TooFew"/> with nothing
+    /// changed.
+    /// </summary>
+    private DroneReply AssignCarriers(uint viewer, HullHandle hull, int page, uint id, double mass, Vector3 half, OrderTask task, out int carriers)
+    {
+        carriers = 0;
+        var rules = _content.Drones;
+        var info = _hulls.Info(hull.Index);
+        var design = _content.Designs[info.Design];
+        var alive = _hulls.Blocks(hull.Index);
         ref var p = ref _bayPages[page];
         var room = p.FetchPending > 0 || p.Scan.Pending > 0 ? 0 : DroneRoom(viewer, out _);
         var carry = 0f;
@@ -73,7 +93,6 @@ public sealed partial class ServerHost
         }
         if (carry < mass) return DroneReply.TooFew;
 
-        var half = FreeContainers.Half(_content.Cargo, item.Size);
         var radius = _content.Designs[_content.WorkDroneDesign].Flight.Radius;
         var until = _tick + rules.FetchTicks;
         var slot = 0;
@@ -81,7 +100,7 @@ public sealed partial class ServerHost
         {
             ref var order = ref _orders[i];
             if (order.Base != hull || order.Task != OrderTask.Hold) continue;
-            order.Task = OrderTask.Fetch;
+            order.Task = task;
             order.Phase = 0;
             order.Subject = id;
             order.Point = DroneFetch.Place(slot++, half, radius, rules.AttachGapMetres);
@@ -98,13 +117,11 @@ public sealed partial class ServerHost
         p.FetchPending = (byte)launches;
         p.FetchPendingKg = pendingKg;
         p.FetchSubject = id;
+        p.FetchOre = task == OrderTask.FetchOre;
         p.FetchSlot = (byte)slot;
         p.FetchUntil = until;
         if (launches > 0) p.LaunchIssuer = viewer;
         p.Revision++;
-        ref var target = ref _containers.At(index);
-        target.FetchHull = hull.Packed;
-        target.FetchMount = mount;
         carriers = holders + launches;
         return DroneReply.Fetching;
     }
@@ -130,7 +147,7 @@ public sealed partial class ServerHost
         // only then takes the recall, from its bay's hold point as a fetching drone does.
         if (IsScan(order.Task) && order.Phase != ScanOrderPhase.ScanLeaving) { order.Phase = ScanOrderPhase.ScanLeaving; return; }
         var far = false;
-        if ((order.Task == OrderTask.Fetch || IsScan(order.Task)) && _hulls.IsAlive(order.Base))
+        if ((order.Task is OrderTask.Fetch or OrderTask.FetchOre || IsScan(order.Task)) && _hulls.IsAlive(order.Base))
         {
             var design = _content.Designs[_hulls.Info(order.Base.Index).Design];
             if ((uint)order.Bay < (uint)design.Bays.Length)
@@ -153,18 +170,28 @@ public sealed partial class ServerHost
     private bool Fetch(ref TaskOrder order, int page)
     {
         var index = _containers.Find((uint)order.Subject);
-        if (index < 0 || _containers.Items[index].FetchHull != order.Base.Packed || (order.Until != 0 && _tick >= order.Until))
+        var held = index >= 0 && _containers.Items[index].FetchHull == order.Base.Packed;
+        return FetchBody(ref order, page, held, held ? _containers.Items[index].Position : default, held ? _containers.Items[index].Velocity : default);
+    }
+
+    /// <summary>
+    /// The one flight of a fetching drone, whatever it fetches: to its place beside the body at
+    /// <paramref name="bodyPosition"/>, aimed ahead of it by what its autopilot lags, phase 1 while within the tether.
+    /// Home when the body is no longer <paramref name="held"/> for its hull or the fetch has taken too long.
+    /// </summary>
+    private bool FetchBody(ref TaskOrder order, int page, bool held, Double3 bodyPosition, Vector3 bodyVelocity)
+    {
+        if (!held || (order.Until != 0 && _tick >= order.Until))
         {
             ToRecall(ref order);
             return Recall(ref order, page);
         }
-        var item = _containers.Items[index];
         var rules = _content.Drones;
-        var place = item.Position + HullRotation.Rotate(order.Point, _hulls.State(order.Base.Index).Orientation);
+        var place = bodyPosition + HullRotation.Rotate(order.Point, _hulls.State(order.Base.Index).Orientation);
         var position = _hulls.State(order.Actor.Index).Position;
         order.Phase = place.RelativeTo(position).LengthSquared() <= rules.TetherMetres * rules.TetherMetres ? (byte)1 : (byte)0;
-        var lead = DroneFetch.Lead(item.Velocity.Length(), _hulls.Flight(order.Actor.Index).WeakestPush);
-        Fly(order.Actor, place + item.Velocity * lead, rules.TetherMetres * 0.5f);
+        var lead = DroneFetch.Lead(bodyVelocity.Length(), _hulls.Flight(order.Actor.Index).WeakestPush);
+        Fly(order.Actor, place + bodyVelocity * lead, rules.TetherMetres * 0.5f);
         return true;
     }
 
@@ -188,18 +215,7 @@ public sealed partial class ServerHost
                 continue;
             }
 
-            float holding = 0, total = 0;
-            var attached = 0;
-            for (var i = 0; i < _orderCount; i++)
-            {
-                ref readonly var order = ref _orders[i];
-                if (order.Task != OrderTask.Fetch || order.Subject != item.Id || order.Base != hull || !_hulls.IsAlive(order.Actor)) continue;
-                var carry = CarryOf(order);
-                total += carry;
-                if (order.Phase == 1) { holding += carry; attached++; }
-            }
-            ref var p = ref _bayPages[page];
-            if (p.FetchPending > 0 && p.FetchSubject == item.Id) total += p.FetchPendingKg;
+            CarryGroup(hull, page, item.Id, OrderTask.Fetch, out var holding, out var total, out var attached);
             var mass = TractorSimulation.Mass(_content.Cargo, item);
             if (total < mass) { DropFetch(ref item, hull, DroneReply.Dropped); continue; }
             var info = _hulls.Info(hull.Index);
@@ -218,7 +234,7 @@ public sealed partial class ServerHost
             item.AngularVelocity = state.AngularVelocity;
             if (delta.Length() <= rules.HandoverToleranceMetres && relative <= rules.HandoverSpeed)
             {
-                var mount = _tractors.Receiver(_containers, _content, _field, hull.Index, item, rules.HandoverMetres, free: true, CargoScratch, out var why, out var rack);
+                var mount = _tractors.Receiver(_containers, _content, _field, hull.Index, item, rules.HandoverMetres, free: true, CargoScratch, out var why, out var rack, _chunks);
                 if (mount >= 0)
                 {
                     FreeContainers.ClearFetch(ref item);
@@ -252,15 +268,40 @@ public sealed partial class ServerHost
         if (_hulls.IsAlive(hull)) ReplyDrones(_hulls.Info(hull.Index).Owner, reply, 0);
     }
 
-    /// <summary>Calls home every drone of <paramref name="hull"/> fetching container <paramref name="id"/>, and stops launches for it.</summary>
-    private void EndFetch(uint id, HullHandle hull)
+    /// <summary>
+    /// What the drones of <paramref name="hull"/> on <paramref name="task"/> for body <paramref name="id"/> carry: the
+    /// kilograms of those holding on (phase 1) and how many they are, and the kilograms of all of them, drones still
+    /// waiting to launch for it included.
+    /// </summary>
+    private void CarryGroup(HullHandle hull, int page, uint id, OrderTask task, out float holding, out float total, out int attached)
     {
+        holding = total = 0;
+        attached = 0;
         for (var i = 0; i < _orderCount; i++)
-            if (_orders[i].Task == OrderTask.Fetch && _orders[i].Subject == id && _orders[i].Base == hull) ToRecall(ref _orders[i]);
+        {
+            ref readonly var order = ref _orders[i];
+            if (order.Task != task || order.Subject != id || order.Base != hull || !_hulls.IsAlive(order.Actor)) continue;
+            var carry = CarryOf(order);
+            total += carry;
+            if (order.Phase == 1) { holding += carry; attached++; }
+        }
+        ref var p = ref _bayPages[page];
+        if (p.FetchPending > 0 && p.FetchSubject == id && p.FetchOre == (task == OrderTask.FetchOre)) total += p.FetchPendingKg;
+    }
+
+    /// <summary>
+    /// Calls home every drone of <paramref name="hull"/> fetching the container <paramref name="id"/> (the ore chunk,
+    /// with <paramref name="ore"/>), and stops launches for it.
+    /// </summary>
+    private void EndFetch(uint id, HullHandle hull, bool ore = false)
+    {
+        var task = ore ? OrderTask.FetchOre : OrderTask.Fetch;
+        for (var i = 0; i < _orderCount; i++)
+            if (_orders[i].Task == task && _orders[i].Subject == id && _orders[i].Base == hull) ToRecall(ref _orders[i]);
         var page = PageOf(hull);
         if (page < 0) return;
         ref var p = ref _bayPages[page];
-        if (p.FetchPending > 0 && p.FetchSubject == id)
+        if (p.FetchPending > 0 && p.FetchSubject == id && p.FetchOre == ore)
         {
             var design = _content.Designs[_hulls.Info(hull.Index).Design];
             for (var b = 0; b < design.Bays.Length && p.FetchPending > 0; b++)
@@ -280,7 +321,7 @@ public sealed partial class ServerHost
     {
         var count = page >= 0 ? _bayPages[page].FetchPending : 0;
         for (var i = 0; i < _orderCount; i++)
-            if (_orders[i].Task == OrderTask.Fetch && _orders[i].Base == hull) count++;
+            if (_orders[i].Task is OrderTask.Fetch or OrderTask.FetchOre && _orders[i].Base == hull) count++;
         return count;
     }
 }

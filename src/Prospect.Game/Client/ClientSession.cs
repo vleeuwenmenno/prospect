@@ -154,6 +154,15 @@ public sealed class SessionSnapshot(GameContent content)
     public BayView Bays;
     public readonly HoldContainer[] OwnCargo = new HoldContainer[BlockStateStore.MaxContainers];
 
+    /// <summary>
+    /// What the flown hull's ore bins hold, as the server last told: the memory behind that hull's
+    /// <see cref="HullView.Ore"/>. Entry <c>i</c> is bin <c>i</c> of the hull's design (<see cref="HullDesign.Bins"/>).
+    /// </summary>
+    public readonly OreBin[] OwnOre = new OreBin[OreBins.MaxBins];
+
+    /// <summary>The server tick of the bins in <see cref="OwnOre"/>; it moves on with every change the server reports.</summary>
+    public long OwnOreTick;
+
     /// <summary>Snapshot-owned loose cargo, filtered by the server's sensor coverage.</summary>
     public readonly FreeContainer[] FreeContainers = new FreeContainer[Prospect.Game.World.FreeContainers.Capacity];
     public int FreeContainerCount;
@@ -463,6 +472,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         if (snapshot.HullCount == 0)
             snapshot.OwnHull = -1;
         _world.PublishCargo(snapshot);
+        _world.PublishOre(snapshot);
         snapshot.Bays = _state == SessionState.Active ? _bays : default;
         _world.PublishFreeContainers(snapshot);
         _world.PublishLasers(snapshot, tick);
@@ -596,6 +606,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 break;
             case MessageId.Cargo when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= CargoMessage.MaxWireSize:
                 _world.OnCargo(ref reader);
+                break;
+            case MessageId.OreBins when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= OreBinsMessage.MaxWireSize:
+                _world.OnOreBins(ref reader);
                 break;
             case MessageId.LaserBeams when _state == SessionState.Active && channel == NetChannel.Unreliable && payload.Length <= LaserBeamsMessage.MaxWireSize:
                 _world.OnLaserBeams(ref reader, _clientTick);

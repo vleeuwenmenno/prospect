@@ -352,6 +352,7 @@ public sealed partial class ServerHost
         var tanks = 0;
         var cargoCount = 0;
         var bayCount = 0;
+        var binCount = 0;
         for (var i = 0; i < world.HullCount; i++)
         {
             ref var saved = ref world.Hulls[i];
@@ -414,6 +415,19 @@ public sealed partial class ServerHost
                 if (autoPage < 0) throw new InvalidDataException($"Saved hull {i}: auto pickup without a drone bay.");
                 _bayPages[autoPage].AutoPickup = true;
             }
+            if (saved.PickUpOres)
+            {
+                var orePage = PageOf(handle);
+                if (orePage < 0) throw new InvalidDataException($"Saved hull {i}: ore pickup without a drone bay.");
+                _bayPages[orePage].PickUpOres = true;
+            }
+
+            // A bin holds what it was saved with, and only what such a bin can: one record for each bin of the
+            // design, an ore this galaxy has, at most the bin's capacity, and nothing in a bin that was lost.
+            if (saved.BinStart != binCount || saved.Bins != design.Bins.Length || saved.Bins > world.BinCount - binCount
+                || !_hulls.BlockStates.TrySetOre(_hulls.Info(handle.Index).BlockState, world.OreBins.AsSpan(binCount, saved.Bins), Galaxy.Resources.Length))
+                throw new InvalidDataException($"Saved hull {i}: its ore is outside what its bins hold.");
+            binCount += saved.Bins;
             info = ref _hulls.Info(handle.Index);
             info.ConnectivityRevision = _hulls.Revision(handle.Index);
             _field.RestoreFigures(handle.Index);
@@ -431,7 +445,7 @@ public sealed partial class ServerHost
             info.Piloted = owner >= 0 && _owners[owner].Controlled == saved.Entity;
         }
 
-        if (blocks != world.BlockCount || losses != world.LossCount || tanks != world.TankCount || cargoCount != world.CargoCount || bayCount != world.BayCount)
+        if (blocks != world.BlockCount || losses != world.LossCount || tanks != world.TankCount || cargoCount != world.CargoCount || bayCount != world.BayCount || binCount != world.BinCount)
             throw new InvalidDataException("The saved hulls do not add up to the saved blocks.");
 
         for (var i = 0; i < _ownerCount; i++)
@@ -578,6 +592,7 @@ public sealed partial class ServerHost
         buffer.TankCount = 0;
         buffer.CargoCount = 0;
         buffer.BayCount = 0;
+        buffer.BinCount = 0;
         buffer.ActionGroupCount = 0;
         buffer.CargoRules = SavedCargoRules.Of(_content);
         buffer.FreeContainerCount = _containers.Items.Length;
@@ -636,6 +651,14 @@ public sealed partial class ServerHost
             saved.BayStart = buffer.BayCount;
             saved.Bays = bays.Length;
             saved.AutoPickup = page >= 0 && _bayPages[page].AutoPickup;
+            saved.PickUpOres = page >= 0 && _bayPages[page].PickUpOres;
+
+            // A bin is a block, so the room for every hull's blocks is room for every hull's bins.
+            var ore = _hulls.BlockStates.Bins(info.BlockState);
+            saved.BinStart = buffer.BinCount;
+            saved.Bins = ore.Length;
+            ore.CopyTo(buffer.OreBins.AsSpan(buffer.BinCount));
+            buffer.BinCount += ore.Length;
             for (var b = 0; b < bays.Length; b++)
             {
                 var capacity = _content.Designs[info.Design].Types[bays[b]].Bay!.Capacity;

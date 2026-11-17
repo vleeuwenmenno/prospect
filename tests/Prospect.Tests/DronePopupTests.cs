@@ -99,6 +99,26 @@ public sealed class DronePopupTests
     }
 
     [Fact]
+    public void EachCheckboxFlipsItsOwnSettingAndSendsTheOtherAsTheServerHasIt()
+    {
+        var bridge = new PlayerInputBridge();
+        var view = View(4, 0, auto: true);
+
+        // "Pick up ores" on leaves "Pick up cargo" as the view has it, and the other way round.
+        DronePopup.ToggleOres(view, 5, bridge);
+        Assert.True(bridge.ConsumeDroneSettings(out var ores));
+        Assert.Equal(new DroneSettingsMessage(5, true, true), ores);
+        view.PickUpOres = true;
+        DronePopup.ToggleAutoPickup(view, 5, bridge);
+        Assert.True(bridge.ConsumeDroneSettings(out var cargo));
+        Assert.Equal(new DroneSettingsMessage(5, false, true), cargo);
+        DronePopup.ToggleOres(view, 5, bridge);
+        Assert.True(bridge.ConsumeDroneSettings(out var off));
+        Assert.Equal(new DroneSettingsMessage(5, true, false), off);
+        Assert.False(bridge.ConsumeDroneSettings(out _));
+    }
+
+    [Fact]
     public void ThePopupAndItsTrackerTakeNoMemory()
     {
         var popup = new DronePopup();
@@ -115,6 +135,8 @@ public sealed class DronePopupTests
                 tracker.Update(view, 0.016f);
                 _ = tracker.Latest;
                 DronePopup.ToggleAutoPickup(view, 5, bridge);
+                bridge.ConsumeDroneSettings(out _);
+                DronePopup.ToggleOres(view, 5, bridge);
                 bridge.ConsumeDroneSettings(out _);
             }
         }

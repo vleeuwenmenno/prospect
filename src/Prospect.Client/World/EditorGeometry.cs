@@ -315,6 +315,8 @@ internal static class EditorGeometry
         : type.Tractor is not null ? PartRole.Tractor
         : type.Laser is not null ? PartRole.Laser
         : type.Bay is not null ? PartRole.Bay
+        : type.OreCapacity > 0 ? PartRole.Bin
+        : type.Hopper ? PartRole.Hopper
         : type.Cargo > 0 ? PartRole.Cargo
         : type.Crew > 0 ? PartRole.Crew
         : type.Module.Family != ModuleFamily.None ? PartRole.Module
@@ -334,6 +336,8 @@ internal static class EditorGeometry
         PartRole.Shield => new Vector3(0.30f, 0.75f, 1.00f),
         PartRole.Cargo => new Vector3(0.70f, 0.55f, 0.40f),
         PartRole.Bay => new Vector3(0.95f, 0.75f, 0.25f),
+        PartRole.Bin => new Vector3(0.62f, 0.50f, 0.36f),
+        PartRole.Hopper => new Vector3(0.85f, 0.62f, 0.30f),
         PartRole.Laser => new Vector3(1.00f, 0.35f, 0.30f),
         PartRole.Crew => new Vector3(0.90f, 0.90f, 0.95f),
         PartRole.Module => new Vector3(0.35f, 0.90f, 0.85f),
@@ -374,4 +378,10 @@ internal enum PartRole : byte
 
     /// <summary>A mining laser mounted on a face, fired as one of an action group.</summary>
     Laser,
+
+    /// <summary>An ore bin: holds raw ore of one kind.</summary>
+    Bin,
+
+    /// <summary>An ore hopper: takes ore chunks through its intake face into the bins.</summary>
+    Hopper,
 }

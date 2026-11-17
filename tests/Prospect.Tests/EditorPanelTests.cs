@@ -131,16 +131,23 @@ public sealed class EditorPanelTests
         Assert.Equal(0, count);
         Assert.Equal(FillOffer.ApplyFirst, EditorFill.Plan(draft, pod, [tanks[0].Block, added], blocks, out _));
 
-        // A tank resized in the draft is another tank until it is applied.
+        // A tank resized in the draft is another tank until it is applied. The first tank with a free cell beside it
+        // is grown: the ones along the keel are boxed in by the ore bins under them.
         var resized = BuildDraft.FromBlueprint(pod, Content);
-        var box = resized.Boxes[tanks[0].Block];
-        var grown = false;
-        for (var face = 0; face < 6 && !grown; face++)
-            grown = resized.Resize(tanks[0].Block, face, new[] { box.Size.X, box.Size.Y, box.Size.Z }[face >> 1] + 1) == DraftEdit.Done;
-        Assert.True(grown);
-        Assert.NotEqual(box.Size, resized.Boxes[tanks[0].Block].Size);
-        Assert.Equal(FillOffer.ApplyFirst, EditorFill.Plan(resized, pod, [tanks[0].Block], blocks, out _));
-        Assert.Equal(FillOffer.Ready, EditorFill.Plan(resized, pod, [tanks[1].Block], blocks, out count));
+        var grownTank = -1;
+        var box = default(DesignBox);
+        for (var t = 0; t < tanks.Length && grownTank < 0; t++)
+        {
+            box = resized.Boxes[tanks[t].Block];
+            for (var face = 0; face < 6 && grownTank < 0; face++)
+                if (resized.Resize(tanks[t].Block, face, new[] { box.Size.X, box.Size.Y, box.Size.Z }[face >> 1] + 1) == DraftEdit.Done)
+                    grownTank = t;
+        }
+        Assert.True(grownTank >= 0);
+        var other = grownTank == 0 ? 1 : 0;
+        Assert.NotEqual(box.Size, resized.Boxes[tanks[grownTank].Block].Size);
+        Assert.Equal(FillOffer.ApplyFirst, EditorFill.Plan(resized, pod, [tanks[grownTank].Block], blocks, out _));
+        Assert.Equal(FillOffer.Ready, EditorFill.Plan(resized, pod, [tanks[other].Block], blocks, out count));
 
         // More than a request carries.
         var many = new int[EditorRequestMessage.MaxFill + 1];
@@ -192,7 +199,7 @@ public sealed class EditorPanelTests
         drone.Category = Array.IndexOf(Tuning.Categories, Tab("Storage"));
         Assert.Equal(["microBipropellantTank", "microNitrogenTank"], types.Where(t => drone.Shows(Tuning, t)).Select(t => t.Id).ToArray());
         ship.Category = Array.IndexOf(Tuning.Categories, Tab("Storage"));
-        Assert.Equal(["bipropellantTank", "hydrazineTank", "nitrogenTank", "cargo", "droneBay", "tractorBeam", "miningLaser"], types.Where(t => ship.Shows(Tuning, t)).Select(t => t.Id).ToArray());
+        Assert.Equal(["bipropellantTank", "hydrazineTank", "nitrogenTank", "cargo", "droneBay", "oreBin", "oreHopper", "tractorBeam", "miningLaser"], types.Where(t => ship.Shows(Tuning, t)).Select(t => t.Id).ToArray());
     }
 
     [Fact]
@@ -203,9 +210,9 @@ public sealed class EditorPanelTests
         string[] Cards() => Enumerable.Range(0, types.Count).Where(i => palette.ShowsCard(Tuning, types, i)).Select(i => types[i].Id).ToArray();
 
         // One card stands for the three tanks, and it places the chosen fuel's type.
-        Assert.Equal(["bipropellantTank", "cargo", "droneBay", "tractorBeam", "miningLaser"], Cards());
+        Assert.Equal(["bipropellantTank", "cargo", "droneBay", "oreBin", "oreHopper", "tractorBeam", "miningLaser"], Cards());
         palette.TankFuel = FuelKind.Hydrazine;
-        Assert.Equal(["hydrazineTank", "cargo", "droneBay", "tractorBeam", "miningLaser"], Cards());
+        Assert.Equal(["hydrazineTank", "cargo", "droneBay", "oreBin", "oreHopper", "tractorBeam", "miningLaser"], Cards());
         Assert.Equal(Array.FindIndex(types.ToArray(), t => t.Id == "nitrogenTank"), palette.TankTypeOf(types, FuelKind.Nitrogen));
         Span<FuelKind> fuels = stackalloc FuelKind[4];
         Assert.Equal(3, palette.TankFuels(types, fuels));

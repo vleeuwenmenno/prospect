@@ -154,6 +154,8 @@ internal sealed class EditorPalette
         PartRole.Tractor => "tractor cargo pickup",
         PartRole.Bay => "drone bay hatch launch",
         PartRole.Laser => "mining laser cut rock fire group",
+        PartRole.Bin => "ore bin storage mining",
+        PartRole.Hopper => "ore hopper intake mining chunk",
         PartRole.Crew => "crew quarters",
         PartRole.Module => "module scanner locator gas asteroid survey",
         _ => "structure armour hull",

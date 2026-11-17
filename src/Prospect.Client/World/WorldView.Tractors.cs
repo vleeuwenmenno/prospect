@@ -44,21 +44,28 @@ internal sealed partial class WorldView
     {
         from = to = default;
         pose = default;
-        if (!container.TractorPowered || container.TractorHull == 0 || _snapshot is null) return false;
+        if (!container.TractorPowered || !TractorEmitter(container.TractorHull, container.TractorMount, out from)
+            || !TryGetContainer(container.Id, out pose)) return false;
+        to = pose.Position;
+        return true;
+    }
+
+    /// <summary>Where the beam of a drawn hull's tractor mount leaves it, on the hull's rendered pose. False for a hull or mount not drawn.</summary>
+    private bool TractorEmitter(uint hullId, int tractor, out Double3 from)
+    {
+        from = default;
+        if (hullId == 0 || _snapshot is null) return false;
         for (var i = 0; i < _snapshot.HullCount && i < _visuals.Hulls.Length; i++)
         {
             ref var hull = ref _snapshot.Hulls[i];
-            if (hull.Id != container.TractorHull || hull.Design >= InstalledDesigns || hull.Design >= _designs.Length) continue;
+            if (hull.Id != hullId || hull.Design >= InstalledDesigns || hull.Design >= _designs.Length) continue;
             var design = _designs[hull.Design];
-            if ((uint)container.TractorMount >= (uint)design.Mounts.Length) return false;
-            var mount = design.Mounts[container.TractorMount];
+            if ((uint)tractor >= (uint)design.Mounts.Length) return false;
+            var mount = design.Mounts[tractor];
             if (mount.Type.Tractor is null || !BlockSet.Has(hull.Blocks.Span, mount.Parent)) return false;
             ref readonly var visual = ref _visuals.Hulls[i];
-            var offset = design.MountOffsets[container.TractorMount]
-                + Facings.Vector(mount.Face) * design.MountHalfExtents[container.TractorMount];
+            var offset = design.MountOffsets[tractor] + Facings.Vector(mount.Face) * design.MountHalfExtents[tractor];
             from = DrawnPosition(visual) + HullRotation.Rotate(offset, visual.Orientation);
-            if (!TryGetContainer(container.Id, out pose)) return false;
-            to = pose.Position;
             return true;
         }
         return false;
@@ -116,6 +123,17 @@ internal sealed partial class WorldView
                 targetRel = pose.Position.RelativeTo(camera);
                 return true;
             }
+        }
+
+        // An ore chunk the beam holds, where it is drawn.
+        var chunks = _oreVisuals.Items;
+        var tick = OreChunkVisuals.ShownTick(snapshot.Hulls.AsSpan(0, snapshot.HullCount), snapshot.OwnHull, snapshot.ServerTickPrecise, _frameAlpha);
+        for (var i = 0; i < chunks.Length; i++)
+        {
+            ref readonly var item = ref chunks[i];
+            if (!item.TractorPowered || item.TractorHull != hullId || item.TractorMount != mount) continue;
+            targetRel = _oreVisuals.Pose(i, tick).Position.RelativeTo(camera);
+            return true;
         }
         return false;
     }
@@ -256,6 +274,39 @@ internal sealed partial class WorldView
                 ToLength = new float4(toRel.X, toRel.Y, toRel.Z, len),
                 ContainerQuat = new float4(q.X, q.Y, q.Z, q.W),
                 ContainerHalf = new float4(half.X, half.Y, half.Z, half.Length()),
+            };
+        }
+
+        // Ore chunks a beam holds: the same beam, ending on the chunk where it is drawn.
+        var chunks = _oreVisuals.Items;
+        var tick = OreChunkVisuals.ShownTick(snapshot.Hulls.AsSpan(0, snapshot.HullCount), snapshot.OwnHull, snapshot.ServerTickPrecise, _frameAlpha);
+        for (var i = 0; i < chunks.Length && count < output.Length; i++)
+        {
+            ref readonly var item = ref chunks[i];
+            if (!item.TractorPowered || !TractorEmitter(item.TractorHull, item.TractorMount, out var from)) continue;
+            var fromRel = from.RelativeTo(camera);
+            for (var s = 0; s < _turrets.Length; s++)
+            {
+                ref readonly var state = ref _turrets[s];
+                if (state.HullId == item.TractorHull && state.Mount == item.TractorMount && state.LensFrame == _turretFrame)
+                {
+                    fromRel = state.LensRel;
+                    break;
+                }
+            }
+            var pose = _oreVisuals.Pose(i, tick);
+            var toRel = pose.Position.RelativeTo(camera);
+            var len = (toRel - fromRel).Length();
+            if (len < 1e-4f) continue;
+            var half = OreChunks.Half(snapshot.Content.Mining, item.Mass);
+            var q = pose.Orientation;
+            var seed = ((item.Id * 0x85EBCA6Bu) & 0xFFFFu) / 65536f;
+            output[count++] = new TractorInstance
+            {
+                FromSeed = new float4(fromRel.X, fromRel.Y, fromRel.Z, seed),
+                ToLength = new float4(toRel.X, toRel.Y, toRel.Z, len),
+                ContainerQuat = new float4(q.X, q.Y, q.Z, q.W),
+                ContainerHalf = new float4(half, half, half, half * 1.7320508f),
             };
         }
         _scene.QueueTractors(count, TractorLook.Constants);

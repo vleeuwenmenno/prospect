@@ -680,5 +680,33 @@
     "body": [0.5, 0.54, 0.58],
     "door": [0.88, 0.58, 0.12],
     "light": [0.3, 1.0, 0.45]
+  },
+  "hopper": {
+    "inset": 0.05,
+    "beam": 0.07,
+    "beamShade": 0.34,
+    "rimShade": 0.6,
+    "stepShade": 0.3,
+    "barShade": 0.5,
+    "pitShade": 0.07,
+    "rimWidth": 0.14,
+    "stepWidth": 0.12,
+    "pitDepth": 0.7,
+    "bars": 2,
+    "barWidth": 0.07,
+    "lightLift": 0.03,
+    "lightLength": 0.4,
+    "lightWidth": 0.06,
+    "body": [0.46, 0.42, 0.36],
+    "light": [1.0, 0.62, 0.15]
+  },
+  "bin": {
+    "inset": 0.05,
+    "beam": 0.07,
+    "beamShade": 0.34,
+    "bandWidth": 0.22,
+    "bandLift": 0.02,
+    "body": [0.38, 0.36, 0.33],
+    "band": [0.82, 0.56, 0.18]
   }
 }

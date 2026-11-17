@@ -178,8 +178,11 @@ public static class LaserBeamsMessage
 /// <summary>A complete sensor-filtered set of loose ore chunks, sent reliably every few ticks, as loose containers are.</summary>
 public static class OreChunkMessage
 {
-    /// <summary>Bytes a chunk takes: id, position, velocity, orientation, spin, resource, grade and mass.</summary>
-    public const int RecordBytes = 4 + 24 + 12 + 16 + 12 + 1 + 4 + 4;
+    /// <summary>
+    /// Bytes a chunk takes: id, position, velocity, orientation, spin, resource, grade and mass, then the tractor
+    /// that holds it (hull, mount, stage and whether it pulls).
+    /// </summary>
+    public const int RecordBytes = 4 + 24 + 12 + 16 + 12 + 1 + 4 + 4 + 4 + 2 + 1 + 1;
 
     /// <summary>Id, tick and count.</summary>
     public const int HeaderBytes = 1 + 8 + 2;
@@ -198,20 +201,39 @@ public static class OreChunkMessage
         w.WriteByte((byte)c.Resource);
         w.WriteSingle(c.Grade);
         w.WriteSingle(c.Mass);
+        w.WriteUInt32(c.TractorHull); w.WriteUInt16((ushort)c.TractorMount);
+        w.WriteByte(c.TractorStage); w.WriteByte(c.TractorPowered ? (byte)1 : (byte)0);
     }
 
     /// <summary>Reads one chunk; validation belongs to the enclosing message or saved-world contract.</summary>
-    public static OreChunk ReadRecord(ref NetReader r) => new()
+    public static OreChunk ReadRecord(ref NetReader r)
     {
-        Id = r.ReadUInt32(),
-        Position = new(r.ReadDouble(), r.ReadDouble(), r.ReadDouble()),
-        Velocity = new(r.ReadSingle(), r.ReadSingle(), r.ReadSingle()),
-        Orientation = new(r.ReadSingle(), r.ReadSingle(), r.ReadSingle(), r.ReadSingle()),
-        AngularVelocity = new(r.ReadSingle(), r.ReadSingle(), r.ReadSingle()),
-        Resource = r.ReadByte(),
-        Grade = r.ReadSingle(),
-        Mass = r.ReadSingle(),
-    };
+        var c = new OreChunk
+        {
+            Id = r.ReadUInt32(),
+            Position = new(r.ReadDouble(), r.ReadDouble(), r.ReadDouble()),
+            Velocity = new(r.ReadSingle(), r.ReadSingle(), r.ReadSingle()),
+            Orientation = new(r.ReadSingle(), r.ReadSingle(), r.ReadSingle(), r.ReadSingle()),
+            AngularVelocity = new(r.ReadSingle(), r.ReadSingle(), r.ReadSingle()),
+            Resource = r.ReadByte(),
+            Grade = r.ReadSingle(),
+            Mass = r.ReadSingle(),
+            TractorHull = r.ReadUInt32(),
+            TractorMount = r.ReadUInt16(),
+            TractorStage = r.ReadByte(),
+        };
+        var powered = r.ReadByte();
+        c.TractorPowered = powered == 1;
+
+        // A flag that is neither on nor off makes the claim one ValidClaim refuses.
+        if (powered > 1) c.TractorStage = byte.MaxValue;
+        return c;
+    }
+
+    /// <summary>A claim a server could have sent: none at all, or a hull, one of a design's mounts and a stage.</summary>
+    public static bool ValidClaim(GameContent content, in OreChunk c) => c.TractorHull == 0
+        ? c.TractorMount == 0 && c.TractorStage == 0 && !c.TractorPowered
+        : c.TractorHull >> 16 != 0 && (uint)c.TractorMount < (uint)content.Blocks.Limits.MaxMounts && c.TractorStage <= 1;
 
     /// <summary>Writes a full set; an empty set withdraws every earlier chunk.</summary>
     public static void Write(ref NetWriter writer, long tick, ReadOnlySpan<OreChunk> items)
@@ -231,7 +253,7 @@ public static class OreChunkMessage
         for (var i = 0; i < count; i++)
         {
             var c = ReadRecord(ref reader);
-            if (c.Id == 0 || !OreChunks.Valid(content, c)) return false;
+            if (c.Id == 0 || !OreChunks.Valid(content, c) || !ValidClaim(content, c)) return false;
             for (var j = 0; j < i; j++) if (items[j].Id == c.Id) return false;
             items[i] = c;
         }
