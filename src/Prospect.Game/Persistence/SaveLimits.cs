@@ -54,6 +54,9 @@ public sealed record SaveLimits
     /// <summary>Bounded retained module results across all durable owners.</summary>
     public long MaxModuleObservations => (long)MaxOwners * ModuleScanRules.KnowledgePerOwner;
 
+    /// <summary>Kept drone scan results across all durable owners.</summary>
+    public long MaxDroneScans => (long)MaxOwners * DroneScanRecordRules.KnowledgePerOwner;
+
     /// <summary>All owners at the hard per-owner chart limit.</summary>
     public long MaxCharts => (long)MaxOwners * ExplorationRules.MaxChartsPerOwner;
 
@@ -65,6 +68,7 @@ public sealed record SaveLimits
         WorldSnapshotCodec.HeaderBound
         + FreeContainers.Capacity * WorldSnapshotCodec.FreeContainerBytes
         + MaxModuleObservations * WorldSnapshotCodec.ModuleObservationBytes
+        + MaxDroneScans * Protocol.DroneScanCodec.MaxBytes
         + MaxCharts * WorldSnapshotCodec.ChartBytes
         + MaxCatalogueBytes
         + (long)MaxDesigns * (4 + SHA256.HashSizeInBytes)
@@ -83,6 +87,7 @@ public sealed record SaveLimits
     public long MaxDecodedBytes =>
         FreeContainers.Capacity * System.Runtime.CompilerServices.Unsafe.SizeOf<FreeContainer>()
         + MaxModuleObservations * (System.Runtime.CompilerServices.Unsafe.SizeOf<ModuleObservation>() + 128)
+        + MaxDroneScans * System.Runtime.CompilerServices.Unsafe.SizeOf<DroneScanRecord>()
         + MaxCharts * (System.Runtime.CompilerServices.Unsafe.SizeOf<SectorChart>() + 128)
         + MaxCatalogueBytes
         + (long)MaxDesigns * (SHA256.HashSizeInBytes + 64)

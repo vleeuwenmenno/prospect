@@ -145,6 +145,9 @@ public sealed record DroneRules
     /// <summary>Seconds auto pickup waits after its owner recalls the drones by hand, so a recall means something.</summary>
     public required float AutoPickupPauseSeconds { get; init; }
 
+    /// <summary>How drones scan rocks: range, standoff, travel and the two scan levels.</summary>
+    public required DroneScanRules Scans { get; init; }
+
     /// <summary>Ticks a refused container is skipped, at least one.</summary>
     public long AutoPickupRetryTicks => Math.Max(1, (long)Math.Ceiling(AutoPickupRetrySeconds * TickLoop.SimulationHz));
 
@@ -210,6 +213,7 @@ public sealed record DroneRules
             AutoPickupWindow = Whole("autoPickupWindow", 1, FreeContainers.Capacity),
             AutoPickupRetrySeconds = Number("autoPickupRetrySeconds", 1, 3600),
             AutoPickupPauseSeconds = Number("autoPickupPauseSeconds", 0, 3600),
+            Scans = DroneScanRules.Read(root.GetProperty("scans"u8), root.GetProperty("maxPerPlayer"u8).GetInt32()),
         };
         if (rules.HoldDistanceMetres > rules.MaxHoldDistanceMetres)
             throw new InvalidDataException("drones.json: holdDistanceMetres must not exceed maxHoldDistanceMetres");

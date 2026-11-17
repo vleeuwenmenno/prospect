@@ -23,6 +23,29 @@ public enum OrderTask : byte
     /// base hull's tractor beam. Phase 1 while the drone is close enough to its place to pull.
     /// </summary>
     Fetch = 3,
+
+    /// <summary>
+    /// Take a place around the rock of the hull's drone scan (<see cref="TaskOrder.Point"/>, in the rock's own frame,
+    /// metres from its centre), flying around the rock's shell, and hold it for the group scan. Phase 1 while the drone
+    /// holds its place; <see cref="ScanLeaving"/> once the scan is over and it flies around the rock toward home.
+    /// </summary>
+    Survey = 4,
+
+    /// <summary>The same for the detailed scan, which maps veins and pockets.</summary>
+    DetailedScan = 5,
+}
+
+/// <summary>Phases shared by the scan tasks.</summary>
+public static class ScanOrderPhase
+{
+    /// <summary>On the way to its place.</summary>
+    public const byte Moving = 0;
+
+    /// <summary>Holding its place.</summary>
+    public const byte InPlace = 1;
+
+    /// <summary>The scan is over: around the rock toward home, then a recall.</summary>
+    public const byte ScanLeaving = 2;
 }
 
 /// <summary>

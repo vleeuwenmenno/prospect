@@ -276,7 +276,7 @@ public sealed class OwnerClaimTests
         var countsOffset = ownerOffset;
         for (var i = 0; i < snapshot.DesignCount; i++)
             countsOffset -= 4 + 32 + snapshot.Designs[i].Length;
-        countsOffset -= 32 + 4 + 4 + SavedCargoRules.WireBytes + 8 + 8;
+        countsOffset -= 32 + 4 + 4 + SavedCargoRules.WireBytes + 8 + 8 + 4;
         System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(duplicate.AsSpan(countsOffset), 2);
         var nextOwnerOffset = countsOffset - 5 - snapshot.StartingFleet.Length - 8 - 4;
         System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(duplicate.AsSpan(nextOwnerOffset), 3);

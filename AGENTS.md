@@ -35,7 +35,7 @@ Use the Makefile, not raw `dotnet` commands.
 | --- | --- |
 | `make setup` | First run on a machine: system packages for the OS (Vulkan; MoltenVK on macOS), the .NET SDK into `~/.dotnet`, restore. `make doctor` checks the toolchain and GPU. |
 | `make check` | Formatting, warnings-as-errors build and all tests. Must pass before work is called done. Takes about two minutes. |
-| `make bench` | Release benchmarks: an empty scene, resizing (`--bench-resize`), then editor cargo, Fuel menu, fuel-on-apply and mirror ghosts (four measured seconds each, after four seconds for scripted edits and workers to settle). Then, on a copy of the build whose pod has a tractor beam and racks (`tools/prepare_tractor_capture.py`), 25 s of cargo: jettison, drift, tractor pull and stow (`--open cargo --jettison 5`); it also fails unless the container was seen loose and is back in the hold. Then, on a copy whose pod has a drone bay (`tools/prepare_drone_capture.py`), 25 s of drones: launch, hold station, recall and dock (`--open drones --drone-recall 12`); it also fails unless a drone was seen out and the bay is full again. Last, 14 s of a rock being scraped thirty passes (`--open rock-scrape`): edits, bricks and patch rebuilds on every thread; it also fails unless all 480 edits came back from the server and the patch was rebuilt and is drawn. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
+| `make bench` | Release benchmarks: an empty scene, resizing (`--bench-resize`), then editor cargo, Fuel menu, fuel-on-apply and mirror ghosts (four measured seconds each, after four seconds for scripted edits and workers to settle). Then, on a copy of the build whose pod has a tractor beam and racks (`tools/prepare_tractor_capture.py`), 25 s of cargo: jettison, drift, tractor pull and stow (`--open cargo --jettison 5`); it also fails unless the container was seen loose and is back in the hold. Then, on a copy whose pod has a drone bay (`tools/prepare_drone_capture.py`), 25 s of drones: launch, hold station, recall and dock (`--open drones --drone-recall 12`); it also fails unless a drone was seen out and the bay is full again. Then, on the same copy, 30 s of a detailed drone scan (`--open drone-scan --drone-scan detailed`); it also fails unless the result arrived. Last, 14 s of a rock being scraped thirty passes (`--open rock-scrape`): edits, bricks and patch rebuilds on every thread; it also fails unless all 480 edits came back from the server and the patch was rebuilt and is drawn. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
 | `make bench-scans` | Release benchmark with each module scan type repeating (gas, asteroid, locator), on a copy of the build whose pod carries the scanners (`tools/prepare_scan_bench.py`). Fails on any managed allocation on any thread, or under five completed scans. Run it after touching module scans, their server worker or the module interface. |
 | `make bench-gas` | Release benchmark inside gas clouds (ordinary from inside, pilot and command view, huge, lightning; cold and a pair reported only). Fails under 144 fps or on any managed allocation. Run it after touching the gas shaders or how gas is drawn. |
 | `make run ARGS="..."` | The client. `make server` is the dedicated server. |
@@ -317,6 +317,33 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `--open cargo --jettison 5 --drone-autopickup 3 --drone-popup` (scripted runs only). Capture: `tools/prepare_drone_capture.py` then
   `--open drones` (launch 3 at 1.5 s, recall at `--drone-recall`, default 14 s) and `--open edit-bay` (a bay's ghost
   on a top face, hatch up); `make bench` runs `--open drones` on the prepared copy.
+- **Drone scans (D3):** two levels of the same group job, `DroneScanKind.Survey` (true bulk composition at
+  `scans.resolution`, 0.1 %, and a vein count band) and `Detailed` (that plus a map: veins as polylines with a radius
+  per point, pockets with kind and ore, a 64-cell surface heat map: unstable pocket under a cell, how near rich ore is).
+  Shared rules are `World/DroneScans.cs`: `DroneScanning.Needed` (drones from size, shape stretch and line of sight:
+  each drone covers the smaller of the cap it sees from the standoff and its sensors' `coverageSquareMetres`; together
+  `cover` times; at least `minDrones`, more than `maxDrones` refuses TooLarge), `Place` (golden-spiral directions, the
+  standoff off the surface `RockInteriorSurface` gives that way), `Travel` (around the bounding shell, at most
+  `travelStepDegrees` a leg, so no leg cuts the rock). Figures are the `scans` entry of `blocks/drones.json` (shared).
+  The server is `ServerDroneScans.cs`: one `ScanGroup` per bay page (one scan per hull), `StartDroneScan` (the one way
+  in: sight through `Covered`, range, count, holders first then launches, else TooFew with the count), orders
+  `OrderTask.Survey`/`DetailedScan` in the one executor (`ScanOrder`), `TickDroneScan` (Moving, Ready when all hold,
+  Scanning only on the player's order, then `CompleteDroneScan`), `EndDroneScan` (drones fly around the rock to the
+  ship's side, `ScanOrderPhase.ScanLeaving`, then an ordinary recall). The result is `DroneScanResults.Build` from
+  `RockInterior` on the server only; a client shows `SessionSnapshot.DroneScans` and never describes an interior.
+  Kept per owner (`DroneScanRecordRules.KnowledgePerOwner`, 32; the oldest gives way; a survey never replaces a
+  detailed record). Wire: protocol 69, `DroneScanCommandMessage` (47, own rate limit), `DroneScanResultMessage` (48, one
+  record, `DroneScanCodec`, at most 1,281 bytes), scan fields in `BayView` (40). Save: codec 21, `WorldSnapshot.DroneScans`,
+  `RestoreDroneScans` is the load rule (owner, rock, resources, time, each rock once). A scan group is never saved: a
+  saved world docks its drones. Tests: `DroneScanTests`. Client: keys `SurveyRock` (`;`), `DetailedScan` (`'`) and
+  `ToggleScanHologram` (`\`) through `DroneScanUi.Press` (Ready starts, the same kind again cancels); the target panel's
+  buttons and the drone result rows are `Screens.DroneScans.cs` (a drone record is shown in place of the module
+  analysis, through `DroneScanRecord.AsObservation` and `RockComposition`); the hologram is `ScanHologram` (font-free,
+  fixed buffers) drawn with the ImGui draw list from `WorldView.TryGetRockPose`; figures are `droneScan` in
+  `content/visuals/modules.json`. Tests: `DroneScanUiTests`. Capture: `tools/prepare_drone_capture.py`, then
+  `--open drone-scan --drone-scan survey|detailed` (the rock-scrape placement without scraping; `--drone-scan-hold <s>`
+  stays READY that long, `--drone-scan-camera dist,yaw,pitch` with `--drone-scan-camera-at <s>` moves the command
+  camera); `make bench` runs it for 30 s and fails unless the detailed result arrived.
 - **Debug: add container (temporary, local games only):** `EditorRequestKind.AddContainer` asks for size/resource in
   one existing selected rack. `ShipEditor.RequestContainer` sends through `PlayerInputBridge`; `ServerHost.AddContainer`
   checks the edit token, owner, controlled hull, in-process transport, `AllowDebugFill`, rate and `HasRoom`, then uses

@@ -73,6 +73,7 @@ internal sealed partial class ScreenHost
         }
 
         _moduleTargets = targets;
+        UpdateDroneScans(snapshot, world);
         _droneState = DroneUi.State(snapshot.Bays, own.Id);
         _droneTrack.Update(snapshot.Bays, _ui.DeltaTime);
         _dronePopup.Follow(own.Id, _droneState != DroneChipState.Absent);
@@ -119,6 +120,7 @@ internal sealed partial class ScreenHost
     {
         DroneUi.HandleKeys(_app.Actions, _app.Devices, !_ui.WantsTextInput, snapshot.Bays, _app.World.Own.Id, bridge,
             DroneUi.FetchSubject(_app.World.HoverContainerId, _app.World.TargetContainer));
+        HandleDroneScanKeys(bridge, snapshot, _app.World);
         for (var slot = 0; slot < 3; slot++)
         {
             var family = ModuleRules.Families[slot];
@@ -315,8 +317,29 @@ internal sealed partial class ScreenHost
         Kit.ClippedText(draw, _ui.SansMedium, Theme.FontCaption, min + new float2(pad + keyWidth + Kit.Px(Theme.Space2), Kit.Px(4)), Theme.Text, recalling ? "RECALL"u8 : "LAUNCH"u8, Math.Max(0f, inner - keyWidth - Kit.Px(Theme.Space2)));
         var statusAt = min + new float2(pad, Kit.Px(20));
         var rebuild = DroneUi.RebuildSeconds(bays, snapshot.ServerTick);
-        if (reply != DroneReply.None)
-            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, DroneUi.Refused(reply) ? Theme.Bad : Theme.Good, DroneUi.Words(reply), inner);
+        // A scan under way speaks for itself (where the drones are, ready, the time left) unless the server just refused
+        // something: the refusal says why a key did nothing.
+        var scanning = DroneScanUi.Active(bays) || bays.ScanPhase == DroneScanPhase.Returning;
+        if (reply != DroneReply.None && (DroneUi.Refused(reply) || !scanning))
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, DroneReplyColour(reply), DroneUi.Words(reply), inner);
+        else if (scanning)
+        {
+            switch (bays.ScanPhase)
+            {
+                case DroneScanPhase.Moving:
+                    Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Info, Kit.F($"SCAN {bays.ScanInPlace}/{bays.ScanDrones}"), inner);
+                    break;
+                case DroneScanPhase.Ready:
+                    Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Good, "SCAN READY"u8, inner);
+                    break;
+                case DroneScanPhase.Scanning:
+                    Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Info, Kit.F($"SCANNING {DroneScanUi.SecondsLeft(bays, snapshot.ServerTick):0.0} S"), inner);
+                    break;
+                default:
+                    Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.TextDim, "SCAN DONE"u8, inner);
+                    break;
+            }
+        }
         else if (bays.Fetching > 0)
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Info, Kit.F($"{bays.Fetching} FETCHING  {stocked} IN"), inner);
         else if (_droneState == DroneChipState.Out)
@@ -328,8 +351,14 @@ internal sealed partial class ScreenHost
         else
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.TextMute, "EMPTY"u8, inner);
 
-        // A drone being rebuilt shows as a bar along the foot, filling as it nears done.
-        if (rebuild > 0 && bays.NextRebuild() is var done and > 0)
+        // A running scan shows as a bar along the foot, filling as it nears its end; so does a drone being rebuilt.
+        if (bays.ScanPhase == DroneScanPhase.Scanning)
+        {
+            var track = new float2(min.X + Kit.Px(3), max.Y - Kit.Px(4));
+            draw.AddRectFilled(track, new float2(max.X - Kit.Px(1), max.Y - Kit.Px(1)), Kit.Color(Theme.PanelRaised, 0.9f));
+            draw.AddRectFilled(track, new float2(track.X + (max.X - Kit.Px(1) - track.X) * DroneScanUi.Progress(bays, snapshot.ServerTick), max.Y - Kit.Px(1)), Kit.Color(Theme.Info));
+        }
+        else if (rebuild > 0 && bays.NextRebuild() is var done and > 0)
         {
             var full = Math.Max(1f, MaxRebuildTicks(snapshot));
             var progress = Math.Clamp(1f - (done - snapshot.ServerTick) / full, 0f, 1f);
@@ -356,7 +385,8 @@ internal sealed partial class ScreenHost
         var gap = Kit.Px(Theme.Space2);
         var line = Kit.Px(16);
         var width = Kit.Px(244);
-        var height = pad * 2 + line + gap + Kit.Px(Theme.ControlHeight) + gap + Kit.Px(24) + gap + line * DronePopupStatusLines;
+        var height = pad * 2 + line + gap + Kit.Px(Theme.ControlHeight) + gap + Kit.Px(24) + gap + line * DronePopupStatusLines
+            + gap + line + gap + Kit.Px(Theme.ControlHeight);
         var display = _ui.DisplaySize;
         var edge = Kit.Px(Theme.Space2);
         var min = new float2(
@@ -411,8 +441,30 @@ internal sealed partial class ScreenHost
             const string Label = "LAST  ";
             var labelWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, Label).X;
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, at, Theme.TextMute, Label);
-            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(labelWidth, 0), DroneUi.Refused(last) ? Theme.Bad : Theme.Good, DroneUi.Words(last), Math.Max(0f, inner - labelWidth));
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(labelWidth, 0), DroneReplyColour(last), DroneUi.Words(last), Math.Max(0f, inner - labelWidth));
         }
+        at.Y += line + gap;
+
+        // The drone scan: where it stands, a button to order it once the drones are in place, and one to give it up.
+        var ready = bays.ScanPhase == DroneScanPhase.Ready;
+        var active = DroneScanUi.Active(bays);
+        var scanText = bays.ScanPhase switch
+        {
+            DroneScanPhase.Moving => Kit.F($"{(bays.ScanKind == DroneScanKind.Detailed ? "DETAILED" : "SURVEY")} SCAN  {bays.ScanInPlace}/{bays.ScanDrones} IN PLACE"),
+            DroneScanPhase.Ready => Kit.F($"{(bays.ScanKind == DroneScanKind.Detailed ? "DETAILED" : "SURVEY")} SCAN READY  {bays.ScanDrones} DRONES"),
+            DroneScanPhase.Scanning => Kit.F($"SCANNING  {DroneScanUi.SecondsLeft(bays, snapshot.ServerTick):0.0} S LEFT"),
+            DroneScanPhase.Returning => "SCAN OVER  DRONES RETURNING"u8,
+            _ => "NO SCAN UNDER WAY"u8,
+        };
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at, ready || active ? Theme.Info : Theme.TextMute, scanText, inner);
+        at.Y += line + gap;
+        var half = (inner / Kit.Scale - Theme.Space2) * 0.5f;
+        ImGui.SetCursorScreenPos(at);
+        if (Kit.Button("Scan"u8, ButtonKind.Primary, half, ready) && Bridge is { } scanBridge)
+            DroneScanUi.StartIfReady(bays, own, scanBridge);
+        ImGui.SetCursorScreenPos(at + new float2(Kit.Px(half + Theme.Space2), 0));
+        if (Kit.Button("Cancel scan"u8, ButtonKind.Secondary, half, active) && Bridge is { } cancelBridge)
+            DroneScanUi.CancelIfActive(bays, own, cancelBridge);
         ImGui.End();
     }
 
@@ -591,6 +643,10 @@ internal sealed partial class ScreenHost
     {
         var look = ModuleStyle;
         var galaxy = snapshot.Galaxy!;
+        // What the player's drones found is finer than any scanner module's analysis and comes first.
+        var drone = snapshot.DroneScans.Find(rock);
+        if (drone >= 0)
+            return DrawDroneAnalysis(draw, snapshot, rock, drone, at, width);
         var index = FindAnalysis(snapshot, rock);
         if (index < 0)
         {

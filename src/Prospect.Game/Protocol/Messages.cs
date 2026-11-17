@@ -118,6 +118,12 @@ public enum MessageId : byte
 
     /// <summary>Client to server, reliable: a drone setting of a hull. See <see cref="DroneSettingsMessage"/>.</summary>
     DroneSettings = 43,
+
+    /// <summary>Client to server, reliable: a drone scan of a rock asked for, started or given up. See <see cref="DroneScanCommandMessage"/>.</summary>
+    DroneScan = 47,
+
+    /// <summary>Server to client, reliable: one of the player's drone scan results. See <see cref="DroneScanResultMessage"/>.</summary>
+    DroneScanResult = 48,
 }
 
 public enum RejectReason : byte
@@ -194,7 +200,7 @@ public static class ProtocolInfo
     /// index in a list both ends generate for themselves, so two builds that generate differently would mean
     /// different rocks by the same number. Client and server must match exactly.
     /// </summary>
-    public const uint Version = 67;
+    public const uint Version = 69;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;

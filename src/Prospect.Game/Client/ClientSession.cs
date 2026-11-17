@@ -80,6 +80,9 @@ public sealed class SessionSnapshot(GameContent content)
     public bool OwnIsDrone;
     /// <summary>Personal retained module surveys and active operation feedback.</summary>
     public readonly ModuleKnowledgeView Modules = new();
+
+    /// <summary>What the player's drones found in rocks, as the server sent it. Nothing here is generated on the client.</summary>
+    public readonly DroneScanKnowledgeView DroneScans = new();
     public readonly ExplorationView Exploration = new(content.Exploration.ChartsPerOwner);
 
     public SessionState State;
@@ -189,7 +192,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     // Reserve the full fleet message, one five-byte Control, one editor request, one cargo release and one design acknowledgement
     // before allowing any social traffic.
     internal const int EditorBytesPerTick = EditorRequestMessage.MaxWireSize + DesignReadyMessage.WireSize;
-    internal const int SocialBytesPerTick = ServerHost.PlayerBytesPerTick - FleetOrdersMessage.MaxWireSize - 5 - EditorBytesPerTick - ExplorationMessage.ScanWireSize - ModuleMessage.RequestWireSize - JettisonCargoMessage.MaxWireSize - DroneCommandMessage.MaxWireSize - DroneSettingsMessage.MaxWireSize;
+    internal const int SocialBytesPerTick = ServerHost.PlayerBytesPerTick - FleetOrdersMessage.MaxWireSize - 5 - EditorBytesPerTick - ExplorationMessage.ScanWireSize - ModuleMessage.RequestWireSize - JettisonCargoMessage.MaxWireSize - DroneCommandMessage.MaxWireSize - DroneSettingsMessage.MaxWireSize - DroneScanCommandMessage.MaxWireSize;
     internal static readonly int SocialMessagesPerTick = Math.Min(ServerHost.PlayerMessagesPerTick - 7, SocialBytesPerTick / SocialMessage.MaxWireSize);
     private long _receivedSnapshotTick = -1;
     private long _clientTick;
@@ -371,6 +374,13 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                         if (!_transport.Send(0, NetChannel.Reliable, writer.Written))
                         { End(SessionEndReason.ConnectionLost); return; }
                     }
+                    if (sendCommands && Input.ConsumeDroneScan(out var droneScan))
+                    {
+                        var writer = new NetWriter(_sendBuffer);
+                        droneScan.Write(ref writer);
+                        if (!_transport.Send(0, NetChannel.Reliable, writer.Written))
+                        { End(SessionEndReason.ConnectionLost); return; }
+                    }
                     if (sendCommands && Input.ConsumeDroneSettings(out var droneSettings))
                     {
                         var writer = new NetWriter(_sendBuffer);
@@ -407,6 +417,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         var serverTick = _state == SessionState.Active ? EstimateServerTick(now) : 0;
         snapshot.ServerTick = (long)serverTick;
         _world.CopyModules(snapshot.Modules);
+        _world.CopyDroneScans(snapshot.DroneScans);
         _world.CopyExploration(snapshot.Exploration, (long)serverTick);
         snapshot.ServerTickPrecise = serverTick;
         snapshot.RockCount = _state == SessionState.Active ? _world.CopyRockDeltas(snapshot.Rocks) : 0;
@@ -564,6 +575,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
 
             case MessageId.Navigation when _state == SessionState.Active && channel == NetChannel.Reliable:
                 _world.OnNavigation(ref reader);
+                break;
+            case MessageId.DroneScanResult when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= DroneScanResultMessage.MaxWireSize:
+                _world.OnDroneScanResult(ref reader);
                 break;
             case MessageId.ModuleSurvey when _state == SessionState.Active && channel == NetChannel.Reliable:
                 _world.OnModuleSurvey(ref reader);

@@ -45,6 +45,9 @@ internal sealed class ModuleLook
     /// <summary>The module strip's figures.</summary>
     public StripLook Strip { get; init; } = new();
 
+    /// <summary>The drone scan panel's and the detailed scan hologram's figures.</summary>
+    public DroneScanLook DroneScan { get; init; } = new();
+
     /// <summary>The width, in unscaled pixels, of a gas bar on the sector card.</summary>
     public float CardBarWidth { get; init; }
 
@@ -212,6 +215,7 @@ internal sealed class ModuleLook
         RockRgb = Rgb(path, "the rock", RockColorFile);
         if (!(TraceMarkPixels is >= 1 and <= 8) || !(CompositionBarHeight is >= 4 and <= 30) || !(CompositionRowHeight is >= 10 and <= 40) || !(TargetPanelFooter is >= 10 and <= 60))
             throw new InvalidDataException($"{path}: traceMarkPixels is 1 to 8, compositionBarHeight 4 to 30, compositionRowHeight 10 to 40, targetPanelFooter 10 to 60");
+        DroneScan.Build(path);
         if (!(UnresolvedPercent is >= 0 and <= 20) || !(TargetPanelUnknownExtra is >= 0 and <= 300))
             throw new InvalidDataException($"{path}: unresolvedPercent is 0 to 20, targetPanelUnknownExtra 0 to 300");
     }
@@ -248,6 +252,82 @@ internal sealed class ModuleLook
 
         /// <summary>How many of the nearest asteroids carry a class label while the pulse is fresh.</summary>
         public int LabelNearest { get; init; }
+    }
+
+    /// <summary>
+    /// The drone scans' figures: the rows of the target panel's scan block, and how the detailed scan's hologram is drawn
+    /// over its rock. Sizes are unscaled pixels; colours are six hex digits in the file.
+    /// </summary>
+    public sealed class DroneScanLook
+    {
+        /// <summary>One line of the record's text, the height of a scan button and the gap around rows, in unscaled pixels.</summary>
+        public float LineHeight { get; init; }
+        public float ButtonHeight { get; init; }
+        public float Gap { get; init; }
+
+        /// <summary>The width of the hologram's button, in unscaled pixels.</summary>
+        public float HologramButtonWidth { get; init; }
+
+        /// <summary>Alpha of a vein's line and of a pocket's fill and ring, at full strength.</summary>
+        public float VeinAlpha { get; init; }
+        public float PocketFillAlpha { get; init; }
+        public float PocketRingAlpha { get; init; }
+
+        /// <summary>A vein is drawn this thick (screen pixels) at least and at most, whatever the rock's size on screen.</summary>
+        public float VeinMinPixels { get; init; }
+        public float VeinMaxPixels { get; init; }
+
+        /// <summary>A pocket's circle is at least this wide (screen pixels), and an unstable one has a second ring this far outside it.</summary>
+        public float PocketMinPixels { get; init; }
+        public float UnstableRingPixels { get; init; }
+
+        /// <summary>A heat dot's radius in screen pixels, and the alpha of one that is neither easy nor unstable.</summary>
+        public float HeatDotPixels { get; init; }
+        public float HeatFaintAlpha { get; init; }
+
+        /// <summary>A heat cell counts as easy to reach from this much of <see cref="DroneScanMap.Ease"/>.</summary>
+        public float EasyThreshold { get; init; }
+
+        /// <summary>The strength left to a point on the far side of the rock's centre, from the camera: 1 is none lost.</summary>
+        public float FarStrength { get; init; }
+
+        [JsonPropertyName("unstableColor")]
+        public string UnstableColorFile { get; init; } = "";
+
+        [JsonPropertyName("easyColor")]
+        public string EasyColorFile { get; init; } = "";
+
+        [JsonPropertyName("faintColor")]
+        public string FaintColorFile { get; init; } = "";
+
+        [JsonPropertyName("veinKeyColor")]
+        public string VeinKeyColorFile { get; init; } = "";
+
+        [JsonPropertyName("pocketKeyColor")]
+        public string OrePocketKeyColorFile { get; init; } = "";
+
+        /// <summary>Colours of unstable pockets and cells, of easy cells, of cells with nothing near the surface, and of the legend's swatches for veins and ore pockets.</summary>
+        public uint UnstableRgb { get; private set; }
+        public uint EasyRgb { get; private set; }
+        public uint FaintRgb { get; private set; }
+        public uint VeinKeyRgb { get; private set; }
+        public uint OrePocketKeyRgb { get; private set; }
+
+        internal void Build(string path)
+        {
+            if (!(LineHeight is >= 10 and <= 40) || !(ButtonHeight is >= 14 and <= 48) || !(Gap is >= 0 and <= 16) || !(HologramButtonWidth is >= 40 and <= 240))
+                throw new InvalidDataException($"{path}: droneScan lineHeight is 10 to 40, buttonHeight 14 to 48, gap 0 to 16, hologramButtonWidth 40 to 240");
+            if (!Unit(VeinAlpha) || !Unit(PocketFillAlpha) || !Unit(PocketRingAlpha) || !Unit(HeatFaintAlpha) || !Unit(EasyThreshold) || !(FarStrength is > 0 and <= 1))
+                throw new InvalidDataException($"{path}: droneScan alphas and easyThreshold are 0 to 1, farStrength above 0 up to 1");
+            if (!(VeinMinPixels is >= 0.5f and <= 8) || !(VeinMaxPixels >= VeinMinPixels && VeinMaxPixels <= 40) || !(PocketMinPixels is >= 1 and <= 40)
+                || !(UnstableRingPixels is >= 0 and <= 20) || !(HeatDotPixels is >= 0.5f and <= 12))
+                throw new InvalidDataException($"{path}: droneScan veinMinPixels is 0.5 to 8, veinMaxPixels up to 40, pocketMinPixels 1 to 40, unstableRingPixels 0 to 20, heatDotPixels 0.5 to 12");
+            UnstableRgb = Rgb(path, "the unstable", UnstableColorFile);
+            EasyRgb = Rgb(path, "the easy", EasyColorFile);
+            FaintRgb = Rgb(path, "the faint", FaintColorFile);
+            VeinKeyRgb = Rgb(path, "the vein key", VeinKeyColorFile);
+            OrePocketKeyRgb = Rgb(path, "the pocket key", OrePocketKeyColorFile);
+        }
     }
 
     /// <summary>The module strip's figures.</summary>

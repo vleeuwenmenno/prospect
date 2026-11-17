@@ -194,6 +194,7 @@ internal sealed partial class ScreenHost
             }
 
             DrawLocatorVision(draw, snapshot, world, 1f, world.CommandBlend > 0.5f);
+            DrawScanHologram(draw, snapshot, world, 1f);
             if (pilot > 0.01f)
                 DrawFlightReadouts(draw, snapshot, world, pilot);
             if (world.CommandBlend > 0.01f)
@@ -808,11 +809,18 @@ internal sealed partial class ScreenHost
             // What the player has scanned decides how much the panel says: an unscanned rock shows only what can be seen
             // (its size and distance) and how to scan it; the generated ore and mass are not read off the sector.
             var analysis = FindAnalysis(snapshot, targetRock);
+            var droneResult = snapshot.DroneScans.Find(targetRock);
+            var dronesPresent = DroneUi.Present(snapshot.Bays, world.Own.Id);
             var look = ModuleStyle;
             var extra = look.TargetPanelUnknownExtra;
-            if (analysis >= 0)
+            if (droneResult >= 0)
+                extra = DroneAnalysisHeight(snapshot.DroneScans.Records[droneResult], snapshot.Galaxy!.Resources.Length);
+            else if (analysis >= 0)
                 extra = look.AnalysisHeight(RockComposition.From(snapshot.Modules.Records[analysis], snapshot.Galaxy!.Resources.Length));
-            var size = new float2(Kit.Px(HudLayout.TargetReadoutWidth), Kit.Px(92 + extra));
+            else if (dronesPresent)
+                extra = Math.Max(extra, 36f);
+            var buttons = dronesPresent ? DroneScanUi.ButtonBlockHeight(look.DroneScan) : 0f;
+            var size = new float2(Kit.Px(HudLayout.TargetReadoutWidth), Kit.Px(92 + extra + buttons));
             var min = new float2((display.X - size.X) * 0.5f, HudTop);
             Kit.PanelFrame(draw, min, min + size);
             var text = min + new float2(Kit.Px(Theme.Space4), Kit.Px(Theme.Space3));
@@ -824,6 +832,8 @@ internal sealed partial class ScreenHost
             var rangeSize = Kit.Measure(_ui.Mono, Theme.FontCaption, rangeText);
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(min.X + size.X - rangeSize.X - Kit.Px(Theme.Space4), text.Y + Kit.Px(20)), Theme.TextDim, rangeText);
             DrawRockAnalysis(draw, snapshot, world, targetRock, text + new float2(0, Kit.Px(64)), size.X - Kit.Px(Theme.Space4 * 2));
+            if (dronesPresent)
+                DrawDroneScanButtons(draw, snapshot, world, targetRock, text + new float2(0, Kit.Px(64 + extra)), size.X - Kit.Px(Theme.Space4 * 2));
         }
 
         if (world.TryGetContainer(world.TargetContainer, out var container)) DrawContainerReadout(draw, snapshot, container);

@@ -84,6 +84,39 @@ public enum DroneReply : byte
 
     /// <summary>Drones handed the container to the tractor beam and are coming home.</summary>
     Delivered = 20,
+
+    /// <summary>Drones are on their way to their places around the rock; the count says how many the scan takes.</summary>
+    ScanSent = 21,
+
+    /// <summary>Every scan drone holds its place: the scan waits for the player's order.</summary>
+    ScanReady = 22,
+
+    /// <summary>The scan runs.</summary>
+    ScanRunning = 23,
+
+    /// <summary>The scan is done and its result kept; the drones are coming home.</summary>
+    ScanDone = 24,
+
+    /// <summary>The rock needs more drones than a scan of that kind may take; the count says how many.</summary>
+    TooLarge = 25,
+
+    /// <summary>The hull already has a scan under way, or drones still on their way to a fetch.</summary>
+    ScanBusy = 26,
+
+    /// <summary>The drones do not all hold their places yet.</summary>
+    ScanNotReady = 27,
+
+    /// <summary>A scan drone was lost, or could not launch: too few are left to scan.</summary>
+    ScanAborted = 28,
+
+    /// <summary>The drones took too long to reach their places, or the scan was never ordered.</summary>
+    ScanTimedOut = 29,
+
+    /// <summary>The player gave the scan up.</summary>
+    ScanCancelled = 30,
+
+    /// <summary>This server cannot scan rocks with drones.</summary>
+    ScanUnavailable = 31,
 }
 
 /// <summary>A player's drone command for one of their hulls. Reliable; the server checks everything again.</summary>
@@ -190,6 +223,17 @@ public struct BayView
 
     /// <summary>True while the hull's drones fetch loose containers on their own.</summary>
     public bool AutoPickup;
+
+    /// <summary>The hull's drone scan: its kind and phase (<see cref="DroneScanPhase.None"/> without one) and its rock.</summary>
+    public DroneScanKind ScanKind;
+    public DroneScanPhase ScanPhase;
+    public RockRef ScanRock;
+
+    /// <summary>How many drones the scan takes and how many hold their places.</summary>
+    public byte ScanDrones, ScanInPlace;
+
+    /// <summary>While scanning, the server ticks it started and ends at; zero otherwise.</summary>
+    public long ScanStarted, ScanCompletes;
     public int Count;
     public BayEntries Bays;
 
@@ -219,7 +263,10 @@ public struct BayView
 public static class BayMessage
 {
     public const int RecordBytes = 2 + 1 + 1 + 1 + 1 + 1 + 8;
-    public const int HeaderBytes = 1 + 4 + 8 + 4 + 1 + 1 + 1 + 1 + 1;
+    public const int HeaderBytes = 1 + 4 + 8 + 4 + 1 + 1 + 1 + 1 + ScanBytes + 1;
+
+    /// <summary>The scan: kind, phase, sector, index, drones, in place, start and end.</summary>
+    public const int ScanBytes = 1 + 1 + 12 + 4 + 1 + 1 + 8 + 8;
     public const int MaxWireSize = HeaderBytes + DroneBayRules.MaxBays * RecordBytes;
 
     /// <summary>Writes the view whole.</summary>
@@ -228,7 +275,12 @@ public static class BayMessage
         writer.WriteByte((byte)MessageId.Bays);
         writer.WriteUInt32(view.Hull); writer.WriteInt64(view.Tick); writer.WriteUInt32(view.ReplySequence);
         writer.WriteByte((byte)view.Reply); writer.WriteByte(view.ReplyCount); writer.WriteByte(view.Fetching);
-        writer.WriteByte(view.AutoPickup ? (byte)1 : (byte)0); writer.WriteByte((byte)view.Count);
+        writer.WriteByte(view.AutoPickup ? (byte)1 : (byte)0);
+        writer.WriteByte((byte)view.ScanKind); writer.WriteByte((byte)view.ScanPhase);
+        writer.WriteInt32(view.ScanRock.Sector.X); writer.WriteInt32(view.ScanRock.Sector.Y); writer.WriteInt32(view.ScanRock.Sector.Z);
+        writer.WriteInt32(view.ScanRock.Index); writer.WriteByte(view.ScanDrones); writer.WriteByte(view.ScanInPlace);
+        writer.WriteInt64(view.ScanStarted); writer.WriteInt64(view.ScanCompletes);
+        writer.WriteByte((byte)view.Count);
         for (var i = 0; i < view.Count; i++)
         {
             var bay = view.Bays[i];
@@ -245,8 +297,19 @@ public static class BayMessage
         view = default;
         view.Hull = reader.ReadUInt32(); view.Tick = reader.ReadInt64(); view.ReplySequence = reader.ReadUInt32();
         view.Reply = (DroneReply)reader.ReadByte(); view.ReplyCount = reader.ReadByte(); view.Fetching = reader.ReadByte();
-        var auto = reader.ReadByte(); view.AutoPickup = auto == 1; view.Count = reader.ReadByte();
-        if (!reader.IsValid || auto > 1 || view.Tick < 0 || view.Reply > DroneReply.Delivered || view.Count > DroneBayRules.MaxBays
+        var auto = reader.ReadByte(); view.AutoPickup = auto == 1;
+        view.ScanKind = (DroneScanKind)reader.ReadByte(); view.ScanPhase = (DroneScanPhase)reader.ReadByte();
+        view.ScanRock = new RockRef(new SectorCoord(reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32()), reader.ReadInt32());
+        view.ScanDrones = reader.ReadByte(); view.ScanInPlace = reader.ReadByte();
+        view.ScanStarted = reader.ReadInt64(); view.ScanCompletes = reader.ReadInt64();
+        view.Count = reader.ReadByte();
+        var scanShape = view.ScanPhase == DroneScanPhase.None
+            ? view.ScanKind == DroneScanKind.None && view.ScanRock == default && view.ScanDrones == 0 && view.ScanInPlace == 0
+            : view.ScanKind is DroneScanKind.Survey or DroneScanKind.Detailed && view.ScanPhase <= DroneScanPhase.Returning
+                && view.ScanRock.Index >= 0 && view.ScanDrones is > 0 and <= DroneScanning.MaxDrones && view.ScanInPlace <= view.ScanDrones;
+        var scanTime = view.ScanPhase == DroneScanPhase.Scanning ? view.ScanStarted >= 0 && view.ScanCompletes >= view.ScanStarted
+            : view.ScanStarted == 0 && view.ScanCompletes == 0;
+        if (!reader.IsValid || auto > 1 || !scanShape || !scanTime || view.Tick < 0 || view.Reply > DroneReply.ScanUnavailable || view.Count > DroneBayRules.MaxBays
             || reader.Remaining != view.Count * RecordBytes) return false;
         for (var i = 0; i < view.Count; i++)
         {

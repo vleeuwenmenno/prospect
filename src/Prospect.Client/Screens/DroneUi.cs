@@ -94,11 +94,26 @@ internal static class DroneUi
         DroneReply.TooFew => "TOO FEW DRONES"u8,
         DroneReply.Dropped => "DROPPED"u8,
         DroneReply.Delivered => "DELIVERED"u8,
+        DroneReply.ScanSent => "SCAN SENT"u8,
+        DroneReply.ScanReady => "SCAN READY"u8,
+        DroneReply.ScanRunning => "SCANNING"u8,
+        DroneReply.ScanDone => "SCAN DONE"u8,
+        DroneReply.TooLarge => "ROCK TOO LARGE"u8,
+        DroneReply.ScanBusy => "SCAN BUSY"u8,
+        DroneReply.ScanNotReady => "NOT IN PLACE"u8,
+        DroneReply.ScanAborted => "SCAN ABORTED"u8,
+        DroneReply.ScanTimedOut => "SCAN TIMED OUT"u8,
+        DroneReply.ScanCancelled => "SCAN CANCELLED"u8,
+        DroneReply.ScanUnavailable => "NO DRONE SCANS"u8,
         _ => default,
     };
 
     /// <summary>Whether an answer is a refusal, shown in the warning colour.</summary>
-    public static bool Refused(DroneReply reply) => reply is not (DroneReply.None or DroneReply.Launching or DroneReply.Recalling or DroneReply.Fetching or DroneReply.Delivered);
+    public static bool Refused(DroneReply reply) => reply is not (DroneReply.None or DroneReply.Launching or DroneReply.Recalling or DroneReply.Fetching or DroneReply.Delivered
+        or DroneReply.ScanSent or DroneReply.ScanReady or DroneReply.ScanRunning or DroneReply.ScanDone or DroneReply.ScanCancelled);
+
+    /// <summary>Whether an answer is a drone scan's: its words tell how the scan stands, and the panel puts them by its buttons.</summary>
+    public static bool IsScanReply(DroneReply reply) => reply is >= DroneReply.ScanSent and <= DroneReply.ScanUnavailable or DroneReply.TooFar or DroneReply.NotFound or DroneReply.InTransit;
 }
 
 /// <summary>

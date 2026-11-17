@@ -196,6 +196,9 @@ internal sealed class OwnerLink(GameContent content, bool inProcess = true) : IT
     public BayView Bays;
     public int BayMessages;
 
+    /// <summary>The drone scan results the server sent, in order.</summary>
+    public readonly List<DroneScanRecord> DroneScanResults = new();
+
     /// <summary>True if two snapshots in a row ever named the same interval, or one went back.</summary>
     public bool SnapshotRepeated;
 
@@ -257,6 +260,14 @@ internal sealed class OwnerLink(GameContent content, bool inProcess = true) : IT
         var bytes = new byte[DroneCommandMessage.MaxWireSize];
         var writer = new NetWriter(bytes);
         command.Write(ref writer);
+        Deliver(bytes[..writer.Length]);
+    }
+
+    public void DroneScan(in DroneScanCommandMessage message)
+    {
+        var bytes = new byte[DroneScanCommandMessage.MaxWireSize];
+        var writer = new NetWriter(bytes);
+        message.Write(ref writer);
         Deliver(bytes[..writer.Length]);
     }
 
@@ -324,6 +335,9 @@ internal sealed class OwnerLink(GameContent content, bool inProcess = true) : IT
             case MessageId.Bays when BayMessage.TryRead(ref reader, out var bays):
                 Bays = bays;
                 BayMessages++;
+                break;
+            case MessageId.DroneScanResult when DroneScanResultMessage.TryRead(ref reader, out var scanResult):
+                DroneScanResults.Add(scanResult);
                 break;
             case MessageId.EditorState when EditorStateMessage.TryRead(ref reader, out var state):
                 Editor = state;

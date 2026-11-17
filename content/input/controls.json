@@ -24,6 +24,9 @@
     { "tab": "Flight", "action": "LaunchDrones", "label": "Launch every drone in the bays to hold station in front of their hatches", "scope": ["Pilot", "Command"] },
     { "tab": "Flight", "action": "RecallDrones", "label": "Call every drone home through its hatch", "scope": ["Pilot", "Command"] },
     { "tab": "Flight", "action": "FetchContainer", "label": "Send drones to fetch the loose container under the pointer, or the one targeted, to the tractor beam", "scope": ["Pilot", "Command"] },
+    { "tab": "Scanning & exploration", "action": "SurveyRock", "label": "Send drones to survey the targeted asteroid; again to cancel, or when the drones are in place, to scan", "scope": ["Pilot", "Command"] },
+    { "tab": "Scanning & exploration", "action": "DetailedScan", "label": "Send drones for a detailed scan of the targeted asteroid (a map of veins and pockets); again to cancel, or when the drones are in place, to scan", "scope": ["Pilot", "Command"] },
+    { "tab": "Scanning & exploration", "action": "ToggleScanHologram", "label": "Show or hide the hologram of a detailed scan over its asteroid", "scope": ["Pilot", "Command"] },
 
     { "tab": "Camera", "axis": "Pitch", "label": "Look down / up", "negative": "Look down", "positive": "Look up", "scope": ["Pilot", "Command", "Map"] },
     { "tab": "Camera", "axis": "Yaw", "label": "Look left / right", "negative": "Look left", "positive": "Look right", "scope": ["Pilot", "Command", "Map"] },

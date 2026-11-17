@@ -3242,6 +3242,49 @@ internal sealed partial class WorldView
         return false;
     }
 
+    /// <summary>
+    /// Where an asteroid is this frame, how it is turned and its radius: what a map in the rock's own frame needs to be
+    /// laid over it (world = <paramref name="position"/> + rotate(local, <paramref name="rotation"/>)). A rock only
+    /// translates when it is pushed, so the turn is the one it was generated with. False if its sector is not loaded.
+    /// </summary>
+    public bool TryGetRockPose(RockRef rock, out Double3 position, out Quaternion rotation, out float radius)
+    {
+        foreach (var slot in _slots)
+        {
+            if (slot.State != SectorSlot.Ready || slot.Coord != rock.Sector || !ReferenceEquals(slot.Galaxy, _galaxy))
+                continue;
+            if ((uint)rock.Index >= (uint)slot.Content.AsteroidCount)
+                break;
+            ref var asteroid = ref slot.Content.Asteroids[rock.Index];
+            position = _galaxy!.CenterOf(slot.Coord) + asteroid.LocalPosition + (slot.Displaced ? slot.Offsets[rock.Index] : Vector3.Zero);
+            rotation = asteroid.Rotation;
+            radius = asteroid.Radius;
+            return true;
+        }
+
+        position = default;
+        rotation = Quaternion.Identity;
+        radius = 0;
+        return false;
+    }
+
+    /// <summary>The camera as the scan hologram projects with it: the same arithmetic as <see cref="Project"/>.</summary>
+    internal Prospect.Client.Screens.HologramCamera HologramView => new(CameraPosition, _right, _up, _forward, _tanHalfFov, new Vector2(_screen.X, _screen.Y));
+
+    /// <summary>
+    /// Scripted runs only (<c>--open drone-scan</c>): targets the asteroid whose surface is within <paramref name="maxGap"/>
+    /// metres of the ship being flown, the one the server put it above. False while no sector has loaded or none is that near.
+    /// </summary>
+    internal bool ScriptTargetRockNearHull(float maxGap)
+    {
+        if (!_devices.Muted || _galaxy is null || !NearestRock(OwnPosition, out var name, out _, out _, out var gap) || gap > maxGap)
+            return false;
+        TargetContainer = 0;
+        TargetRock = name;
+        TargetHull = 0;
+        return true;
+    }
+
     /// <summary>What an asteroid carries: the resource index (or -1 for bare rock) and its grade.</summary>
     public bool TryGetRockOre(RockRef rock, out int resource, out float grade)
     {

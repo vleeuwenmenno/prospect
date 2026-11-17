@@ -317,11 +317,11 @@ public sealed class ScannerMountTests
     public void ASavedWorldOfTheOldLayoutIsRefusedWithItsLayoutNamedAndNothingIsConverted()
     {
         var world = WorldSnapshot.NewWorld(Content, Guid.NewGuid(), "Old", DateTimeOffset.UnixEpoch, 1, Content.SettingCatalog.Defaults, default);
-        Assert.Equal(19, WorldSnapshotCodec.Version);
+        Assert.Equal(21, WorldSnapshotCodec.Version);
         Assert.True(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(world), SaveLimits.Default, out _, out _));
         world.Compatibility = world.Compatibility with { SaveVersion = 17 };
         Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(world), SaveLimits.Default, out var snapshot, out var error));
         Assert.Null(snapshot);
-        Assert.Equal("save layout 17, this build reads 19", error);
+        Assert.Equal("save layout 17, this build reads 21", error);
     }
 }

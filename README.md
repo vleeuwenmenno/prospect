@@ -59,9 +59,21 @@ in sensor sight, is yours to take (no one else's claim, pickup delay over) and i
 for 30 s, or until you launch again. The setting is per ship and is saved with the world. There is no "Pick up ores"
 box yet: ore chunks do not exist until the mining laser (R4).
 A saved world keeps a carried container loose where it was. Not built: a ship without a tractor beam cannot be fetched
-to, choosing the hold point in the interface, a drone panel, drone battery limits, scans and charges (later drone steps),
+to, choosing the hold point in the interface, a drone panel, drone battery limits, charges (a later drone step),
 and any avoidance: a drone flies straight to its place and may bump the ship it came from.
 
+
+Drones scan asteroids. Target one and press `;` (or SURVEY WITH DRONES on the target panel) for a group scan, or `'`
+(DETAILED SCAN) for a detailed one. The server works out how many drones the rock takes from its size, shape and line
+of sight (a 10 m rock: 2 for a survey, 4 for a detailed scan; a 100 m rock: 3 and 6), sends drones holding station
+and drones from the bays to places spread around it, and says why when it cannot (not in sight, over 3 km away, too
+few drones, rock too large). Drones fly around the rock, never through it. The chip and the panel show SCAN 2/4, then
+READY; press the key or SCAN to run it (3 s or 6 s). A survey gives the rock's true composition to 0.1 % and how many
+veins run through it (few, several, many); a detailed scan adds a hologram over the rock: veins in their ore's colour,
+ore pockets, unstable pockets in red and a heat map of where rich ore lies near the surface (green) or an unstable
+pocket lies under it (red). `\` turns the hologram on or off. Results are yours, kept for your last 32 rocks and saved
+with the world; the drones come home and are used again. Not built: giants (they need over a hundred drones), drone
+power use for a scan, and checking places against other rocks or ships.
 
 Rocks can be scraped: a scrape cuts a groove into an asteroid for everyone who has it in view, hulls and loose
 containers touch the groove, and it is saved with the world. This is the foundation of mining and has no tool yet:
@@ -613,6 +625,8 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Asteroid locator: pulse | `Y` | |
 | Drones: launch every drone in the bays / call them all home (flight, command view) | `.` / `,` | |
 | Drones: fetch the loose container under the pointer, else the targeted one (flight, command view) | `/` | |
+| Drones: survey the targeted asteroid / detailed scan of it; when the drones are READY either key starts the scan, the same key again cancels | `;` / `'` | |
+| Drone scan hologram on the targeted asteroid on or off | `\` | |
 | Gas window: clouds you have sampled | `F4` | |
 | Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |

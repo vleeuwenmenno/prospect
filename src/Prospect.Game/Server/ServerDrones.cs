@@ -86,6 +86,9 @@ public sealed partial class ServerHost
         public long AutoPausedUntil;
         public int AutoCursor, AutoSkipNext;
         public AutoSkips AutoSkip;
+
+        /// <summary>The hull's drone scan, if one is under way (<see cref="ServerHost.ScanGroup"/>).</summary>
+        public ScanGroup Scan;
         public BayRecords Bays;
     }
 
@@ -180,7 +183,7 @@ public sealed partial class ServerHost
             order.Base = next;
             order.Bay = bay;
         }
-        if (to >= 0) { _bayPages[to].AutoPickup = _bayPages[from].AutoPickup; _bayPages[to].Revision++; }
+        if (to >= 0) { _bayPages[to].AutoPickup = _bayPages[from].AutoPickup; _bayPages[to].Scan = _bayPages[from].Scan; _bayPages[to].Revision++; }
     }
 
     private void RemoveOrder(int index) => _orders[index] = _orders[--_orderCount];
@@ -337,13 +340,17 @@ public sealed partial class ServerHost
         ref var p = ref _bayPages[page];
         for (var b = 0; b < DroneBayRules.MaxBays; b++) p.Bays[b].Pending = 0;
         p.FetchPending = 0; p.FetchPendingKg = 0;
+        // A scan under way is given up: its drones fly around the rock and home like the rest.
+        p.Scan.Pending = 0;
+        if (p.Scan.Phase is not (DroneScanPhase.None or DroneScanPhase.Returning)) EndDroneScan(page);
         // A recall by hand means "come home": auto pickup holds off for a while instead of sending them straight out again.
         if (p.AutoPickup) p.AutoPausedUntil = _tick + _content.Drones.AutoPickupPauseTicks;
         for (var i = 0; i < _orderCount; i++)
         {
             ref var order = ref _orders[i];
             if (order.Base != hull) continue;
-            if (order.Task != OrderTask.Recall) ToRecall(ref order);
+            // Scan drones were sent around the rock by EndDroneScan; they take the recall once on the ship's side.
+            if (order.Task != OrderTask.Recall && !IsScan(order.Task)) ToRecall(ref order);
             count++;
         }
 
@@ -380,7 +387,9 @@ public sealed partial class ServerHost
             if (!_hulls.IsAlive(page.Hull) || _hulls.Info(page.Hull.Index).BayPage != p + 1) { page = default; continue; }
             TickBays(p);
             TickAutoPickup(p);
+            TickDroneScan(p);
         }
+        ForgetDroneScans();
 
         for (var i = _orderCount - 1; i >= 0; i--)
             if (!TickOrder(i)) RemoveOrder(i);
@@ -430,6 +439,8 @@ public sealed partial class ServerHost
         var pending = 0;
         for (var b = 0; b < design.Bays.Length; b++) pending += page.Bays[b].Pending;
         if (page.FetchPending > pending) { page.FetchPending = (byte)pending; if (pending == 0) page.FetchPendingKg = 0; }
+        var scanRoom = Math.Max(0, pending - page.FetchPending);
+        if (page.Scan.Pending > scanRoom) page.Scan.Pending = (byte)scanRoom;
     }
 
     private void CancelLaunches(int index, DroneReply reply)
@@ -437,6 +448,7 @@ public sealed partial class ServerHost
         ref var page = ref _bayPages[index];
         for (var b = 0; b < DroneBayRules.MaxBays; b++) page.Bays[b].Pending = 0;
         page.FetchPending = 0; page.FetchPendingKg = 0;
+        page.Scan.Pending = 0;
         page.Revision++;
         ReplyDrones(page.LaunchIssuer, reply, 0);
     }
@@ -493,6 +505,24 @@ public sealed partial class ServerHost
             return DroneReply.None;
         }
 
+        if (page.Scan.Pending > 0 && page.Scan.Phase is DroneScanPhase.Moving or DroneScanPhase.Ready)
+        {
+            // A drone launched for a scan goes straight to its place around the rock.
+            ref var scan = ref page.Scan;
+            scan.Pending--;
+            _orders[_orderCount++] = new TaskOrder
+            {
+                Task = ScanTask(scan.Kind),
+                Phase = ScanOrderPhase.Moving,
+                Issuer = owner,
+                Actor = handle,
+                Base = hull,
+                Bay = bayIndex,
+                Point = DroneScanning.Place(scan.Slot++, scan.Drones, scan.Asteroid.Radius, scan.Asteroid.Shape, scan.Standoff),
+            };
+            return DroneReply.None;
+        }
+
         Vector3 point;
         if (page.LaunchHasPoint) point = DroneBayRules.HoldSlot(page.LaunchPoint, face, page.LaunchSlot++, rules.HoldSpacingMetres);
         else point = DroneBayRules.HoldSlot(DroneBayRules.DefaultHold(design, block, rules.HoldDistanceMetres), face, bay.Slot++, rules.HoldSpacingMetres);
@@ -530,7 +560,7 @@ public sealed partial class ServerHost
         }
 
         // A hull that starts a jump calls its drones home; those still out when it leaves are lost.
-        if (jump != JumpPhase.None && order.Task != OrderTask.Recall) ToRecall(ref order);
+        if (jump != JumpPhase.None && order.Task != OrderTask.Recall && !IsScan(order.Task)) ToRecall(ref order);
 
         switch (order.Task)
         {
@@ -541,6 +571,9 @@ public sealed partial class ServerHost
                 return Recall(ref order, page);
             case OrderTask.Fetch:
                 return Fetch(ref order, page);
+            case OrderTask.Survey:
+            case OrderTask.DetailedScan:
+                return ScanOrder(ref order, page);
             default:
                 return false;
         }
@@ -640,6 +673,17 @@ public sealed partial class ServerHost
                 Fetching = (byte)Math.Min(byte.MaxValue, FetchingDrones(c.Hull, page)),
                 AutoPickup = page >= 0 && _bayPages[page].AutoPickup,
             };
+            if (page >= 0 && _bayPages[page].Scan.Phase != DroneScanPhase.None)
+            {
+                ref readonly var scan = ref _bayPages[page].Scan;
+                view.ScanKind = scan.Kind;
+                view.ScanPhase = scan.Phase;
+                view.ScanRock = scan.Rock;
+                view.ScanDrones = scan.Drones;
+                view.ScanInPlace = scan.InPlace;
+                view.ScanStarted = scan.Phase == DroneScanPhase.Scanning ? scan.Started : 0;
+                view.ScanCompletes = scan.Phase == DroneScanPhase.Scanning ? scan.Completes : 0;
+            }
             if (page >= 0)
             {
                 var design = _content.Designs[_hulls.Info(c.Hull.Index).Design];

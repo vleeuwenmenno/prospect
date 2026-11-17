@@ -343,6 +343,7 @@ public sealed partial class ServerHost
         _containers.EnforceCaps(_content);
         RestoreCharts(world);
         RestoreModules(world);
+        RestoreDroneScans(world);
 
         var entities = new HashSet<ulong>(world.HullCount);
         var blocks = 0;
@@ -534,6 +535,7 @@ public sealed partial class ServerHost
             return false;
 
         if (!CaptureModules(buffer)) return false;
+        if (!CaptureDroneScans(buffer)) return false;
         _charts.AsSpan(0, _chartCount).CopyTo(buffer.Charts);
         buffer.ChartCount = _chartCount;
         buffer.Compatibility = _compatibility;

@@ -55,7 +55,7 @@ public sealed partial class ServerHost
 
         // Carriers: drones holding station first, then drones inside bays whose hatch is open, until they lift it.
         ref var p = ref _bayPages[page];
-        var room = p.FetchPending > 0 ? 0 : DroneRoom(viewer, out _);
+        var room = p.FetchPending > 0 || p.Scan.Pending > 0 ? 0 : DroneRoom(viewer, out _);
         var carry = 0f;
         var holders = 0;
         for (var i = 0; i < _orderCount && carry < mass && holders < rules.MaxCarriers; i++)
@@ -126,8 +126,11 @@ public sealed partial class ServerHost
     /// </summary>
     private void ToRecall(ref TaskOrder order)
     {
+        // A scan drone may be on the far side of the rock: it first flies around it to the ship's side (ScanOrder), and
+        // only then takes the recall, from its bay's hold point as a fetching drone does.
+        if (IsScan(order.Task) && order.Phase != ScanOrderPhase.ScanLeaving) { order.Phase = ScanOrderPhase.ScanLeaving; return; }
         var far = false;
-        if (order.Task == OrderTask.Fetch && _hulls.IsAlive(order.Base))
+        if ((order.Task == OrderTask.Fetch || IsScan(order.Task)) && _hulls.IsAlive(order.Base))
         {
             var design = _content.Designs[_hulls.Info(order.Base.Index).Design];
             if ((uint)order.Bay < (uint)design.Bays.Length)

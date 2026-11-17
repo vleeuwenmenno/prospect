@@ -38,6 +38,9 @@
     "LaunchDrones": ["Key:Period"],
     "RecallDrones": ["Key:Comma"],
     "FetchContainer": ["Key:Slash"],
+    "SurveyRock": ["Key:Semicolon"],
+    "DetailedScan": ["Key:Apostrophe"],
+    "ToggleScanHologram": ["Key:Backslash"],
     "DebugScrape": ["Key:F10"]
   },
   "axes": {

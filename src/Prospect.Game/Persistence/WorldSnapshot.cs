@@ -213,8 +213,9 @@ public struct SavedHull
 public sealed class WorldSnapshot
 {
     /// <summary>A snapshot with room for exactly these counts.</summary>
-    public WorldSnapshot(int owners, int hulls, int blocks, int rocks, int charts = 0, int moduleObservations = 0, int editedRocks = 0, int rockEdits = 0)
+    public WorldSnapshot(int owners, int hulls, int blocks, int rocks, int charts = 0, int moduleObservations = 0, int editedRocks = 0, int rockEdits = 0, int droneScans = 0)
     {
+        DroneScans = new DroneScanRecord[droneScans];
         EditedRocks = new RockRef[editedRocks];
         EditedRockEdits = new int[editedRocks];
         RockEdits = new RockScrape[rockEdits];
@@ -234,7 +235,7 @@ public sealed class WorldSnapshot
     /// <summary>A snapshot with room for the most a world under <paramref name="limits"/> can hold: a capture buffer.</summary>
     public WorldSnapshot(SaveLimits limits, int charts = 0)
         : this(limits.MaxOwners, limits.MaxHulls, limits.MaxBlocks, limits.MaxRocks, charts, checked(limits.MaxOwners * ModuleScanRules.KnowledgePerOwner),
-            limits.MaxEditedRocks, limits.MaxRockEdits)
+            limits.MaxEditedRocks, limits.MaxRockEdits, checked((int)limits.MaxDroneScans))
     { }
 
     /// <summary>What the save was made with; compared before anything else is believed.</summary>
@@ -371,6 +372,10 @@ public sealed class WorldSnapshot
     /// <summary>Personal module surveys with their original observed values and age; active scans are transient.</summary>
     public readonly ModuleObservation[] ModuleObservations;
     public int ModuleObservationCount;
+
+    /// <summary>What every owner's drones found in rocks, owner by owner (codec 21): the first <see cref="DroneScanCount"/>.</summary>
+    public readonly DroneScanRecord[] DroneScans;
+    public int DroneScanCount;
 
     /// <summary>
     /// The first state of a new world: the content's own catalogue and roles, no owner, no hull, no pushed

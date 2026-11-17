@@ -341,6 +341,13 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         /// <summary>What the client was last told of its flown hull's bays.</summary>
         public uint BaysHull, BaysRevision, BaysReply;
 
+        /// <summary>The earliest tick the player may give another drone scan command.</summary>
+        public long DroneScanNext;
+
+        /// <summary>Per kept drone scan of the player: the tick of the record last sent from that place, -1 for none; and where sending goes on.</summary>
+        public readonly long[] DroneScanSent = new long[DroneScanRecordRules.KnowledgePerOwner];
+        public int DroneScanCursor;
+
         public void Reset()
         {
             Array.Clear(Visible);
@@ -362,6 +369,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             ModuleScan = default;
             ModuleSentScan = default; ModulesSent = false; ModuleCursor = 0;
             Array.Fill(ModuleSentRecords, -1);
+            Array.Fill(DroneScanSent, -1);
+            DroneScanCursor = 0;
+            DroneScanNext = 0;
             ModuleEquipment = default;
             ChartCursor = 0;
             SentScan = default;
@@ -673,6 +683,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             }
 
             InitializeModules(world is null ? _maxPlayers : _saveLimits.MaxOwners);
+            InitializeDroneScans(world is null ? _maxPlayers : _saveLimits.MaxOwners);
             _loop = new TickLoop("Server", TickLoop.SimulationHz, this);
 
             // Last, so that everything above can still refuse the world: the worker owns the store from here.
@@ -997,7 +1008,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         SendRockEdits();
         TickExploration(tick);
         foreach (var connection in _connections)
-            if (connection.State == ConnectionState.Active) { SendExploration(connection); SendModules(connection); }
+            if (connection.State == ConnectionState.Active) { SendExploration(connection); SendModules(connection); SendDroneScans(connection); }
         TickSocial(tick);
         Volatile.Write(ref _tick, tick + 1);
 
@@ -1266,6 +1277,10 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             case MessageId.DroneCommand when channel == NetChannel.Reliable:
                 if (DroneCommandMessage.TryRead(ref reader, out var drones))
                     ReceiveDroneCommand(connection, drones);
+                break;
+            case MessageId.DroneScan when channel == NetChannel.Reliable:
+                if (DroneScanCommandMessage.TryRead(ref reader, out var droneScan))
+                    ReceiveDroneScan(connection, droneScan);
                 break;
             case MessageId.DroneSettings when channel == NetChannel.Reliable:
                 if (DroneSettingsMessage.TryRead(ref reader, out var droneSettings))

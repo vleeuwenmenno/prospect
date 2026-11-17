@@ -1,7 +1,7 @@
 # Drones and mining
 
 Product direction from the brainstorm on 2026-11-16. Built so far: D1 (orders, the bay, launch and recall), D2
-(fetching cargo) and R1, the scrape foundation (see "R1 as built").
+(fetching cargo), D3 (drone scans, see "D3 as built") and R1, the scrape foundation (see "R1 as built").
 
 ## Why
 
@@ -117,7 +117,13 @@ Built (popup and "Pick up cargo"); "Pick up ores" waits for R4.
 
 ### Detailed scans by drones
 
-- D3 builds both drone scan levels as decided above: the group scan and the detailed scan (veins, pockets, heat map).
+Built in D3 (2026-11-17); see "D3 as built".
+
+- Both levels are one group job: the group scan (survey) and the detailed scan.
+- The player orders the scan. Drones fly into place, the chip says READY, the player presses SCAN. Nothing starts by itself.
+- One scan per ship at a time. A recall gives it up.
+- Scan drones are not used up: they come home and are used again.
+- What a scan found is the player's own, kept and saved per player, like module scans.
 
 ### Built to be extended
 
@@ -179,7 +185,7 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
    - Gaps: drones have no battery limit beyond D1's power use (no endurance figure); no avoidance; a ship with no
      tractor beam cannot be fetched to; two fetches for one rack slot are both accepted and the second is dropped
      with "no rack room" at the hand-over; a beam busy with another container makes the drones wait at the point.
-3. D3, scans: group scan and detailed scan (needs rock interiors, track I).
+3. D3, scans: group scan and detailed scan. **Done** (2026-11-17), see "D3 as built".
 4. D4, charges: drones place charges along the player's cutting plane (needs R2).
 
 ### Track I: rock interiors and heat
@@ -187,6 +193,78 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
 1. I1, interiors: crust, mantle, veins and pockets from the seed; what scraping and cracking yield.
    Done: the shared query. The yield rules themselves come with R3 and R4. See "I1: rock interiors (built)".
 2. I2, heat cracking: the special laser and the heat window.
+
+## D3 as built
+
+How to work on it is in `AGENTS.md`, "Drone scans (D3)". This is what exists and what does not.
+
+### How a scan goes
+
+1. The player targets a rock and asks for a survey or a detailed scan (target panel buttons or keys).
+2. The server checks it: rock in sensor sight, surface within 3 km, enough drones holding station or in bays.
+3. It sends that many drones to places spread evenly around the rock, off its surface by the standoff.
+4. Drones on the far side fly around the rock on its bounding shell, never through it.
+5. When every drone holds its place the scan is READY. The player presses SCAN; it runs a few seconds.
+6. The server works the result out of the rock's interior and keeps it for the player. Drones fly around the rock
+   to the ship's side and dock.
+
+### What each level shows
+
+- Survey: the true bulk composition to 0.1 % (a scanner module resolves 1 % to 10 %), and a vein hint:
+  none, few (1 to 3), several (4 or 5), many (6 or more).
+- Detailed: the same, the exact veins (polylines with a radius at each point, ore and grade), pockets (ore, ice or
+  volatile gas; unstable flagged) and a heat map.
+- Heat map: 64 cells over the surface. A cell is unstable when an unstable pocket lies under it; it is easy as far as
+  vein or ore pocket ore lies near the surface under it.
+- The hologram draws veins in their ore's colour, pockets, and the heat map (red unstable, green easy) over the rock.
+
+### How many drones
+
+- Each drone covers the smaller of what it sees from the standoff (a cap of the rock) and its sensors' coverage.
+- Together they cover the rock `cover` times: half of it for a survey, all of it for a detailed scan.
+- A stretched rock has more surface: its area grows with the square root of farthest over nearest radius.
+- Standoff: 0.6 of the radius, 12 to 300 m.
+
+| Rock radius | Survey | Detailed |
+| --- | --- | --- |
+| 10 m | 2 | 4 |
+| 100 m | 3 | 6 |
+| 200 m | 4 or 5 | too large (15 to 18) |
+| 1 km | too large (about 100) | too large (about 400) |
+
+- Shape matters: a stretched rock of 200 m takes up to a fifth more than a round one.
+- A detailed result is worked out in about 1.7 ms (Debug build) when the scan ends; nothing runs per tick but flying.
+
+### Figures
+
+The `scans` entry of `content/blocks/drones.json`, shared content:
+
+| Figure | Survey | Detailed |
+| --- | --- | --- |
+| Coverage a drone | 40,000 m² | 20,000 m² |
+| Cover | 0.5 | 1.0 |
+| Drones | 2 to 8 | 3 to 12 |
+| Scan time | 3 s | 6 s |
+
+- Range 3 km to the surface; place tolerance 2.5 m; travel step 25°.
+- Drones get 180 s to reach their places and wait 120 s for the order, then come home.
+- Resolution 0.1 % of the rock's mass.
+
+### Wire and save
+
+- Protocol 69: message 47 (scan command: request, start, cancel), message 48 (one result, at most 1,281 bytes).
+- The bay view (message 40) carries the scan: kind, phase, rock, drones, in place, start and end ticks.
+- Save codec 21: every player's results. A scan under way is not saved; its drones dock as all drones do.
+
+### Not built, known limits
+
+- A detailed scan fits rocks up to about 150 m radius, a survey up to about 250 m. Giants need far more than a
+  player may have out. Tiers may raise coverage later.
+- No drone battery or endurance: a scan costs no power.
+- Places are not checked against other rocks or ships nearby.
+- A player keeps 32 drone scans; the oldest gives way to a new rock.
+- The result describes the rock as generated. Scrapes (R1) do not change it; cracks (R2) will need their parent's map.
+- A ship that moves over 6 km from the rock gives the scan up.
 
 ## R1 as built
 

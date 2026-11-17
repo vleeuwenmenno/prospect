@@ -259,6 +259,51 @@ public sealed class PlayerInputBridge
         }
     }
 
+    private bool _hasDroneScan;
+    private DroneScanCommandMessage _droneScan;
+
+    /// <summary>
+    /// Asks the server to send drones from <paramref name="hull"/>'s bays to their places around <paramref name="rock"/>
+    /// for a scan of <paramref name="kind"/>. The server works out how many it takes and says why when it cannot
+    /// (<see cref="SessionSnapshot.Bays"/>); the drones' progress is <see cref="BayView.ScanPhase"/>.
+    /// </summary>
+    public void RequestDroneScan(uint hull, DroneScanKind kind, RockRef rock)
+    {
+        if (hull == 0 || kind == DroneScanKind.None || rock.Index < 0) return;
+        lock (_lock)
+        {
+            _droneScan = new DroneScanCommandMessage(hull, DroneScanAction.Request, kind, rock);
+            _hasDroneScan = true;
+        }
+    }
+
+    /// <summary>Orders the scan once every drone holds its place (<see cref="DroneScanPhase.Ready"/>).</summary>
+    public void StartDroneScan(uint hull) => DroneScanCommand(hull, DroneScanAction.Start);
+
+    /// <summary>Gives the hull's drone scan up; its drones fly around the rock and home.</summary>
+    public void CancelDroneScan(uint hull) => DroneScanCommand(hull, DroneScanAction.Cancel);
+
+    private void DroneScanCommand(uint hull, DroneScanAction action)
+    {
+        if (hull == 0) return;
+        lock (_lock)
+        {
+            _droneScan = new DroneScanCommandMessage(hull, action, DroneScanKind.None, default);
+            _hasDroneScan = true;
+        }
+    }
+
+    internal bool ConsumeDroneScan(out DroneScanCommandMessage message)
+    {
+        lock (_lock)
+        {
+            message = _droneScan;
+            var pending = _hasDroneScan;
+            _hasDroneScan = false;
+            return pending;
+        }
+    }
+
     private bool _hasDroneSettings;
     private DroneSettingsMessage _droneSettings;
 

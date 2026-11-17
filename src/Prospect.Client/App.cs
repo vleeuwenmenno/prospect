@@ -202,6 +202,18 @@ internal sealed class AppOptions
     /// <summary>Scripted runs only: the command camera's distance from the groove in metres, or null for the pilot view.</summary>
     public float? RockScrapeDistance { get; set; }
 
+    /// <summary>Scripted runs only (<c>--open drone-scan --drone-scan</c>): which scan the drones are sent for; detailed when not given.</summary>
+    public Prospect.Game.World.DroneScanKind? DroneScan { get; set; }
+
+    /// <summary>Scripted runs only (<c>--drone-scan-camera</c>): the command camera's distance in metres, yaw and pitch in degrees, looking at the rock; null for the pilot view.</summary>
+    public System.Numerics.Vector3? DroneScanCamera { get; set; }
+
+    /// <summary>Scripted runs only (<c>--drone-scan-hold</c>): seconds the drones are left in place, ready, before the scan is ordered.</summary>
+    public float DroneScanHold { get; set; }
+
+    /// <summary>Scripted runs only (<c>--drone-scan-camera-at</c>): seconds after the splash from which the command camera is held.</summary>
+    public float DroneScanCameraAt { get; set; }
+
     /// <summary>Scripted runs only (<c>--align-at</c>): seconds after the splash at which the align button is clicked for a moment.</summary>
     public float? AlignAt { get; set; }
 
@@ -719,7 +731,8 @@ internal sealed class App : IDisposable
                 ScriptedShieldBreakSeconds = _options.BreakShieldSeconds,
                 ScriptedRamSpeed = _options.RamSpeed,
                 ScriptedCoastSpeed = _options.CoastSpeed,
-                ScriptedRockScrapeRadius = Devices.Muted && _options.OpenView == "rock-scrape" ? _options.RockScrapeRadius : null,
+                // The drone scan capture only needs the hull put above the rock: the scrape's placement, with no scraping.
+                ScriptedRockScrapeRadius = Devices.Muted && _options.OpenView is "rock-scrape" or "drone-scan" ? _options.RockScrapeRadius : null,
                 ScriptedRockScrapeStandoff = _options.RockScrapeStandoff,
                 ScriptedRockScrapeRest = Devices.Muted && _options.OpenView == "rock-scrape" ? _options.RockScrapeRest : null,
                 ScriptedExhaustShield = Devices.Muted ? _options.OpenView switch { "exhaust-shield" => 1, "exhaust-shield-cold" => 2, _ => 0 } : 0,
@@ -1228,6 +1241,48 @@ internal sealed class App : IDisposable
         _dronesHome = _dronesRecalled && outside == 0 && stocked == capacity && capacity > 0;
     }
 
+    private bool _droneScanRequested, _droneScanStarted, _droneScanRecord;
+    private float _droneScanReadyAt = -1f;
+    private Prospect.Game.World.RockRef _droneScanRock;
+
+    /// <summary>
+    /// Capture and bench only (<c>--open drone-scan</c>): once the server has put the hull above its rock, targets that
+    /// rock, asks for the scan the keys would (<c>--drone-scan</c>, detailed by default) at 3 s, orders it when every drone
+    /// is in place, and notes whether the result came back. All through the same bridge calls as the keys; the hologram
+    /// turns itself on when a detailed result arrives, as it does in play.
+    /// </summary>
+    private void ScriptDroneScan(SessionSnapshot snapshot)
+    {
+        var own = snapshot.Hulls[snapshot.OwnHull].Id;
+        var kind = _options.DroneScan ?? Prospect.Game.World.DroneScanKind.Detailed;
+        if (World.TargetRock is not { } rock)
+        {
+            if (_sinceSplash >= 2.5f)
+                World.ScriptTargetRockNearHull(_options.RockScrapeStandoff + 5f);
+            return;
+        }
+
+        if (!_droneScanRequested && _sinceSplash >= 3f && DroneUi.Present(snapshot.Bays, own))
+        {
+            _droneScanRequested = true;
+            _droneScanRock = rock;
+            Session!.Client.Input.RequestDroneScan(own, kind, rock);
+        }
+
+        if (snapshot.Bays.ScanPhase != Prospect.Game.World.DroneScanPhase.Ready)
+            _droneScanReadyAt = -1f;
+        else if (_droneScanReadyAt < 0f)
+            _droneScanReadyAt = _sinceSplash;
+        if (_droneScanRequested && !_droneScanStarted && snapshot.Bays.ScanPhase == Prospect.Game.World.DroneScanPhase.Ready && _sinceSplash - _droneScanReadyAt >= _options.DroneScanHold)
+        {
+            _droneScanStarted = true;
+            Session!.Client.Input.StartDroneScan(own);
+        }
+
+        var index = _droneScanRequested ? snapshot.DroneScans.Find(_droneScanRock) : -1;
+        _droneScanRecord = index >= 0 && snapshot.DroneScans.Records[index].Kind == kind;
+    }
+
     /// <summary>Drives the scripted runs: a timed screenshot (<c>--capture</c>) and the benchmark (<c>--bench</c>).</summary>
     private void Automate(SessionSnapshot? snapshot, bool worldDrawn)
     {
@@ -1274,6 +1329,8 @@ internal sealed class App : IDisposable
             _screens.OpenCargoWindow(selectFirst: true);
         if (_options.OpenView == "drones" && _viewOpened && Session is not null && snapshot is { OwnHull: >= 0, Content: { } content })
             ScriptDrones(snapshot, content);
+        if (_options.OpenView == "drone-scan" && _viewOpened && Session is not null && snapshot is { OwnHull: >= 0 })
+            ScriptDroneScan(snapshot);
         if (_options.DroneFetchSeconds is { } fetchAt && !_droneFetchSent && _sinceSplash >= fetchAt && Session is not null
             && snapshot is { OwnHull: >= 0, FreeContainerCount: > 0 })
         {
@@ -1395,6 +1452,10 @@ internal sealed class App : IDisposable
                 World.ScriptCargoForCapture(view == "cargo");
                 World.CaptureJettisonSeconds = _options.JettisonSeconds;
                 World.CaptureCargoSpace = _options.HurtFleetCargo || _options.JettisonSeconds is not null;
+            }
+            else if (view == "drone-scan")
+            {
+                // Nothing to open: the pilot view is the capture, and ScriptDroneScan drives the scan.
             }
             else if (view == "rock-scrape")
             {
@@ -1739,6 +1800,10 @@ internal sealed class App : IDisposable
             // The scripted groove seen from the command camera, from the side the star lights.
             if (_options.RockScrapeDistance is { } scrapeDistance && World.RockScrapeFocus is { } scrapeFocus && _viewOpened)
                 World.SetCommandCapturePose(scrapeFocus, scrapeDistance, 0.5f, -0.85f);
+            // The drone scan's rock seen from the command camera, at the angle and distance asked for.
+            if (_options.OpenView == "drone-scan" && _options.DroneScanCamera is { } scanCamera && _viewOpened && _sinceSplash >= _options.DroneScanCameraAt
+                && World.TargetRock is { } scanRock && World.TryGetRockPose(scanRock, out var scanFocus, out _, out _))
+                World.SetCommandCapturePose(scanFocus, scanCamera.X, scanCamera.Y * (MathF.PI / 180f), scanCamera.Z * (MathF.PI / 180f));
             if (_capturesTaken < count && rtsReady && (_options.CaptureHitAge is not { } hitAge || World.Own.ShieldHit.Strength > 0 && World.Own.ShieldHitAge >= hitAge) && captureClock >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
                 ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory" or "edit-tank-fuel");
@@ -1774,6 +1839,11 @@ internal sealed class App : IDisposable
                 {
                     var work = World.RockPatchWork;
                     Console.WriteLine($"capture {_capturesTaken:D2} rock-scrape: asked {World.RockScrapeAsked}; edits {World.RockEditsKnown}; patches drawn {World.RockPatchesDrawn}, ready {World.RockPatchesReady}, built {work.Built} (last {work.Milliseconds:F1} ms, {work.Vertices} vertices); own speed {World.Own.Velocity.Length():F2} m/s");
+                }
+                if (_options.OpenView == "drone-scan" && snapshot is not null)
+                {
+                    var bays = snapshot.Bays;
+                    Console.WriteLine($"capture {_capturesTaken:D2} drone-scan at {_sinceSplash:F1}s: phase {bays.ScanPhase} ({bays.ScanKind}), in place {bays.ScanInPlace}/{bays.ScanDrones}, record known {_droneScanRecord}, hologram {_screens.ScanHologramOn}, reply {bays.Reply} ({bays.ReplyCount})");
                 }
                 if (World.PulseShown.Strength > 0f)
                     Console.WriteLine($"capture {_capturesTaken:D2} scan pulse: radius {World.PulseShown.Radius:F0} m, strength {World.PulseShown.Strength:F2}");
@@ -1824,6 +1894,8 @@ internal sealed class App : IDisposable
                 "edit-mirror" => World.Editor.HasGhost && World.Editor.Mirror == (MirrorAxes.X | MirrorAxes.Z),
                 // Launch, hold and recall all happen inside the measurement: drones were seen out and every one is home.
                 "drones" => _benchmarkSawDrones && _dronesOut == 0 && _dronesHome,
+                // The scan was asked for, ordered once the drones held their places, and its result came back for the rock.
+                "drone-scan" => _droneScanRecord,
                 _ => true,
             };
             if (!editorReady)

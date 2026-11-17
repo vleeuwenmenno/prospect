@@ -28,7 +28,7 @@ namespace Prospect.Game.Persistence;
 public static partial class WorldSnapshotCodec
 {
     /// <summary>The layout's version. A save with any other is refused; there are no migrations yet.</summary>
-    public const int Version = 19;
+    public const int Version = 21;
     internal const int ChartBytes = 4 + 12 + 8;
 
     /// <summary>"PWS1": tells a save from any other bytes before its version is believed.</summary>
@@ -58,7 +58,7 @@ public static partial class WorldSnapshotCodec
         + 1 + WorldSettings.Capacity * (1 + WorldSettingCatalog.MaxIdLength + 4)
         + 8 + 8 + 4 + 8
         + 5 + byte.MaxValue
-        + 8 * 4 + 4 + 4 + SavedCargoRules.WireBytes + 8 + 8;
+        + 8 * 4 + 4 + 4 + SavedCargoRules.WireBytes + 8 + 8 + 4;
 
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
@@ -68,7 +68,9 @@ public static partial class WorldSnapshotCodec
         long size = 4 + 4 + 4 + 4 + ContentIdentity.WireSize + 16 + 1 + Utf8.GetByteCount(snapshot.Name) + 8 + 8 + 12 + 1;
         for (var i = 0; i < snapshot.SettingCount; i++)
             size += 1 + snapshot.SettingIds[i].Length + 4;
-        size += 8 + 8 + 4 + 8 + 5 + snapshot.StartingFleet.Length + 8 * 4 + 4 + 4 + SavedCargoRules.WireBytes + 8 + 8 + RockEditBytes(snapshot);
+        size += 8 + 8 + 4 + 8 + 5 + snapshot.StartingFleet.Length + 8 * 4 + 4 + 4 + SavedCargoRules.WireBytes + 8 + 8 + RockEditBytes(snapshot) + 4;
+        for (var i = 0; i < snapshot.DroneScanCount; i++)
+            size += DroneScanCodec.Size(snapshot.DroneScans[i]);
         for (var i = 0; i < snapshot.DesignCount; i++)
             size += 4 + SHA256.HashSizeInBytes + snapshot.Designs[i].Length;
         size += (long)snapshot.OwnerCount * OwnerBytes;
@@ -157,6 +159,7 @@ public static partial class WorldSnapshotCodec
         writer.WriteUInt32(snapshot.NextContainerId);
         writer.WriteInt32(snapshot.EditedRockCount);
         writer.WriteInt32(snapshot.RockEditCount);
+        writer.WriteInt32(snapshot.DroneScanCount);
 
         for (var i = 0; i < snapshot.DesignCount; i++)
         {
@@ -245,6 +248,13 @@ public static partial class WorldSnapshotCodec
         foreach (var container in snapshot.FreeContainers.AsSpan(0, snapshot.FreeContainerCount)) WriteFreeContainer(ref writer, container);
 
         WriteRockEdits(ref writer, snapshot);
+
+        for (var i = 0; i < snapshot.DroneScanCount; i++)
+        {
+            if (!DroneScanRecordRules.Valid(snapshot.DroneScans[i]))
+                throw new InvalidDataException("A drone scan does not fit the save layout.");
+            DroneScanCodec.Write(ref writer, snapshot.DroneScans[i]);
+        }
 
         if (writer.Length != size)
             throw new InvalidDataException("The snapshot's counts do not describe its records.");
@@ -373,6 +383,7 @@ public static partial class WorldSnapshotCodec
         var nextContainer = reader.ReadUInt32();
         var editedRocks = reader.ReadInt32();
         var rockEdits = reader.ReadInt32();
+        var droneScans = reader.ReadInt32();
         if (!reader.IsValid)
         {
             error = "the save ends inside its header";
@@ -392,7 +403,8 @@ public static partial class WorldSnapshotCodec
             || (uint)losses > (uint)blocks || (uint)tanks > (uint)blocks || (uint)rocks > (uint)limits.MaxRocks || charts < 0 || charts > limits.MaxCharts
             || observations < 0 || observations > limits.MaxModuleObservations
             || cargoCount < 0 || cargoCount > (long)hulls * BlockStateStore.MaxContainers
-            || (uint)editedRocks > (uint)limits.MaxEditedRocks || (uint)rockEdits > (uint)limits.MaxRockEdits || editedRocks > rockEdits)
+            || (uint)editedRocks > (uint)limits.MaxEditedRocks || (uint)rockEdits > (uint)limits.MaxRockEdits || editedRocks > rockEdits
+            || droneScans < 0 || droneScans > limits.MaxDroneScans)
         {
             error = "the save names more than a world may hold";
             return false;
@@ -400,7 +412,7 @@ public static partial class WorldSnapshotCodec
 
         var promised = (long)designCount * (4 + SHA256.HashSizeInBytes) + (long)owners * OwnerBytes + (long)hulls * HullFixedBytes
             + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)tanks * sizeof(double) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes + (long)cargoCount * CargoRecordBytes + (long)freeCount * FreeContainerBytes + (long)bayCount * BayBytes
-            + (long)editedRocks * EditedRockBytes + (long)rockEdits * RockEditCodec.ScrapeOnBytes;
+            + (long)editedRocks * EditedRockBytes + (long)rockEdits * RockEditCodec.ScrapeOnBytes + (long)droneScans * DroneScanCodec.HeadBytes;
         if (promised > reader.Remaining)
         {
             error = "the save names more than it holds";
@@ -436,7 +448,7 @@ public static partial class WorldSnapshotCodec
             designs[i] = reader.ReadBytes(length).ToArray();
         }
 
-        var result = new WorldSnapshot(owners, hulls, blocks, rocks, charts, observations, editedRocks, rockEdits)
+        var result = new WorldSnapshot(owners, hulls, blocks, rocks, charts, observations, editedRocks, rockEdits, droneScans)
         {
             Compatibility = compatibility,
             WorldId = worldId,
@@ -649,6 +661,28 @@ public static partial class WorldSnapshotCodec
             error = "invalid saved rock edits";
             return false;
         }
+
+        // Drone scans: structure, a known owner, a time before the save, each rock once per owner, and no more an
+        // owner than the server keeps. Whether the rock and its resources exist is the server's to judge at restore.
+        for (var i = 0; i < droneScans; i++)
+        {
+            if (!DroneScanCodec.Read(ref reader, out result.DroneScans[i]))
+            { error = "invalid saved drone scan"; return false; }
+            ref readonly var scan = ref result.DroneScans[i];
+            var known = false;
+            foreach (var owner in result.Owners) known |= owner.Id == scan.Owner;
+            var owned = 0;
+            for (var j = 0; j < i; j++)
+            {
+                ref readonly var other = ref result.DroneScans[j];
+                if (other.Owner != scan.Owner) continue;
+                owned++;
+                if (other.Sector == scan.Sector && other.Index == scan.Index) known = false;
+            }
+            if (!known || scan.RecordedTick >= nextTick || owned >= DroneScanRecordRules.KnowledgePerOwner)
+            { error = "invalid drone scan owner, rock or time"; return false; }
+        }
+        result.DroneScanCount = droneScans;
 
         if (!reader.IsValid || reader.Remaining != 0 || result.BlockCount != blocks || result.LossCount != losses || result.TankCount != tanks || result.CargoCount != cargoCount || result.BayCount != bayCount)
         {

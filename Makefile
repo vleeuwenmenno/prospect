@@ -342,6 +342,8 @@ bench: need-dotnet ## Release benchmark: empty scene, resizing, editor panels, c
 	$(Q)python3 tools/prepare_drone_capture.py $(BIN)/Prospect.Client/release $(DRONE_BENCH)
 	$(call step,Benchmarking drones (launch, hold station, recall and dock))
 	$(Q)$(RUN_ENV) "$(DOTNET)" $(DRONE_BENCH)/prospect.dll --bench 25 --size 1920x1080 --open drones --drone-recall 12
+	$(call step,Benchmarking a detailed drone scan (into place, scan, hologram, home))
+	$(Q)$(RUN_ENV) "$(DOTNET)" $(DRONE_BENCH)/prospect.dll --bench 30 --size 1920x1080 --open drone-scan --drone-scan detailed
 	$(call step,Fitting a copy of the build for a drone fetch)
 	$(Q)python3 tools/prepare_drone_fetch_capture.py $(BIN)/Prospect.Client/release $(FETCH_BENCH)
 	$(call step,Benchmarking a drone fetch (outbound, carry, hand-over and stow))

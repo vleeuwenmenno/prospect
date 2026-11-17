@@ -224,7 +224,7 @@ internal static class Program
                 case "--rock-interior-resource" when hasValue:
                     options.RockInteriorResource = args[++i];
                     break;
-                case "--open" when hasValue && args[i + 1] is "rock-interior" or "exhaust-rock" or "rock-scrape" or "exhaust-shield" or "exhaust-shield-cold" or "command" or "drone" or "map" or "map-ftl" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "edit-drone" or "edit-fill" or "edit-fill-done" or "edit-turn" or "edit-rings" or "edit-ion" or "edit-tank" or "edit-cargo" or "cargo" or "edit-rack" or "edit-tank-long" or "edit-tank-slab" or "edit-tank-fuel" or "edit-palette-tip" or "edit-scanner" or "edit-bay" or "drones" or "edit-mount" or "edit-mirror" or "edit-box-select" or "edit-select-all" or "edit-menu" or "edit-resize" or "edit-dump" or "edit-save" or "edit-load" or "edit-load-confirm" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "cargo-window" or "modules" or "module-command" or "gas" or "pinned-gas" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
+                case "--open" when hasValue && args[i + 1] is "rock-interior" or "exhaust-rock" or "rock-scrape" or "exhaust-shield" or "exhaust-shield-cold" or "command" or "drone" or "map" or "map-ftl" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "edit-drone" or "edit-fill" or "edit-fill-done" or "edit-turn" or "edit-rings" or "edit-ion" or "edit-tank" or "edit-cargo" or "cargo" or "edit-rack" or "edit-tank-long" or "edit-tank-slab" or "edit-tank-fuel" or "edit-palette-tip" or "edit-scanner" or "edit-bay" or "drones" or "drone-scan" or "edit-mount" or "edit-mirror" or "edit-box-select" or "edit-select-all" or "edit-menu" or "edit-resize" or "edit-dump" or "edit-save" or "edit-load" or "edit-load-confirm" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "cargo-window" or "modules" or "module-command" or "gas" or "pinned-gas" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:
@@ -418,6 +418,22 @@ internal static class Program
                     options.RockScrapeDistance = scrapeDistance;
                     i++;
                     break;
+                case "--drone-scan" when hasValue && args[i + 1] is "survey" or "detailed":
+                    options.DroneScan = args[i + 1] == "survey" ? Prospect.Game.World.DroneScanKind.Survey : Prospect.Game.World.DroneScanKind.Detailed;
+                    i++;
+                    break;
+                case "--drone-scan-camera" when hasValue && TryParseScanCamera(args[i + 1], out var scanCamera):
+                    options.DroneScanCamera = scanCamera;
+                    i++;
+                    break;
+                case "--drone-scan-hold" when hasValue && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var scanHold) && scanHold is >= 0f and <= 120f:
+                    options.DroneScanHold = scanHold;
+                    i++;
+                    break;
+                case "--drone-scan-camera-at" when hasValue && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var scanCameraAt) && scanCameraAt is >= 0f and <= 600f:
+                    options.DroneScanCameraAt = scanCameraAt;
+                    i++;
+                    break;
                 case "--coast" when hasValue && float.TryParse(args[i + 1], out var coastSpeed) && coastSpeed is >= 0f and <= 400f:
                     options.CoastSpeed = coastSpeed;
                     i++;
@@ -604,8 +620,8 @@ internal static class Program
         if (options.BenchResizes > 0 && (options.BenchSeconds <= 0 || options.VisualBenchmark is not null))
             return Fail("--bench-resize works only with --bench, without --visual-scene.");
 
-        if (options.OpenView == "rock-scrape" && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
-            return Fail("--open rock-scrape works only with --capture or --bench, in an unsaved private local game.");
+        if (options.OpenView is "rock-scrape" or "drone-scan" && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
+            return Fail("--open rock-scrape and --open drone-scan work only with --capture or --bench, in an unsaved private local game.");
 
         if (options.HoldThrust is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--hold-thrust works only with --capture or --bench: it replaces the pilot's forward key.");
@@ -748,6 +764,20 @@ internal static class Program
         "bipropellant" => Prospect.Game.World.FuelKind.Bipropellant,
         _ => Prospect.Game.World.FuelKind.None,
     };
+
+    /// <summary>A command camera for the drone scan capture, "distance,yaw,pitch" in metres and degrees.</summary>
+    private static bool TryParseScanCamera(string text, out System.Numerics.Vector3 camera)
+    {
+        camera = default;
+        var parts = text.Split(',');
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        if (parts.Length != 3 || !float.TryParse(parts[0], culture, out var distance) || !float.TryParse(parts[1], culture, out var yaw) || !float.TryParse(parts[2], culture, out var pitch))
+            return false;
+        if (distance is < 2f or > 100_000f || yaw is < -360f or > 360f || pitch is < -90f or > 0f)
+            return false;
+        camera = new System.Numerics.Vector3(distance, yaw, pitch);
+        return true;
+    }
 
     private static int Fail(string message)
     {
