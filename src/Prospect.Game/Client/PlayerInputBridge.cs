@@ -32,7 +32,10 @@ public struct PlayerControls
 /// </summary>
 public sealed class PlayerInputBridge
 {
-    private readonly Lock _lock = new();
+    // A plain object, not System.Threading.Lock: the first time a thread has to wait for a Lock the runtime
+    // allocates the lock's wait event on that thread. The render thread and the simulation thread meet here every
+    // frame, so on a busy machine that was 280 bytes in a frame that must take none.
+    private readonly object _lock = new();
     private ScanIntent _scan;
     private bool _modulePending;
     private ModuleScanRequest _moduleRequest;

@@ -164,7 +164,10 @@ public sealed class ShieldSurface
     private static readonly Vector3[] Ball = BuildBall();
 
     private static ShieldSurface? _shared;
-    private static readonly Lock SharedLock = new();
+    // A plain object, not System.Threading.Lock: the first time a thread has to wait for a Lock the runtime
+    // allocates the lock's wait event on that thread. Admission and the client's shell worker take turns
+    // here for milliseconds at a time, so one of them does wait.
+    private static readonly object SharedLock = new();
 
     /// <summary>
     /// Runs <paramref name="build"/> with the one builder this process keeps, made the first time it is asked for:

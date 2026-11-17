@@ -44,7 +44,10 @@ public sealed partial class AccountClient : IDisposable
     private readonly TimeSpan _signinTimeout;
     private readonly bool _sample;
     private readonly CancellationTokenSource _stop = new();
-    private readonly Lock _gate = new();
+    // A plain object, not System.Threading.Lock: the first time a thread has to wait for a Lock the runtime
+    // allocates the lock's wait event on that thread. The interface reads the view through this gate
+    // from the frame.
+    private readonly object _gate = new();
     private AccountView _view;
     private string? _token;
 

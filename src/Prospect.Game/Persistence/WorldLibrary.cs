@@ -90,7 +90,8 @@ public sealed class WorldLibrary
 
     // A summary takes a world's lease for the moment it looks, so a list being read in this process would make an
     // open of the same world fail as busy. One library call at a time keeps them apart.
-    private readonly Lock _gate = new();
+    // A plain object, as every lock of the game is: see PlayerInputBridge.
+    private readonly object _gate = new();
 
     /// <summary>A library rooted at a folder, which need not exist yet: it is made when the first world is.</summary>
     public WorldLibrary(string root)
@@ -228,7 +229,7 @@ public sealed class WorldLibrary
         }
         finally
         {
-            _gate.Exit();
+            Monitor.Exit(_gate);
         }
     }
 
@@ -247,7 +248,7 @@ public sealed class WorldLibrary
         }
         finally
         {
-            _gate.Exit();
+            Monitor.Exit(_gate);
         }
     }
 
@@ -335,11 +336,11 @@ public sealed class WorldLibrary
     /// <summary>Takes the library's gate, giving up when <paramref name="cancel"/> is cancelled: a list being read never traps an open that is no longer wanted.</summary>
     private void EnterGate(CancellationToken cancel)
     {
-        while (!_gate.TryEnter(50))
+        while (!Monitor.TryEnter(_gate, 50))
             cancel.ThrowIfCancellationRequested();
         if (!cancel.IsCancellationRequested)
             return;
-        _gate.Exit();
+        Monitor.Exit(_gate);
         cancel.ThrowIfCancellationRequested();
     }
 

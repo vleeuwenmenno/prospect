@@ -8,7 +8,7 @@ namespace Prospect.Game.Client;
 internal sealed partial class ClientWorld
 {
     // Edits taken into the bricks on the simulation thread in one tick at most; a rock with more waiting is
-    // replayed on a worker instead, so a long list that comes into view never holds a tick up.
+    // replayed on its own thread instead, so a long list that comes into view never holds a tick up.
     private const int RockEditsInlinePerTick = 8;
 
     private RockEdits? _rockEdits;
@@ -23,6 +23,7 @@ internal sealed partial class ClientWorld
 
     private void ResetRockEdits()
     {
+        _rockReplay?.Dispose();
         _rockEdits = new RockEdits(_content.RockEdits);
         _rockReplay = new RockEditReplay(_rockEdits.Log);
         _rockEditsBehind = false;
@@ -94,22 +95,33 @@ internal sealed partial class ClientWorld
 }
 
 /// <summary>
-/// Works a rock's whole edit list into bricks of its own on a pool thread, for the simulation thread to copy in when
-/// it is done. One rock at a time; starting and collecting take no memory.
+/// Works a rock's whole edit list into bricks of its own on a thread of its own, for the simulation thread to copy in
+/// when it is done. One rock at a time; starting and collecting take no memory.
+/// <para>
+/// The thread is made with the replay, so with the session, and sleeps between rocks. It is not a pool thread: the
+/// pool makes a worker the first time it needs one more, which took about a kilobyte in the middle of play on a
+/// machine of four cores or fewer. It sleeps on a plain object's monitor, whose waits take no managed memory.
+/// </para>
 /// </summary>
-internal sealed class RockEditReplay : IThreadPoolWorkItem
+internal sealed class RockEditReplay : IDisposable
 {
     private const int Idle = 0, Busy = 1, Done = 2;
     private readonly RockEditLog _log;
+    private readonly object _gate = new();
+    private readonly Thread _thread;
     private int _state;
     private int _slot = -1;
     private int _limit;
+    private bool _work;
+    private bool _stop;
 
-    /// <summary>A replay with room for the most bricks one rock may hold.</summary>
+    /// <summary>A replay with room for the most bricks one rock may hold, and its thread, asleep.</summary>
     public RockEditReplay(RockEditLog log)
     {
         _log = log;
         Bricks = new RockBricks(log, log.Rules.MaxBricksPerRock);
+        _thread = new Thread(Run) { Name = "RockReplay", IsBackground = true };
+        _thread.Start();
     }
 
     /// <summary>The worker's own bricks. Read them only between <see cref="TakeDone"/> and the next <see cref="Start"/>.</summary>
@@ -122,10 +134,16 @@ internal sealed class RockEditReplay : IThreadPoolWorkItem
     public void Start(int slot, int limit)
     {
         if (Interlocked.CompareExchange(ref _state, Busy, Idle) != Idle) return;
+
+        // The thread is asleep until it is told of work, so its bricks are this thread's to clear.
         if (_slot >= 0) Bricks.Clear(_slot);
         _slot = slot;
         _limit = limit;
-        ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);
+        lock (_gate)
+        {
+            _work = true;
+            Monitor.Pulse(_gate);
+        }
     }
 
     /// <summary>True once, when a replay has finished: <paramref name="slot"/> is the rock whose bricks are ready.</summary>
@@ -135,10 +153,32 @@ internal sealed class RockEditReplay : IThreadPoolWorkItem
         return Interlocked.CompareExchange(ref _state, Idle, Done) == Done;
     }
 
-    void IThreadPoolWorkItem.Execute()
+    /// <summary>Ends the thread, after the rock it is on.</summary>
+    public void Dispose()
     {
-        for (var next = Bricks.NextPending(_slot, _limit); next >= 0; next = Bricks.NextPending(_slot, _limit))
-            Bricks.Apply(next);
-        Volatile.Write(ref _state, Done);
+        lock (_gate)
+        {
+            _stop = true;
+            Monitor.Pulse(_gate);
+        }
+
+        _thread.Join();
+    }
+
+    private void Run()
+    {
+        while (true)
+        {
+            lock (_gate)
+            {
+                while (!_work && !_stop) Monitor.Wait(_gate);
+                if (_stop) return;
+                _work = false;
+            }
+
+            for (var next = Bricks.NextPending(_slot, _limit); next >= 0; next = Bricks.NextPending(_slot, _limit))
+                Bricks.Apply(next);
+            Volatile.Write(ref _state, Done);
+        }
     }
 }
