@@ -116,6 +116,9 @@ public enum MessageId : byte
     /// <summary>Client to server, reliable: the temporary debug scrape. See <see cref="RockScrapeRequest"/>.</summary>
     RockScrape = 42,
 
+    /// <summary>Client to server, reliable: a drone setting of a hull. See <see cref="DroneSettingsMessage"/>.</summary>
+    DroneSettings = 43,
+
     /// <summary>Client to server, reliable: which action groups fire and where they aim. See <see cref="LaserAimMessage"/>.</summary>
     LaserAim = 44,
 

@@ -306,7 +306,7 @@ What works now:
   are thrown away only with **Discard changes**. The server refuses any other design for a damaged hull.
 - One kind of FTL drive per ship, any number of it; refused at placement, in the check and on the server.
 - The part to place is sized by holding `S` and dragging a face of its ghost (the opposite face stays), and
-  turned with `R` by dragging one of two rings around its ghost, in exact quarter turns, before it is placed.
+  turned with `R` by dragging one of three rings around its ghost (x, y, z), in exact quarter turns, before it is placed.
 - The ghost glides into each turn; the glide is drawn only, never placed. The right button orbits through both.
 - A turn needs no confirming. A click on the turned ghost places it; `R` or a click elsewhere keeps the turn
   without placing; `Esc` puts it back.

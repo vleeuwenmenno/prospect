@@ -6,6 +6,8 @@ The pod is the tractor capture pod (prepare_tractor_capture.py: a tractor beam o
 with a drone bay left of the sensor, hatch facing left. Containers are jettisoned at 6 m/s instead of 2, so one
 leaves the beam's 40 m range before its 10 s pickup delay is over and only drones can bring it back.
 Run the copy with --open cargo --jettison 5 --drone-fetch 16 --capture ... Shipped designs are never changed.
+For auto pickup use --drone-autopickup 3 instead of --drone-fetch: the drones go for the jettisoned container on their
+own once its pickup delay is over; add --drone-popup to open the settings popup over the DRONES chip.
 """
 import json
 import subprocess

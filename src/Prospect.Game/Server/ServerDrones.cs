@@ -35,6 +35,22 @@ public sealed partial class ServerHost
         private BayRecord _first;
     }
 
+    /// <summary>A container auto pickup was refused for, and the tick it may try it again.</summary>
+    private struct AutoSkipRecord
+    {
+        public uint Id;
+        public long Until;
+    }
+
+    [InlineArray(AutoSkipSlots)]
+    private struct AutoSkips
+    {
+        private AutoSkipRecord _first;
+    }
+
+    /// <summary>Refused containers one hull remembers; the oldest is forgotten first.</summary>
+    private const int AutoSkipSlots = 4;
+
     private struct BayPage
     {
         public HullHandle Hull;
@@ -59,6 +75,17 @@ public sealed partial class ServerHost
         public float FetchPendingKg;
         public uint FetchSubject;
         public long FetchUntil;
+
+        /// <summary>
+        /// Auto pickup (saved with the hull): while on, <see cref="TickAutoPickup"/> starts fetches for loose
+        /// containers by itself. <see cref="AutoPausedUntil"/> is the tick a manual recall holds it off until,
+        /// <see cref="AutoCursor"/> where the rotating look at the container pool goes on, and the skips the
+        /// containers a fetch was refused for lately. None of the three is sent or saved.
+        /// </summary>
+        public bool AutoPickup;
+        public long AutoPausedUntil;
+        public int AutoCursor, AutoSkipNext;
+        public AutoSkips AutoSkip;
         public BayRecords Bays;
     }
 
@@ -153,7 +180,7 @@ public sealed partial class ServerHost
             order.Base = next;
             order.Bay = bay;
         }
-        if (to >= 0) _bayPages[to].Revision++;
+        if (to >= 0) { _bayPages[to].AutoPickup = _bayPages[from].AutoPickup; _bayPages[to].Revision++; }
     }
 
     private void RemoveOrder(int index) => _orders[index] = _orders[--_orderCount];
@@ -231,7 +258,33 @@ public sealed partial class ServerHost
         if (page < 0) { ReplyDrones(connection, DroneReply.NoBay, 0); return; }
         if (command.Command == DroneCommand.Recall) RecallDrones(connection, hull, page);
         else if (command.Command == DroneCommand.Fetch) FetchContainer(connection, hull, page, command.Subject);
-        else LaunchDrones(connection, hull, page, command);
+        else
+        {
+            _bayPages[page].AutoPausedUntil = 0;
+            LaunchDrones(connection, hull, page, command);
+        }
+    }
+
+    /// <summary>
+    /// A drone setting, after admission and under its own rate limit (the same spacing as a command, kept apart so
+    /// a launch and a click on the checkbox never cost each other). Only the owner's own, live, non-drone, non-wreck
+    /// hull with bays takes one.
+    /// </summary>
+    private void ReceiveDroneSettings(Connection connection, in DroneSettingsMessage message)
+    {
+        if (connection.State != ConnectionState.Active || _tick < connection.DroneSettingsNext) return;
+        connection.DroneSettingsNext = _tick + _content.Drones.CommandTicks;
+        var hull = new HullHandle((int)(message.Hull & 0xFFFF), (int)(message.Hull >> 16));
+        if (!_hulls.IsAlive(hull)) return;
+        var info = _hulls.Info(hull.Index);
+        if (info.Owner != connection.PlayerId || info.WorkDrone || info.Wreck) return;
+        var page = PageOf(hull);
+        if (page < 0) { ReplyDrones(connection, DroneReply.NoBay, 0); return; }
+        ref var p = ref _bayPages[page];
+        if (p.AutoPickup == message.AutoPickup) return;
+        p.AutoPickup = message.AutoPickup;
+        p.AutoPausedUntil = 0;
+        p.Revision++;
     }
 
     private void LaunchDrones(Connection connection, HullHandle hull, int page, in DroneCommandMessage command)
@@ -284,6 +337,8 @@ public sealed partial class ServerHost
         ref var p = ref _bayPages[page];
         for (var b = 0; b < DroneBayRules.MaxBays; b++) p.Bays[b].Pending = 0;
         p.FetchPending = 0; p.FetchPendingKg = 0;
+        // A recall by hand means "come home": auto pickup holds off for a while instead of sending them straight out again.
+        if (p.AutoPickup) p.AutoPausedUntil = _tick + _content.Drones.AutoPickupPauseTicks;
         for (var i = 0; i < _orderCount; i++)
         {
             ref var order = ref _orders[i];
@@ -324,6 +379,7 @@ public sealed partial class ServerHost
             if (!page.Used) continue;
             if (!_hulls.IsAlive(page.Hull) || _hulls.Info(page.Hull.Index).BayPage != p + 1) { page = default; continue; }
             TickBays(p);
+            TickAutoPickup(p);
         }
 
         for (var i = _orderCount - 1; i >= 0; i--)
@@ -582,6 +638,7 @@ public sealed partial class ServerHost
                 Reply = c.DroneReply,
                 ReplyCount = c.DroneReplyCount,
                 Fetching = (byte)Math.Min(byte.MaxValue, FetchingDrones(c.Hull, page)),
+                AutoPickup = page >= 0 && _bayPages[page].AutoPickup,
             };
             if (page >= 0)
             {

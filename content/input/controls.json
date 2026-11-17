@@ -116,7 +116,7 @@
     { "tab": "Interface", "label": "Leave interface mode", "binding": "{ToggleInterface} again, or Escape; pinned windows stay on screen" },
     { "tab": "Interface", "label": "Pin a window", "binding": "The pin in its title bar; a pinned window stays over the view after interface mode ends (hold {ReleasePointer} to click it)" },
     { "tab": "Interface", "action": "ToggleControls", "label": "Controls / help", "scope": ["All"] },
-    { "tab": "Interface", "action": "ShipInfo", "label": "Ship data sheet", "scope": ["Pilot", "Command", "Map"] },
+    { "tab": "Interface", "action": "ShipInfo", "label": "Ship window", "scope": ["All"] },
     { "tab": "Interface", "action": "TogglePerformance", "label": "Performance overlay", "scope": ["All"] },
     { "tab": "Interface", "action": "ToggleFullscreen", "label": "Fullscreen", "scope": ["All"] },
     { "tab": "Interface", "action": "Screenshot", "label": "Screenshot", "scope": ["All"] },

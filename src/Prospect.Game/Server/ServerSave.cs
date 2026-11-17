@@ -407,6 +407,12 @@ public sealed partial class ServerHost
                 || !RestoreBays(handle, world.BayStocked.AsSpan(bayCount, saved.Bays), world.BayRebuild.AsSpan(bayCount, saved.Bays), world.NextWorldTick, out error))
                 throw new InvalidDataException($"Saved hull {i}: {(error.Length > 0 ? error : "its drone bays do not fit the save")}.");
             bayCount += saved.Bays;
+            if (saved.AutoPickup)
+            {
+                var autoPage = PageOf(handle);
+                if (autoPage < 0) throw new InvalidDataException($"Saved hull {i}: auto pickup without a drone bay.");
+                _bayPages[autoPage].AutoPickup = true;
+            }
             info = ref _hulls.Info(handle.Index);
             info.ConnectivityRevision = _hulls.Revision(handle.Index);
             _field.RestoreFigures(handle.Index);
@@ -627,6 +633,7 @@ public sealed partial class ServerHost
             var bays = page >= 0 ? _content.Designs[info.Design].Bays : [];
             saved.BayStart = buffer.BayCount;
             saved.Bays = bays.Length;
+            saved.AutoPickup = page >= 0 && _bayPages[page].AutoPickup;
             for (var b = 0; b < bays.Length; b++)
             {
                 var capacity = _content.Designs[info.Design].Types[bays[b]].Bay!.Capacity;

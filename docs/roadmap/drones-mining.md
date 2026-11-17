@@ -84,8 +84,26 @@ and the mining rules will be refined by playing.
 
 ### Drone settings
 
-- Clicking the DRONES chip opens a small popup: one Launch/Recall button and checkboxes for what drones pick up
-  on their own: "Pick up cargo" now, "Pick up ores" once ore chunks exist (R4).
+Built (popup and "Pick up cargo"); "Pick up ores" waits for R4.
+
+- Clicking the DRONES chip opens a small popup over it: one Launch/Recall button, the checkbox "Pick up cargo", and
+  status lines (drones in, out, fetching; rebuild timer; the server's last answer). It closes on a click outside, on
+  Escape (`BackStep.DronePopup`) or on the chip again.
+- Decided: "Pick up ores" is not there yet. Ore chunks do not exist until R4 (no stubs); R4 adds that checkbox and
+  its setting, as a second flag beside auto pickup.
+- Decided: the setting is per hull, not per bay. The chip, the popup and a fetch all speak for the whole hull, and
+  a fetch already picks bays itself. It is saved (codec 19) and carried over an edit or repair.
+- Auto pickup is the manual fetch, not a second path: `TickAutoPickup` picks a container and calls `StartFetch`, the
+  same code as the `/` key, so claims, pickup delay, range, carriers and refusals are the same. Each tick it looks at
+  a rotating window of `autoPickupWindow` (16) of the 256-body pool.
+- It skips: containers someone has (tractor, other drones), ones the owner may not take, out of range or sensor
+  sight, and ones the hull's own tractor reaches (`TractorSimulation.Reaches`) since the beam takes those itself.
+- One fetch at a time per hull. A refused container is left alone for `autoPickupRetrySeconds` (20; four are
+  remembered per hull), so an impossible container never nags. The refusal is told to the owner like a manual one.
+- A manual recall holds auto pickup off for `autoPickupPauseSeconds` (30), or until the next manual launch.
+- Turning it off stops new fetches; a fetch under way finishes (recall cancels it).
+- Wire: protocol 67, reliable message 43 `DroneSettingsMessage` (hull, flag; own rate limit, `commandSeconds`),
+  `BayView.AutoPickup` in message 40, which the checkbox reads back, so a lost click shows as an unchanged box.
 - The keys (`.` launch, `,` recall, `/` fetch) keep working.
 
 ### Mining lasers and action groups

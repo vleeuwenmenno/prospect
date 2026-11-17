@@ -28,6 +28,11 @@ internal sealed partial class ScreenHost
     private int _moduleKeysVersion = -1;
     private ModuleTargets _moduleTargets;
     private readonly DroneTracker _droneTrack = new();
+    private readonly DronePopup _dronePopup = new();
+    private bool _dronePopupWanted;
+
+    /// <summary>Opens the drone settings popup as soon as the flown hull has a chip for it. Used by <c>--drone-popup</c>, for captures.</summary>
+    public void RequestDronePopup() => _dronePopupWanted = true;
     private DroneChipState _droneState;
     private byte[] _droneKeyName = [];
     private byte[] _droneRecallKeyName = [];
@@ -70,6 +75,12 @@ internal sealed partial class ScreenHost
         _moduleTargets = targets;
         _droneState = DroneUi.State(snapshot.Bays, own.Id);
         _droneTrack.Update(snapshot.Bays, _ui.DeltaTime);
+        _dronePopup.Follow(own.Id, _droneState != DroneChipState.Absent);
+        if (_dronePopupWanted && _droneState != DroneChipState.Absent)
+        {
+            _dronePopupWanted = false;
+            if (!_dronePopup.IsOpen) _dronePopup.Toggle();
+        }
         if (_droneKeysVersion != _app.Actions.Version)
         {
             _droneKeysVersion = _app.Actions.Version;
@@ -257,7 +268,9 @@ internal sealed partial class ScreenHost
                 RequestModule(slot, bridge);
         }
 
-        // The bays' chip comes last; a click launches every drone inside, or calls them home while some are out.
+        // The bays' chip comes last; a click opens the drone settings popup over it (a click again closes it).
+        var droneChipMin = default(float2);
+        var droneChipShown = false;
         if (_droneState != DroneChipState.Absent)
         {
             var min = origin + new float2((width + gap) * shown, 0);
@@ -267,15 +280,15 @@ internal sealed partial class ScreenHost
             var hot = ImGui.IsItemHovered();
             ImGui.PopID();
             DrawDroneChip(draw, min, new float2(width, height), hot, snapshot);
-            if (pressed && Bridge is { } bridge)
-            {
-                if (_droneState == DroneChipState.Out) bridge.RecallDrones(world.Own.Id);
-                else DroneUi.Launch(snapshot.Bays, world.Own.Id, bridge);
-            }
+            droneChipMin = min;
+            droneChipShown = true;
+            if (pressed) _dronePopup.Toggle();
         }
 
         Kit.Fade = previous;
         ImGui.End();
+        if (droneChipShown && _dronePopup.IsOpen)
+            DrawDronePopup(snapshot, world, droneChipMin, new float2(width, height));
         if (hovered >= 0)
             DrawModuleTip(ImGui.GetForegroundDrawList(), hovered, hoveredMin, new float2(width, height), snapshot);
     }
@@ -328,6 +341,82 @@ internal sealed partial class ScreenHost
             draw.AddRectFilled(track, new float2(track.X + (max.X - Kit.Px(1) - track.X) * progress, max.Y - Kit.Px(1)), Kit.Color(Theme.TextDim));
         }
         Kit.Fade = previous;
+    }
+
+    /// <summary>Rows of the popup's status block: counts, rebuild, last answer.</summary>
+    private const int DronePopupStatusLines = 3;
+
+    /// <summary>
+    /// The drone settings popup, over the DRONES chip: one Launch/Recall button (the keys' own action), the
+    /// "Pick up cargo" checkbox (the server's auto pickup, read back from the view) and three status lines. It
+    /// only takes presses while the pointer is shown; a press anywhere else closes it (<see cref="DronePopup.Press"/>).
+    /// A fixed height keeps its place and the outside-press test from depending on what the lines say.
+    /// </summary>
+    private void DrawDronePopup(SessionSnapshot snapshot, WorldView world, float2 chipMin, float2 chipSize)
+    {
+        var bays = snapshot.Bays;
+        var pad = Kit.Px(Theme.Space3);
+        var gap = Kit.Px(Theme.Space2);
+        var line = Kit.Px(16);
+        var width = Kit.Px(244);
+        var height = pad * 2 + line + gap + Kit.Px(Theme.ControlHeight) + gap + Kit.Px(24) + gap + line * DronePopupStatusLines;
+        var display = _ui.DisplaySize;
+        var edge = Kit.Px(Theme.Space2);
+        var min = new float2(
+            Math.Clamp(chipMin.X, edge, Math.Max(edge, display.X - width - edge)),
+            Math.Max(edge, chipMin.Y - gap - height));
+        var size = new float2(width, height);
+
+        var pointer = ImGui.GetMousePos();
+        var overPopup = pointer.X >= min.X && pointer.X < min.X + size.X && pointer.Y >= min.Y && pointer.Y < min.Y + size.Y;
+        var overChip = pointer.X >= chipMin.X && pointer.X < chipMin.X + chipSize.X && pointer.Y >= chipMin.Y && pointer.Y < chipMin.Y + chipSize.Y;
+        _dronePopup.Press(ImGui.IsMouseClicked(ImGuiMouseButton.Left), overPopup, overChip);
+        if (!_dronePopup.IsOpen)
+            return;
+
+        ImGui.SetNextWindowPos(min);
+        ImGui.SetNextWindowSize(size);
+        ImGui.Begin("##dronepopup"u8, RootFlags | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+        RaiseIfAppearing();
+        var draw = ImGui.GetWindowDrawList();
+        Kit.PanelFrame(draw, min, min + size);
+        var inner = size.X - pad * 2;
+        var at = min + new float2(pad, pad);
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, at, Theme.TextMute, "DRONES"u8);
+        at.Y += line + gap;
+
+        var own = world.Own.Id;
+        bays.Totals(out var stocked, out var outside, out var pending, out var capacity);
+        var recalling = outside > 0;
+        ImGui.SetCursorScreenPos(at);
+        if (Kit.Button(recalling ? "Recall drones"u8 : "Launch drones"u8, ButtonKind.Primary, inner / Kit.Scale) && Bridge is { } bridge)
+            DronePopup.LaunchOrRecall(bays, own, bridge);
+        at.Y += Kit.Px(Theme.ControlHeight) + gap;
+
+        ImGui.SetCursorScreenPos(at);
+        if (EditorCheckbox("##autopickup"u8, "Pick up cargo"u8, new float2(inner, Kit.Px(24)), true, bays.AutoPickup) && Bridge is { } settings)
+            DronePopup.ToggleAutoPickup(bays, own, settings);
+        at.Y += Kit.Px(24) + gap;
+
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, at, Theme.Info, Kit.F($"{stocked} IN  {outside} OUT  {bays.Fetching} FETCHING"));
+        at.Y += line;
+        var rebuild = DroneUi.RebuildSeconds(bays, snapshot.ServerTick);
+        if (rebuild > 0)
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, at, Theme.TextDim, Kit.F($"NEXT DRONE IN {rebuild} S"));
+        else if (pending > 0)
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, at, Theme.TextDim, Kit.F($"{pending} LAUNCHING"));
+        else if (stocked >= capacity)
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, at, Theme.TextDim, "BAYS FULL"u8);
+        at.Y += line;
+        var last = _droneTrack.Latest;
+        if (last != DroneReply.None)
+        {
+            const string Label = "LAST  ";
+            var labelWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, Label).X;
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, at, Theme.TextMute, Label);
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(labelWidth, 0), DroneUi.Refused(last) ? Theme.Bad : Theme.Good, DroneUi.Words(last), Math.Max(0f, inner - labelWidth));
+        }
+        ImGui.End();
     }
 
     /// <summary>The longest rebuild of the flown hull's bays, in ticks: what the rebuild bar measures against.</summary>

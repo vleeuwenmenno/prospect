@@ -223,7 +223,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
     // Reserve the full fleet message, one five-byte Control, one editor request, one cargo release and one design acknowledgement
     // before allowing any social traffic.
     internal const int EditorBytesPerTick = EditorRequestMessage.MaxWireSize + DesignReadyMessage.WireSize;
-    internal const int SocialBytesPerTick = ServerHost.PlayerBytesPerTick - FleetOrdersMessage.MaxWireSize - 5 - EditorBytesPerTick - ExplorationMessage.ScanWireSize - ModuleMessage.RequestWireSize - JettisonCargoMessage.MaxWireSize - DroneCommandMessage.MaxWireSize
+    internal const int SocialBytesPerTick = ServerHost.PlayerBytesPerTick - FleetOrdersMessage.MaxWireSize - 5 - EditorBytesPerTick - ExplorationMessage.ScanWireSize - ModuleMessage.RequestWireSize - JettisonCargoMessage.MaxWireSize - DroneCommandMessage.MaxWireSize - DroneSettingsMessage.MaxWireSize
         - LaserAimMessage.MaxWireSize - SetActionGroupMessage.MaxWireSize;
     internal static readonly int SocialMessagesPerTick = Math.Min(ServerHost.PlayerMessagesPerTick - 7, SocialBytesPerTick / SocialMessage.MaxWireSize);
     private long _receivedSnapshotTick = -1;
@@ -403,6 +403,13 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                     {
                         var writer = new NetWriter(_sendBuffer);
                         drones.Write(ref writer);
+                        if (!_transport.Send(0, NetChannel.Reliable, writer.Written))
+                        { End(SessionEndReason.ConnectionLost); return; }
+                    }
+                    if (sendCommands && Input.ConsumeDroneSettings(out var droneSettings))
+                    {
+                        var writer = new NetWriter(_sendBuffer);
+                        droneSettings.Write(ref writer);
                         if (!_transport.Send(0, NetChannel.Reliable, writer.Written))
                         { End(SessionEndReason.ConnectionLost); return; }
                     }

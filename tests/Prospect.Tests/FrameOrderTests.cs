@@ -4159,8 +4159,8 @@ public sealed class FrameOrderTests : IDisposable
     public void EscapeClosesTheCourseMenuBeforeTheCommandViewAndLeavesTheViewAlone()
     {
         OpenCourseMenu(Ahead(100000));
-        Assert.Equal(ScreenHost.BackStep.CourseMenu, ScreenHost.NextBackStep(false, false, false, _world.CourseMenu.IsOpen, false, false, ViewMode.Command));
-        Assert.Equal(ScreenHost.BackStep.SessionMenu, ScreenHost.NextBackStep(false, false, true, true, false, false, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.CourseMenu, ScreenHost.NextBackStep(false, false, _world.CourseMenu.IsOpen, false, false, false, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.SessionMenu, ScreenHost.NextBackStep(false, true, true, false, false, false, ViewMode.Command));
         Assert.Equal(ScreenHost.BackStep.PilotView, ScreenHost.NextBackStep(false, false, false, false, false, false, ViewMode.Command));
         Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, false, false, ViewMode.Pilot));
         Assert.True(_world.CourseMenu.Close());
@@ -4481,11 +4481,11 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Move(OverButton));
         Assert.True(_world.FreeLook);
 
-        // Letting go returns the view to the nose, as free look does.
+        // Letting go keeps the view where the drag left it, as free look does.
         Frame(() => Button(GlfwMouseButton.Right, false));
         Frame();
         Assert.False(_world.FreeLook);
-        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+        Assert.True(Vector3.Distance(Sent().Aim, Nose) > 0.05f);
         Assert.Equal(0, _buttonClicks);
     }
 
@@ -4742,6 +4742,7 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Move(EmptySpace + new float2(200, 0)));
         Assert.True(_world.FreeLook);
         Frame(() => Move(OverButton));
+        var held = Sent().Aim;
 
         // Both edges arrive in one poll: the new UI press must not continue the old world drag.
         Frame(() =>
@@ -4752,7 +4753,7 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Move(EmptySpace));
         Frame(() => Move(EmptySpace + new float2(300, 0)));
         Assert.False(_world.FreeLook);
-        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+        Assert.True(Vector3.Distance(Sent().Aim, held) < 1e-4f);
         Assert.Equal(0, _buttonClicks);
 
         Frame(() => Button(GlfwMouseButton.Right, false));
@@ -4768,6 +4769,7 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Button(GlfwMouseButton.Right, true));
         Frame(() => Move(EmptySpace + new float2(100, 0)));
         Assert.True(_world.FreeLook);
+        var held = Sent().Aim;
         Frame(() =>
         {
             Button(GlfwMouseButton.Right, false);
@@ -4775,7 +4777,7 @@ public sealed class FrameOrderTests : IDisposable
             Button(GlfwMouseButton.Right, true);
         });
         Assert.False(_world.FreeLook);
-        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+        Assert.True(Vector3.Distance(Sent().Aim, held) < 1e-4f);
         Frame(() => Move(OverButton + new float2(20, 0)));
         Frame(() => Move(EmptySpace));
         Assert.False(_world.FreeLook);
@@ -4787,6 +4789,7 @@ public sealed class FrameOrderTests : IDisposable
         PilotWithShift();
         Frame(() => Button(GlfwMouseButton.Right, true));
         Frame(() => Move(EmptySpace + new float2(100, 0)));
+        var held = Sent().Aim;
         Frame(() =>
         {
             Button(GlfwMouseButton.Right, false);
@@ -4795,7 +4798,7 @@ public sealed class FrameOrderTests : IDisposable
             Move(EmptySpace + new float2(200, 0));
         });
         Assert.False(_world.FreeLook);
-        Assert.True(Vector3.Distance(Sent().Aim, Nose) < 1e-4f);
+        Assert.True(Vector3.Distance(Sent().Aim, held) < 1e-4f);
         Frame(() => Move(EmptySpace + new float2(300, 0)));
         Assert.False(_world.FreeLook);
     }
@@ -5007,7 +5010,7 @@ public sealed class FrameOrderTests : IDisposable
         {
             if (!_actions.Pressed(_devices, InputAction.Pause, true))
                 return false;
-            var step = ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, false, _world.Mode);
+            var step = ScreenHost.NextBackStep(false, false, false, callout.IsOpen, false, false, _world.Mode);
             steps.Add(step);
             if (step == ScreenHost.BackStep.FuelCallout)
                 callout.Close();
@@ -5019,7 +5022,7 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal([ScreenHost.BackStep.FuelCallout], steps);
         Assert.False(callout.IsOpen);
         Assert.Equal(ViewMode.Pilot, _world.Mode);
-        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, false, _world.Mode));
+        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, callout.IsOpen, false, false, _world.Mode));
 
         // Opened again, the same fuel's click closes it; in the command view Escape still takes it first.
         // Dear ImGui reads a press and its release in two frames, so each click gets a frame to finish.
@@ -5034,7 +5037,7 @@ public sealed class FrameOrderTests : IDisposable
         Frame(() => Click());
         Frame();
         Assert.Equal(first, callout.Open);
-        Assert.Equal(ScreenHost.BackStep.FuelCallout, ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, false, ViewMode.Command));
+        Assert.Equal(ScreenHost.BackStep.FuelCallout, ScreenHost.NextBackStep(false, false, false, callout.IsOpen, false, false, ViewMode.Command));
 
         // A gap between cells, or the bars above, opens nothing and closes nothing.
         Frame(() => Move(MiddleOf(ConsoleBar.Shield)));
@@ -8628,13 +8631,12 @@ public sealed class FrameOrderTests : IDisposable
         Assert.True(_mode.Active);
         Assert.Equal(0, _buttonClicks);
 
-        // Let go: free look's own rule, the view returns to the nose; the hull never turned.
+        // Let go: free look's own rule, the view stays where the drag left it; the hull never turned.
         Frame(() => Button(GlfwMouseButton.Right, false), InterfaceKey);
         Assert.False(_world.FreeLook);
-        // The chase camera eases back onto the nose over a few frames.
         for (var i = 0; i < 240; i++)
             Frame(shortcut: InterfaceKey);
-        Assert.True(Vector3.Distance(_world.CameraForward, before) < 0.05f);
+        Assert.True(Vector3.Distance(_world.CameraForward, before) > 0.05f);
     }
 
     [Fact]

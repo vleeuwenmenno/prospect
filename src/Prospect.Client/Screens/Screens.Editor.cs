@@ -54,7 +54,7 @@ internal sealed partial class ScreenHost
         // Escape that closed a tip was the tip's.
         if (!active || _tipBack || _screen != Screen.Session || snapshot is not { OwnHull: >= 0 } || bridge is null)
             return;
-        if (_controlsHandled || _controlsOpen || _sessionMenuOpen || _mapOpen || _shipInfoOpen || SocialSurfaceOpen || _socialHandled)
+        if (_controlsHandled || _controlsOpen || _sessionMenuOpen || _mapOpen || SocialSurfaceOpen || _socialHandled)
             return;
         // A saved designs dialog over the editor has the keyboard: Enter and Escape are its, and no editor key is read.
         if (_designs.Open)
@@ -103,7 +103,6 @@ internal sealed partial class ScreenHost
         DrawEditorParts(layout.Parts, editor, content);
         DrawEditorDetails(layout.Details, editor, draft, content, bridge);
         DrawEditorBar(layout.Bar, editor, draft, bridge);
-        DrawCargoJettison(snapshot, editor, bridge);
         // Last, so the menu is in front of the panels.
         _editorMenu.Draw(editor, draft, _app.Devices.MousePosition);
     }
@@ -342,12 +341,13 @@ internal sealed partial class ScreenHost
 
     private static GridSize Shift(GridSize at, GridSize by) => new(at.X + by.X, at.Y + by.Y, at.Z + by.Z);
 
-    /// <summary>The colours of the rotation rings: about x red, about y green, as the axes are drawn.</summary>
+    /// <summary>The colours of the rotation rings: about x red, about y green, about z blue, as the axes are drawn.</summary>
     private const uint RingX = 0xE0605A;
     private const uint RingY = 0x6AD07A;
+    private const uint RingZ = 0x5A9CF0;
 
     /// <summary>
-    /// The two rings around the ghost of a part being turned, the one under the pointer brighter and thicker, each
+    /// The three rings around the ghost of a part being turned, the one under the pointer brighter and thicker, each
     /// named by its axis, and how to use them beside the pointer.
     /// </summary>
     private void DrawRotationRings(ImDrawListPtr draw, WorldView world)
@@ -355,9 +355,9 @@ internal sealed partial class ScreenHost
         if (!world.PartRings(out var middle, out var radius))
             return;
         var hovered = world.RotationRingHovered;
-        for (var axis = 0; axis < 2; axis++)
+        for (var axis = 0; axis < 3; axis++)
         {
-            var tone = axis == 0 ? RingX : RingY;
+            var tone = axis == 0 ? RingX : axis == 1 ? RingY : RingZ;
             var color = Kit.Color(tone, hovered == axis ? 1f : 0.7f);
             var thickness = Kit.Px(hovered == axis ? 3.5f : 2f);
             for (var i = 0; i < WorldView.RingSegments; i++)
@@ -366,8 +366,9 @@ internal sealed partial class ScreenHost
                     draw.AddLine(a, b, color, thickness);
             }
 
-            if (world.Project(world.EditorPoint(WorldView.RingPoint(middle, radius, axis, 0)), out var label))
-                Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, label + new float2(Kit.Px(6), -Kit.Px(18)), tone, axis == 0 ? "TURN X"u8 : "TURN Y"u8);
+            // The y and z rings meet at their first point, so the z label sits half way round, on the other side.
+            if (world.Project(world.EditorPoint(WorldView.RingPoint(middle, radius, axis, axis == 2 ? WorldView.RingSegments / 2 : 0)), out var label))
+                Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, label + new float2(Kit.Px(6), -Kit.Px(18)), tone, axis == 0 ? "TURN X"u8 : axis == 1 ? "TURN Y"u8 : "TURN Z"u8);
         }
 
         PointerNote(world.RotationRingDragged ? "Drag round: a quarter turn at each half way."u8

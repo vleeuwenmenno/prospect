@@ -17,7 +17,7 @@ collide, split again, and survive saves. Cleanup is configurable; salvage and re
 Cargo racks are loading decks (a plate on the hull side, rails, posts, clamp jaws on stowed containers), content-defined container sizes and shared deterministic packing.
 Cargo payload mass affects flight and client prediction through the same shared simulation.
 Own hull cargo is held by the server, saved, replicated and drawn; local debug loading is available in the editor.
-Select an applied rack, choose a container in its cargo panel, then JETTISON SELECTED in local or remote games.
+Open the Cargo window (U), select a container and jettison it, in local or remote games.
 Destroyed racks eject intact containers; wreck splits retain cargo. Free containers drift, collide, take damage,
 and persist in saves. Middle-click a free container to see its size, resource, amount and HP.
 Containers are drawn the same racked or loose: corner blocks, door seams and lock rods, lifting eyes, and a plate in the
@@ -36,9 +36,8 @@ The energy tooltip lists TRACTORS. No pickup key or pickup by touch; no allow-li
 
 Drone bays (editor, Storage tab) are box blocks with one hatch: it faces away from the face the bay is placed on,
 and the model shows it (frame, orange doors, a light). A Common bay keeps 4 drones, launches 2 at once and rebuilds
-a lost one in 90 s; tiers are content, only Common is in the palette. `.` (or a click on the DRONES chip over the
-console) launches every drone inside; they leave through the hatch and hold station 14 m out in front of it. `,` (or
-the chip while drones are out) calls them home: they line up in front of the hatch, fly in and dock. A blocked hatch
+a lost one in 90 s; tiers are content, only Common is in the palette. `.` launches every drone inside; they leave through the hatch and hold station 14 m out in front of it. `,` calls
+them home: they line up in front of the hatch, fly in and dock. A blocked hatch
 (a block or a part of the ship in front of it) refuses a launch, and the chip says why. Drones are small real hulls
 flown by the server: they collide, can be destroyed (the bay rebuilds them) and use power. A player has at most 12
 out. A jump calls them home; one still out when the ship leaves is lost. A saved world docks every drone.
@@ -50,6 +49,15 @@ lift it together, faster the more they are. They bring it 10 m out in front of t
 the beam stows it as it stows any container. The DRONES chip shows how many are fetching, and why a fetch is refused:
 no tractor beam, no rack room, too heavy, too few drones, someone else's claim, already taken, out of range. Drones wait
 out a container's pickup delay before lifting it. Losing a carrier, or the ship jumping, drops the container where it is.
+
+A click on the DRONES chip (pointer shown: `Shift` or `Tab`) opens the drone settings popup over it: a Launch / Recall
+button (the same as `.` and `,`), the "Pick up cargo" checkbox, and how many drones are in, out and fetching, the
+rebuild timer and the server's last answer. A click on the chip again, a click elsewhere or `Esc` closes it. With
+"Pick up cargo" on, the ship's drones fetch loose containers on their own, one at a time, whenever one is in range and
+in sensor sight, is yours to take (no one else's claim, pickup delay over) and is out of reach of your own tractor beam
+(which takes it by itself). A container a fetch is refused for is left alone for 20 s. Recalling by hand holds it off
+for 30 s, or until you launch again. The setting is per ship and is saved with the world. There is no "Pick up ores"
+box yet: ore chunks do not exist until the mining laser (R4).
 A saved world keeps a carried container loose where it was. Not built: a ship without a tractor beam cannot be fetched
 to, choosing the hold point in the interface, a drone panel, drone battery limits, scans and charges (later drone steps),
 and any avoidance: a drone flies straight to its place and may bump the ship it came from.
@@ -213,11 +221,11 @@ are never blocked. The editor works in space, around your ship:
   side it stands for, and the wedge stays the same wedge. Let go of the button or `S`: nothing is placed; the
   size and place stay, and a new click while the pointer is still or on the ghost places it there. `Esc` puts
   back the size and place from before `S`. The right button still orbits while `S` is held.
-- Turn the part before placing it: `R` with its ghost on a face shows two rings around the ghost, about the
-  grid's x (red) and y (green). Left-drag a ring round: the ghost follows the pointer, and the part itself turns
+- Turn the part before placing it: `R` with its ghost on a face shows three rings around the ghost, about the
+  grid's x (red), y (green) and z (blue). Left-drag a ring round: the ghost follows the pointer, and the part itself turns
   in exact quarter turns (90 degrees) as the drag passes each half way. Let go, and the ghost glides onto the
   quarter turn; nothing else happens. The wheel over a ring turns a quarter either way; a click on it a quarter
-  forward, `Shift`+click back. The two rings together reach all twelve wedge orientations. Each turn glides over
+  forward, `Shift`+click back. The x and y rings alone reach all twelve wedge orientations; z saves the detour. Each turn glides over
   `turnSeconds` in `content/visuals/editor.json`; the glide is only drawn, the part placed is always the quarter
   turn. The right button orbits the camera without ending the turn. Every turn counts at once; nothing confirms
   it. A click on the ghost places it as it is drawn and ends the turn. `R` again, or a left or middle click
@@ -568,14 +576,14 @@ The cursor is hidden only in the pilot view. The command view, the map and every
 
 - **Pilot view:** the hidden cursor steers the view. Hold either `Shift` to show it: mouse flight and targeting
   stop, keyboard flight still works, and the bar and pinned windows can be clicked. With `Shift` held, a right drag that
-  starts over space turns the camera, as free look does; letting go of the button or of `Shift` returns the view to
-  the nose. Press `Shift` before the right button: a click in the same instant as `Shift` is dropped.
-- **Interface mode (`Tab`), pilot view:** a right drag that starts over space turns the camera as free look does (the hull does not turn, no flight input is sent); letting go returns the view to the nose. A press that starts on a window never turns it.
+  starts over space turns the camera, as free look does; letting go of the button or of `Shift` leaves the view
+  where it is. Press `Shift` before the right button: a click in the same instant as `Shift` is dropped.
+- **Interface mode (`Tab`), pilot view:** a right drag that starts over space turns the camera as free look does (the hull does not turn, no flight input is sent); letting go leaves the view where it is. A press that starts on a window never turns it.
 - **Command view:** the cursor is shown as soon as it opens (`N`), and the mouse works in the world: select,
   box-select, order, rotate, pan and zoom. `Shift` there only adds to a selection or moves the plane; it never
   hides the cursor or ends a drag. Back in the pilot view the cursor is hidden again unless `Shift` is held or
   something is open.
-- **Menus, data sheet, map, Controls, the Social workspace, Chat while typing:** the cursor shows until they
+- **Menus, map, Controls, the Social workspace, Chat while typing:** the cursor shows until they
   close, and the world gets no mouse. Pinned windows do not count: they leave the cursor hidden.
 - **Ship editor:** the cursor is shown and the mouse works on the ship, except over the editor's panels. The ship
   gets no controls while it is open. A press on a panel never reaches the ship, with one exception: a part card
@@ -597,7 +605,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Forward / back, strafe | `W` `S`, `A` `D` | Left stick |
 | Up / down | `R`, `F` | Right / left trigger |
 | Look around | Mouse, or arrow keys | Right stick |
-| Free look (hull holds its heading) | Hold right mouse button | |
+| Free look (hull holds its heading; the view stays where you leave it) | Hold right mouse button | |
 | Turn the hull onto the view (hold, or click) | Left mouse button | |
 | Zoom camera | Mouse wheel | |
 | Roll | `Q` `E` | Bumpers |
@@ -614,7 +622,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |
 | Halt (cancel order; the only way to cancel a started jump) | `H` or `Backspace` | `B` |
-| Ship data sheet | `I` | D-pad up |
+| Ship window (stats of the ship flown, or the selection in the command view) | `I` | D-pad up |
 | Target the ship under the reticle, or the asteroid if there is no ship | Middle mouse button | |
 | Take control of the target (same sector only), or leave in a drone | `T` | D-pad down |
 | Menu or back | `Esc` | `Start` |
@@ -733,7 +741,7 @@ on arrival. Outside the map, a move with nothing selected
 still goes to the ship you fly.
 
 Where the command plane cuts through an asteroid or a hull, the cut is drawn as a bright line and the part below
-the plane is dimmed, so it is clear what sits on the plane. `I` shows the data sheet of the first selected hull or
+the plane is dimmed, so it is clear what sits on the plane. `I` opens the Ship window, which then shows the first selected hull or
 asteroid.
 
 `F2` shows or hides the sector panel (name,
