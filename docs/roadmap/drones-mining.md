@@ -54,8 +54,9 @@ Decided 2026-11-17:
 - Tractor beams take chunks on their own, like loose containers, but a container always comes first. A chunk is
   taken only when a bin has room for it, so a full ship stops pulling.
 - Drones take chunks too: the popup gets "Pick up ores", a second flag beside "Pick up cargo".
-- Highlighting in flight: a marker on each chunk within sensor range in the ore's colour, a hover tooltip (ore, grade,
-  kg) like the container's, and a chunk count near the ship on the DRONES chip.
+- Highlighting in flight (built): a marker on each chunk within sensor range in the ore's colour, a hover tooltip (ore,
+  grade, kg) like the container's, and a chunk count near the ship on the DRONES chip. Chunks off screen get edge arrows
+  with counts. Figures: `content/visuals/ore_chunks.json`.
 - While debugging, every method is unlocked. A tech tree decides unlocks later.
 
 ### Drone life and the bay

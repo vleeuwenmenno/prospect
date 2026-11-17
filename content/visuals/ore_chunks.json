@@ -1,0 +1,15 @@
+{
+  "markerPixels": 7,
+  "framePaddingPixels": 3,
+  "lineWidth": 1.5,
+  "fillAlpha": 0.22,
+  "fadeStartMetres": 400,
+  "fadeEndMetres": 3000,
+  "minAlpha": 0.3,
+  "cullMetres": 6000,
+  "edgeArrows": true,
+  "arrowPixels": 12,
+  "edgeMarginPixels": 64,
+  "nearMetres": 500,
+  "hoverPixels": 14
+}

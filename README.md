@@ -81,7 +81,10 @@ fires every group that is on at the view's centre, and with all off it turns the
 laser reaches 60 m, turns at most 40° off its face, draws 3 MW while it fires, and cuts a groove 1 m wide into the
 first rock its beam meets, seen by everyone who has the rock in view and saved with the world. What it cuts away
 yields ore from the rock's interior; every 300 kg of one ore breaks off as a loose ore chunk that drifts and bounces
-off rocks and ships. Chunks cannot be picked up yet: the ore hopper comes next. No shipped ship carries a laser yet;
+off rocks and ships. Each chunk in sensor cover wears a diamond in its ore's colour, fading with distance (chunks off
+screen show as small arrows at the window's edge, with how many lie that way); a shown pointer over one shows its ore,
+grade and kilograms, and the DRONES chip says "N CHUNKS NEAR" while any are within 500 m (figures in
+`content/visuals/ore_chunks.json`). Chunks cannot be picked up yet: the ore hopper comes next. No shipped ship carries a laser yet;
 build one on in the editor. The temporary debug scrape (`F10`, held in the pilot view, private local games only)
 still exists. Not there: picking up ore, cracks, scraping ice shards, beams blocked by other ships, and the pointer
 and exhaust marks following a groove. A rock holds at most 2,048 scrapes and a world 65,536

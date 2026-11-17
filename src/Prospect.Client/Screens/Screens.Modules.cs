@@ -345,6 +345,9 @@ internal sealed partial class ScreenHost
         }
         else if (bays.Fetching > 0)
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Info, Kit.F($"{bays.Fetching} FETCHING  {stocked} IN"), inner);
+        else if (rebuild <= 0 && _app.World.OreChunksNear is > 0 and var chunks)
+            // Loose ore close to the ship: the one line that says there is something to collect (see OreChunkLook.NearMetres).
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Good, Kit.F($"{chunks} {(chunks == 1 ? "CHUNK" : "CHUNKS")} NEAR"), inner);
         else if (_droneState == DroneChipState.Out)
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Info, Kit.F($"{outside} DRONES OUT  {stocked} IN"), inner);
         else if (_droneState == DroneChipState.Ready)

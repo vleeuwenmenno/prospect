@@ -1241,6 +1241,7 @@ internal sealed partial class WorldView
         UpdateThrough(dt);
         UpdateStream();
         UpdateContainerHover(snapshot, pointerOverUi);
+        UpdateOreMarkers(snapshot, pointerOverUi);
     }
 
     /// <summary>Builds this frame's instances and constants and records the scene.</summary>

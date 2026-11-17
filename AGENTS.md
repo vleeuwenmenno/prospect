@@ -188,6 +188,18 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   nose lasers are in group 1), `--open laser` (hull over a rock, group 1 fires from `--fire-at`, default 3 s; `--fire-group <digit>` works in any
   scripted view) or `--open laser-command` (command camera on the cut, `--rock-scrape-distance`); `make bench` runs
   `--open laser`. Tests: `MiningLaserTests` and friends. Gaps in `docs/roadmap/drones-mining.md`, "R3 as built".
+- **Ore chunk marks (R4, client only):** no wire or save change. `WorldView.UpdateOreMarkers` (`WorldView.OreMarkers.cs`, end
+  of `Update`) places every chunk in `OreChunkVisuals` once a frame into a fixed `OreMarker` set, from the very pose
+  `DrawOreChunks` draws the mesh at (`OreChunkVisuals.ShownTick`), so a mark sits on the chunk. Rules are font-free in
+  `OreChunkMarks` (`Place`, `Alpha` fade and cull, `CountNear`, `Pick`, `DiamondHalf`) and `OreEdgeArrows` (eight direction
+  sectors for chunks off screen; `Place` is only for a sector with a count). Figures and validation:
+  `content/visuals/ore_chunks.json` (`OreChunkLook`; fade start/end, cull, arrow, near radius, hover grab). Drawing:
+  `DrawOreMarkers` (diamond framing the lump, edge arrows with counts) and `DrawOreChunkHover` (`Screens.OreMarkers.cs`) in
+  the pilot and command views. Hover uses the container's rules (shown pointer, not over a window, a rock or ship in front
+  hides it; a hovered container wins). The DRONES chip's status row says "N CHUNKS NEAR" (`WorldView.OreChunksNear`, within
+  `nearMetres` of the flown hull) when nothing more urgent (reply, scan, fetch, rebuild) is shown. Never place a mark a second
+  way. Check with `--open laser` (capture at 8 s and 14 s; `--look 0 --look-to 180 --capture-count 5 --capture-every 1.2` from
+  9 s swings the camera for edge arrows; `--hover-chunk` rests the pointer on the first chunk in view). Tests: `OreChunkMarkTests`.
 - **Debug: scrape rock (temporary, local games only):** `MessageId.RockScrape` (42, `RockScrapeRequest`: rays in the
   rock's frame) through `PlayerInputBridge.DebugScrape`; `ServerHost.DebugScrape` checks `AllowDebugFill`, the
   in-process link, a live flown hull not in transit, the interval (`debug.intervalSeconds`), the radius, and that every

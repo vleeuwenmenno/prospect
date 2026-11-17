@@ -276,6 +276,9 @@ internal sealed class AppOptions
     public int? ContainerSheet { get; set; }
     /// <summary>Capture only: <c>--hover-container stowed|free</c> puts the scripted pointer on such a container.</summary>
     public string? HoverContainer { get; set; }
+
+    /// <summary>Scripted runs only (<c>--hover-chunk</c>): the pointer rests on the first ore chunk in view.</summary>
+    public bool HoverChunk { get; set; }
     /// <summary>Scripted private capture: cut the flown hull.</summary>
     public bool CutHull { get; set; }
 
@@ -1780,6 +1783,7 @@ internal sealed class App : IDisposable
             World.ChaseZoom = zoom;
         World.ScriptedAlignLock = Devices.Muted && Session is not null && _options.AlignLock;
         var fireGroup = _options.FireGroup ?? (_options.OpenView is "laser" or "laser-command" ? 1 : null);
+        World.ScriptedHoverChunk = Devices.Muted && _options.HoverChunk;
         World.ScriptedFireGroup = Devices.Muted && Session is not null && fireGroup is { } group && _sinceSplash >= _options.FireAt ? group : 0;
         if (Devices.Muted && _options.OpenView == "laser-command" && snapshot is not null && World.TryOwnCut(snapshot, out var laserCut))
         {
