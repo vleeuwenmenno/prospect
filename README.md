@@ -863,13 +863,13 @@ the generation cap does not mean every rock in every visible sector draws simult
 | `<material>Abundance` | 0 to 4 | 1 | Relative share among already available materials. Zero removes that material from the sector character and rocks. |
 | `<material>GradeMin`, `<material>GradeMax` | 0 to 1 | 0, 1 | Per-material clamp for rocks with that main ore, applied after the global grade range. |
 | `sectorSize` | 20 to 160 km | 80 | Sector edge length. Drive range and the blind-safe band scale with it; minimum jump distance stays fixed. |
-| `gasSizeMin` | 1 to 80 km | 16 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
-| `gasSizeMax` | 1 to 80 km | 22.4 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
-| `gasHugeSizeMin` | 1 to 160 km | 40 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
-| `gasHugeSizeMax` | 1 to 160 km | 80 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
-| `gasHugeChance` | 0 to 1 0–1 | 0.08 | Chance a candidate cloud uses the huge size range; separation can remove candidates. |
-| `gasWispinessMin` | 0 to 2 x | 0.75 | Deterministic per-cloud multiplier on gasWispiness. Drawing only; final wispiness capped at 2. |
-| `gasWispinessMax` | 0 to 2 x | 1.25 | Deterministic per-cloud multiplier on gasWispiness. Drawing only; final wispiness capped at 2. |
+| `gasSizeMin` | 1 to 80 km | 32 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
+| `gasSizeMax` | 1 to 80 km | 45 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
+| `gasHugeSizeMin` | 1 to 160 km | 90 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
+| `gasHugeSizeMax` | 1 to 160 km | 120.2 | Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. |
+| `gasHugeChance` | 0 to 1 0–1 | 0.12 | Chance a candidate cloud uses the huge size range; separation can remove candidates. |
+| `gasWispinessMin` | 0 to 2 x | 1 | Deterministic per-cloud multiplier on gasWispiness. Drawing only; final wispiness capped at 2. |
+| `gasWispinessMax` | 0 to 2 x | 1.75 | Deterministic per-cloud multiplier on gasWispiness. Drawing only; final wispiness capped at 2. |
 | `gasWispiness` | 0 to 2 | 1 | How soft and frayed gas clouds are drawn: 0 dense with a hard outline (the look before this setting), 1 thin outer gas broken into strands and gaps, 2 the most. Drawing only: where clouds are and what is in them stays the same. |
 
 Materials come from galaxy content: `iron`, `copper`, `nickel`, `titanium`, `silver`, `gold`.

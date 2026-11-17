@@ -2383,7 +2383,9 @@ public sealed class FlightSessionTests
     {
         // The server puts new players in the densest sector near home: thousands of asteroids, sizes from pebbles up.
         var seed = new ServerConfig().GalaxySeed;
-        var dense = Sectors.Densest(Content.Galaxy.WithSeed(seed));
+        // One with a large asteroid close to where players arrive: a big gas cloud can make the densest sector
+        // one whose rocks lie far from the arrival point, out of the late joiner's sensor reach.
+        var dense = Sectors.DensestWithRockNear(Content.Galaxy.WithSeed(seed), 40f, 3500f);
         var port = (ushort)(45000 + Environment.ProcessId % 2000);
         using var server = new ServerHost(new ServerConfig { MaxPlayers = 2, GalaxySeed = seed, SpawnSector = dense }, Content, Prospect.Engine.Net.RakNetTransport.Listen(port, 8));
         server.Start();

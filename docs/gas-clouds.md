@@ -10,7 +10,7 @@ Measured results are in the refinement report. Visual acceptance is the develope
 Clouds are things in world space; see [world generation](world-generation.md) for the rules and the query API.
 
 - `gas-clouds` is a `SectorModule` in shared `galaxy.json` with its own streams. A sector anchors at most one cloud: 4% presence, including outside the galaxy disc.
-- A cloud is centred anywhere in its anchor sector and may lie across its walls. Most have an x half-extent of 4 to 5.6 km; 8% are huge, 10 to 20 km.
+- A cloud is centred anywhere in its anchor sector and may lie across its walls. Most have an x half-extent of 16 to 22.5 km (diameter 32 to 45 km); 12% are huge: the huge range is capped at one sector width, so every huge cloud is 40 km in x half-extent, a full 80 km sector across.
 - The anchor's `SectorContent` holds the descriptor and count. The renderer does not read them from there: it reads the cloud list below, which names every cloud by its anchor.
 - Positions become camera-relative only after double-precision sector translation. Density coordinates stay local to the cloud.
 - Some clouds hold asteroids (`inGas` in the asteroid module): gas now changes asteroid lists near those clouds. Generation version 4 and protocol 36 cover it; the frozen fixture holds a copy of the gas rules.
@@ -62,7 +62,7 @@ Many clouds at once, where each is drawn:
 - Any other draw is in the scene after the overlays, before the shields.
 - Middle and far draws there read the scene's own depth, attached read-only meanwhile (`gas_scene.frag`): nothing is copied for them. A full cloud needs the pilot's hull mask, so it reads a scene copy, taken once a frame.
 
-Huge clouds (x half-extent 10 to 20 km) go through the same levels: levels, bounds and step lengths are relative to the cloud, positions are camera-relative.
+Huge clouds (x half-extent 40 km at the default sector size) go through the same levels: levels, bounds and step lengths are relative to the cloud, positions are camera-relative.
 The view range is the same 5 sectors for every size, so a huge cloud is at the full or the middle level for as long as it shows.
 
 ## Large clouds close up
@@ -84,7 +84,7 @@ What a large cloud gains, near the camera only and at the full level only:
 How it is bounded:
 
 - Figures are client data: `closeUp` in `content/visuals/gas.json`. Nothing below `fromHalfSize` (7 km), all of it from `fullHalfSize` (10 km).
-- Every ordinary cloud is below 7 km: its march takes the same expressions as before, and fixtures 1–13 run unchanged.
+- Ordinary clouds are no longer below 7 km: at the default settings they are 16 to 22.5 km, so all of them take the close-up treatment. The fixtures 1–13 set their own sizes and still run unchanged; an ordinary cloud under 7 km (a smaller `gasSizeMax` or `sectorSize`) still takes the same expressions as before.
 - The middle and far levels take none of it. They start at 3 radii, far past the reach.
 - `GasData` carries the figures in an eighth vector (`fine`). At most two more lookups per near sample.
 
@@ -360,15 +360,15 @@ The new immutable texture still requires those same validation checks.
 ## Reproducible muted inspection
 
 Default seed `0x50524F5350454354`, sector `-3,0,5` anchors an ordinary cloud.
-Half extents: `(4071,2646,3461)` m. Center approximately `(-5364.91,10668.58,-2576.74)` m relative to the sector: well off the arrival point.
+Half extents: `(16290,10588,13846)` m. Center approximately `(-10729.82,21337.17,-5153.47)` m relative to the sector: well off the arrival point.
 `--gas-view` is refused unless `--capture` or `--bench` is present, and WorldView checks muted devices again.
 It moves only the inspection camera; it never creates a fake cloud or moves ships/asteroids.
 
 Sectors with the default seed whose arrival point is inside a cloud, for the pilot views:
 
-- `127,-1,-127`: an ordinary cloud, half extents `(5256,3416,4468)` m, centred about 1.1 km from arrival, with rocks in it.
-- `133,0,-77`: a huge cloud, half extents `(19616,12750,16674)` m, centred about 1.9 km from arrival. Its box lies across the wall to sector `132,0,-77`.
-- `-66,1,37`: a huge cloud with rocks in it, half extents `(19967,12978,16972)` m, centred about 7.4 km from arrival.
+- `127,-1,-127`: an ordinary cloud, half extents `(21103,13717,17937)` m, centred about 2.1 km from arrival, with rocks in it.
+- `133,0,-77`: a huge cloud, half extents `(40000,26000,34000)` m, centred about 3.9 km from arrival. Its box lies across the wall to sector `132,0,-77`.
+- `-66,1,37`: a huge cloud with rocks in it, half extents `(40000,26000,34000)` m, centred about 14.7 km from arrival.
 
 - `outside` / `absent`: same camera, 2.4 z half-extents from cloud center; absent disables gas submission.
 - `--gas-distance <radii>` with either: the camera's distance in largest half-extents, 0.1 to 200. `--gas-distance-to <radii>` moves it there over the captures in equal ratios: `--gas-distance 2.6 --gas-distance-to 30 --capture-count 12 --capture-every 0.7` crosses both hand-overs.
@@ -455,11 +455,11 @@ The twelve composition fixtures use homogeneous input, so their rerun alone cann
 
 ## Per-cloud wispiness
 
-`gasWispiness` stays 1 by default. `gasWispinessMin`/`gasWispinessMax` default to 0.75–1.25.
+`gasWispiness` stays 1 by default. `gasWispinessMin`/`gasWispinessMax` default to 1–1.75.
 `GasCloudModule.WispinessOf(cloud)` interpolates the multiplier using `cloud.Seed / 128`, then clamps the product to 0–2.
 This is render-only and consumes no generation draws; changing it never moves clouds or rocks.
 `WorldView.QueueGas` packs it into `GasConstants.Motion.z` for every tier; shaders stay unchanged.
-Larger ordinary clouds can now enter the existing close-up treatment above 7 km half-extent.
+Larger ordinary clouds enter the existing close-up treatment above 7 km half-extent; at the default sizes every ordinary cloud does.
 
 ## Decided (provisional, tunable): kinds and renderer integration
 

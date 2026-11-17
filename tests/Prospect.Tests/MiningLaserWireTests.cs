@@ -12,9 +12,9 @@ public sealed class MiningLaserWireTests
     private static readonly GameContent Content = GameContent.Load();
 
     [Fact]
-    public void TheProtocolIsAtVersion70AndTheNewMessagesHaveTheirOwnIds()
+    public void TheProtocolVersionIsPinnedAndTheNewMessagesHaveTheirOwnIds()
     {
-        Assert.Equal(70u, ProtocolInfo.Version);
+        Assert.Equal(71u, ProtocolInfo.Version);
         Assert.Equal(44, (byte)MessageId.LaserAim);
         Assert.Equal(45, (byte)MessageId.SetActionGroup);
         Assert.Equal(46, (byte)MessageId.LaserBeams);

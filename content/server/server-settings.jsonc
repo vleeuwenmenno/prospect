@@ -91,20 +91,20 @@
   "gasWispiness": 1,
   // Sector edge length. Drive range and the blind-safe band scale with it; minimum jump distance stays fixed. Unit: km; range: 20–160; default: 80.
   "sectorSize": 80,
-  // Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. Unit: km; range: 1–80; default: 16.
-  "gasSizeMin": 16,
-  // Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. Unit: km; range: 1–80; default: 22.4.
-  "gasSizeMax": 22.4,
-  // Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. Unit: km; range: 1–160; default: 40.
-  "gasHugeSizeMin": 40,
-  // Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. Unit: km; range: 1–160; default: 80.
-  "gasHugeSizeMax": 80,
-  // Chance a candidate cloud uses the huge size range; separation can remove candidates. Unit: 0–1; range: 0–1; default: 0.08.
-  "gasHugeChance": 0.08,
-  // Deterministic per-cloud multiplier on gasWispiness. Drawing only; final wispiness capped at 2. Unit: x; range: 0–2; default: 0.75.
-  "gasWispinessMin": 0.75,
-  // Deterministic per-cloud multiplier on gasWispiness. Drawing only; final wispiness capped at 2. Unit: x; range: 0–2; default: 1.25.
-  "gasWispinessMax": 1.25,
+  // Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. Unit: km; range: 1–80; default: 32.
+  "gasSizeMin": 32,
+  // Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. Unit: km; range: 1–80; default: 45.
+  "gasSizeMax": 45,
+  // Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. Unit: km; range: 1–160; default: 90.
+  "gasHugeSizeMin": 90,
+  // Longest box diameter; sampled uniformly, capped to one sector width to preserve neighbour queries. Unit: km; range: 1–160; default: 120.2.
+  "gasHugeSizeMax": 120.2,
+  // Chance a candidate cloud uses the huge size range; separation can remove candidates. Unit: 0–1; range: 0–1; default: 0.12.
+  "gasHugeChance": 0.12,
+  // Deterministic per-cloud multiplier on gasWispiness. Drawing only; final wispiness capped at 2. Unit: x; range: 0–2; default: 1.
+  "gasWispinessMin": 1,
+  // Deterministic per-cloud multiplier on gasWispiness. Drawing only; final wispiness capped at 2. Unit: x; range: 0–2; default: 1.75.
+  "gasWispinessMax": 1.75,
   "server": {
     // Display name; text, 1–48 characters; default: PROSPECT server.
     "name": "PROSPECT server",

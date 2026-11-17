@@ -252,7 +252,7 @@ public sealed class WorldSpaceGenerationTests
             for (var z = -30; z <= 30 && checkedClouds < 5; z++)
             {
                 var anchor = new SectorCoord(x, 0, z);
-                if (!gas.TryGetCloud(galaxy, anchor, out var cloud) || cloud.HalfSize.X < galaxy.SectorSize * 0.25)
+                if (!gas.TryGetCloud(galaxy, anchor, out var cloud) || cloud.HalfSize.X < galaxy.SectorSize * 0.45)
                     continue;
                 checkedClouds++;
                 var placement = new GasCloudPlacement(anchor, cloud);
@@ -346,10 +346,12 @@ public sealed class WorldSpaceGenerationTests
                         continue;
                     clouds.Add((galaxy.CenterOf(anchor) + cloud.Center, cloud.HalfSize.X, cloud.Kind));
                     largest = Math.Max(largest, cloud.HalfSize.X);
-                    if (cloud.HalfSize.X >= edge * 0.25f)
+                    // The defaults make an ordinary cloud 0.2 to 0.28125 of a sector in half-width and every huge
+                    // one a full sector across (its range is capped at one sector width).
+                    if (cloud.HalfSize.X >= edge * 0.45f)
                         huge++;
                     else
-                        Assert.InRange(cloud.HalfSize.X, edge * 0.1f, edge * 0.14f);
+                        Assert.InRange(cloud.HalfSize.X, edge * 0.199f, edge * 0.2813f);
                     Assert.Equal(GasCloudModule.Proportions * cloud.HalfSize.X, cloud.HalfSize);
                 }
 
