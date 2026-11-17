@@ -130,6 +130,13 @@
       "anchor": { "region": "console", "side": "top", "offset": [0, 0] }
     },
     {
+      "id": "laser-heat",
+      "trigger": "laserOverheated",
+      "title": "Laser overheated",
+      "text": "A laser heats while it fires. At full heat it shuts down until it has cooled; the bar under its group shows how hot it is. Fire in bursts, or split your lasers over two groups and take turns. Inside a cold gas cloud lasers and the boost drive heat slower and cool faster.",
+      "anchor": { "region": "console", "side": "top", "offset": [0, 0] }
+    },
+    {
       "id": "interface-mode",
       "trigger": "interfaceOpened",
       "title": "Interface mode",

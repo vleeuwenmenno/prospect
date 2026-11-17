@@ -114,7 +114,7 @@ internal static class HullStatus
 
     /// <summary>One of the two lines of an icon's tooltip, <paramref name="line"/> 0 or 1.</summary>
     public static ReadOnlySpan<byte> Meaning(HullEnvironment environment, int slot, int line) =>
-        Icon(environment, slot) == StatusIcon.Cold ? (line == 0 ? "Inside a cold cloud."u8 : "Asteroids here are ice shards."u8)
+        Icon(environment, slot) == StatusIcon.Cold ? (line == 0 ? "Inside a cold cloud: boost and lasers heat slower, cool faster."u8 : "Asteroids here are ice shards."u8)
             : Bursting(environment, slot) ? (line == 0 ? "Lightning is jamming this ship's sensors."u8 : "Its reach is cut until the burst passes."u8)
             : line == 0 ? "Inside a lightning cloud."u8 : "Bursts jam sensors every few seconds."u8;
 

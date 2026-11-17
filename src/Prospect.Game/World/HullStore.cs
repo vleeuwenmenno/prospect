@@ -83,6 +83,19 @@ public struct HullInfo
     /// <summary>Mining laser demand prepared before this hull steps; never durable.</summary>
     public float LaserDemand;
 
+    /// <summary>
+    /// The heat of the hull's mining lasers and which of them are shut down by it, stepped with the hull by
+    /// <see cref="LaserHeat.Step"/>; and the lasers asked to fire in the step to come. Never saved.
+    /// </summary>
+    public LaserHeatState Lasers;
+
+    /// <summary>
+    /// True while the hull's centre is inside a cold gas cloud, as whoever keeps the hull last looked: the server
+    /// on its own cadence, a client from the hull's replicated environment. Prepared before the hull steps; it
+    /// becomes <see cref="FlightParams.Cold"/> there. Derived, never saved.
+    /// </summary>
+    public bool Cold;
+
     /// <summary>What the hull's tanks hold and what its parts burnt in its last step, for the pilot's readout; never sent or saved.</summary>
     public FuelFlow Fuel;
 

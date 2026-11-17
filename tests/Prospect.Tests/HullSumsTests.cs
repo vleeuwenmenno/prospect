@@ -305,6 +305,8 @@ internal static class Figures
             TurnAcceleration = turnAcceleration,
             HeatRate = 1f / rules.BoostHeatSeconds,
             CoolRate = 1f / rules.CoolSeconds,
+            ColdHeating = rules.ColdCloudHeating,
+            ColdCooling = rules.ColdCloudCooling,
             Mass = (float)massFloor,
             Inertia = new Vector3((float)inertia.X, (float)inertia.Y, (float)inertia.Z),
             CenterOfMass = new Vector3((float)center.X, (float)center.Y, (float)center.Z),

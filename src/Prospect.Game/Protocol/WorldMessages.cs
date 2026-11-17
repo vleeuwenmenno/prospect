@@ -346,8 +346,11 @@ public struct HullRecord
 /// </summary>
 public struct SnapshotHeader
 {
-    /// <summary>The fixed fields, the count of the own hull's tanks and four bytes for each of them.</summary>
-    public const int MaxWireSize = 25 + 1 + TankFuel.MaxTanks * sizeof(float);
+    /// <summary>
+    /// The fixed fields, the count of the own hull's tanks and four bytes for each of them, then the count of its
+    /// lasers, two bytes of heat for each and a bit for each that is shut down.
+    /// </summary>
+    public const int MaxWireSize = 25 + 1 + TankFuel.MaxTanks * sizeof(float) + 1 + LaserHeat.MaxLasers * sizeof(ushort) + LaserHeat.MaxLasers / 8;
     public long ServerTick;
     public uint ControlEpoch;
     public ushort AppliedOrderId;
@@ -379,8 +382,42 @@ public struct SnapshotHeader
     [System.Runtime.CompilerServices.InlineArray(TankFuel.MaxTanks)]
     public struct TankLevels { private float _element0; }
 
-    /// <summary>The bytes this header takes: fewer than <see cref="MaxWireSize"/> for a hull with fewer tanks.</summary>
-    public readonly int WireSize => 25 + 1 + OwnTankCount * sizeof(float);
+    /// <summary>
+    /// How many lasers the design of <see cref="OwnHull"/> has heat for, at most <see cref="LaserHeat.MaxLasers"/>,
+    /// each one's heat in sixteen bits (<see cref="OwnLaserHeat"/>, in the order of <see cref="HullDesign.Lasers"/>),
+    /// and a bit for each that overheated and is shut down. The receiver steps its own hull's laser heat on with the
+    /// server's rule (<see cref="LaserHeat.Step"/>), so it is sent the figures of the same tick as the hull's state.
+    /// No other hull's laser heat is sent.
+    /// </summary>
+    public byte OwnLaserCount;
+    public LaserHeatWire OwnLaserHeat;
+    public ulong OwnLasersLocked;
+
+    /// <summary>Room for the heat of each laser of one hull as it travels: 0 is cool, 65535 overheated.</summary>
+    [System.Runtime.CompilerServices.InlineArray(LaserHeat.MaxLasers)]
+    public struct LaserHeatWire { private ushort _element0; }
+
+    /// <summary>Takes the first <paramref name="count"/> lasers of a hull's heat as they are sent.</summary>
+    public void SetLasers(in LaserHeatState lasers, int count)
+    {
+        count = Math.Clamp(count, 0, LaserHeat.MaxLasers);
+        OwnLaserCount = (byte)count;
+        for (var part = 0; part < count; part++)
+            OwnLaserHeat[part] = (ushort)MathF.Round(Math.Clamp(lasers.Heat[part], 0f, 1f) * ushort.MaxValue);
+        OwnLasersLocked = count == LaserHeat.MaxLasers ? lasers.Locked : lasers.Locked & ((1UL << count) - 1);
+    }
+
+    /// <summary>The lasers' heat as the receiver keeps it; nothing is asked to fire.</summary>
+    public readonly LaserHeatState Lasers()
+    {
+        var lasers = new LaserHeatState { Locked = OwnLasersLocked };
+        for (var part = 0; part < OwnLaserCount; part++)
+            lasers.Heat[part] = OwnLaserHeat[part] / (float)ushort.MaxValue;
+        return lasers;
+    }
+
+    /// <summary>The bytes this header takes: fewer than <see cref="MaxWireSize"/> for a hull with fewer tanks or lasers.</summary>
+    public readonly int WireSize => 25 + 1 + OwnTankCount * sizeof(float) + 1 + OwnLaserCount * sizeof(ushort) + (OwnLaserCount + 7) / 8;
 
     public readonly void Write(ref NetWriter writer)
     {
@@ -395,6 +432,11 @@ public struct SnapshotHeader
         writer.WriteByte(OwnTankCount);
         for (var i = 0; i < OwnTankCount; i++)
             writer.WriteSingle(OwnTanks[i]);
+        writer.WriteByte(OwnLaserCount);
+        for (var i = 0; i < OwnLaserCount; i++)
+            writer.WriteUInt16(OwnLaserHeat[i]);
+        for (var i = 0; i < (OwnLaserCount + 7) / 8; i++)
+            writer.WriteByte((byte)(OwnLasersLocked >> i * 8));
     }
 
     public static bool TryRead(ref NetReader reader, out SnapshotHeader header)
@@ -419,7 +461,16 @@ public struct SnapshotHeader
             tanks &= float.IsFinite(kilograms) && kilograms >= 0f;
         }
 
-        return reader.IsValid && flags <= 1 && header.ServerTick >= 0 && header.ServerTick <= long.MaxValue - 256 && tanks;
+        // Lasers: no more than a hull has heat for, and no bit for a laser that was not sent.
+        header.OwnLaserCount = reader.ReadByte();
+        if (header.OwnLaserCount > LaserHeat.MaxLasers) return false;
+        for (var i = 0; i < header.OwnLaserCount; i++)
+            header.OwnLaserHeat[i] = reader.ReadUInt16();
+        for (var i = 0; i < (header.OwnLaserCount + 7) / 8; i++)
+            header.OwnLasersLocked |= (ulong)reader.ReadByte() << i * 8;
+        var lasers = header.OwnLaserCount == LaserHeat.MaxLasers || header.OwnLasersLocked >> header.OwnLaserCount == 0;
+
+        return reader.IsValid && flags <= 1 && header.ServerTick >= 0 && header.ServerTick <= long.MaxValue - 256 && tanks && lasers;
     }
 }
 

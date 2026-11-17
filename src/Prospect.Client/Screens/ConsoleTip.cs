@@ -238,10 +238,17 @@ internal static class ConsoleTip
             sink.Line("UNLOCKS AT"u8, Kit.F($"{FlightModel.BoostUnlockHeat * 100f:0} %"), Theme.Text);
         else if (starved)
             sink.Line("NEEDS STORED"u8, FlightConsole.Thousands(flight.EnergyStorage) ? Kit.F($"{flight.BoostEnergyFloor / 1000f:0.0} GJ") : Kit.F($"{flight.BoostEnergyFloor:0} MJ"), Theme.Text);
-        sink.Line("HEATING"u8, Kit.F($"{flight.HeatRate * 100f:0.#} %/S"), Theme.Text);
-        sink.Line("COOLING"u8, Kit.F($"{flight.CoolRate * 100f:0.#} %/S"), Theme.Text);
+        // Inside a cold cloud the drive heats slower and cools faster: the rates shown are the ones that apply there.
+        var cold = (own.Environment & HullEnvironment.InColdCloud) != 0 && flight.ColdCooling > 0f;
+        sink.Line("HEATING"u8, Kit.F($"{flight.HeatRate * (cold ? flight.ColdHeating : 1f) * 100f:0.#} %/S"), cold ? ColdColor : Theme.Text);
+        sink.Line("COOLING"u8, Kit.F($"{flight.CoolRate * (cold ? flight.ColdCooling : 1f) * 100f:0.#} %/S"), cold ? ColdColor : Theme.Text);
         sink.Line("BOOST DRAW"u8, Power(flight.ThrustPower * flight.BoostPowerMultiplier), FlightConsole.DrawColor);
+        if (cold)
+            sink.Note(Kit.F($"COLD CLOUD: COOLING \u00d7{flight.ColdCooling:0.#}"), ColdColor);
     }
+
+    /// <summary>The colour of what a cold cloud changes.</summary>
+    private const uint ColdColor = 0x8FDCFF;
 
     /// <summary>True when an unfilled shield cannot charge because the battery is flat.</summary>
     private static bool Starved(in HullView own, in FlightParams flight) => own.Energy <= 0f && own.Shield < flight.ShieldCapacity;

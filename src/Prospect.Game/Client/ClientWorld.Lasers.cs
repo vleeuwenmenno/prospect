@@ -28,6 +28,9 @@ internal sealed partial class ClientWorld
     // The client tick of the newest Tick, which prediction steps use to judge whether the beams still stand.
     private long _laserClock;
 
+    // The own hull's laser heat as the newest snapshot gave it: where prediction starts from.
+    private LaserHeatState _ownLasers;
+
     // The pilot's aim and group changes, once a received snapshot allows reliable commands.
     private void SendLaserCommands(PlayerInputBridge bridge, ITransport transport, bool sendCommands)
     {
@@ -81,16 +84,23 @@ internal sealed partial class ClientWorld
     // Whether the beams last received still stand at this client tick.
     private bool BeamsFresh(long clientTick) => clientTick - _beamReceivedTick <= BeamHoldTicks;
 
-    // The own hull's laser draw for this predicted step: every own beam the server last reported, at its laser's power.
-    private float OwnLaserDemand(long clientTick)
+    // The own hull's lasers for this predicted step: every own beam the server last reported fires, at its laser's
+    // power, unless prediction has that laser overheated already, as the server's plan leaves a shut-down laser out.
+    // The lasers that fire are what LaserHeat heats in the step; the others cool.
+    private float OwnLaserDemand(long clientTick, ulong locked, out ulong firing)
     {
+        firing = 0;
         if (!BeamsFresh(clientTick) || _ownHullId == 0) return 0;
         var design = OwnDesign;
+        var count = LaserHeat.Count(design);
         var demand = 0f;
         for (var b = 0; b < _beamCount; b++)
         {
             ref readonly var beam = ref _beams[b];
-            if (beam.Hull != _ownHullId || beam.Part >= design.Lasers.Length) continue;
+            if (beam.Hull != _ownHullId || beam.Part >= count) continue;
+            var bit = 1UL << beam.Part;
+            if ((locked & bit) != 0 || (firing & bit) != 0) continue;
+            firing |= bit;
             demand += design.Mounts[design.Lasers[beam.Part]].Type.Laser!.Power;
         }
         return demand;
@@ -105,6 +115,11 @@ internal sealed partial class ClientWorld
         snapshot.OreChunkCount = _oreChunkCount;
         snapshot.OreChunkTick = _oreChunkTick;
         _oreChunks.AsSpan(0, _oreChunkCount).CopyTo(snapshot.OreChunks);
+
+        // The flown hull's laser heat as prediction has it: the server's figures of the last snapshot, stepped on.
+        var predicted = _hasOwnState && _near.Slots > 0 && _near.IsAliveAt(0);
+        snapshot.LaserHeatHull = predicted ? _ownHullId : 0;
+        snapshot.LaserHeat = predicted ? _near.Info(0).Lasers : default;
         snapshot.ActionGroupHull = _groupsHull;
         snapshot.ActionGroupCount = _groupCount;
         snapshot.ActionGroupRevision = _groupsRevision;

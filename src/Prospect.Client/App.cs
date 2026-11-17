@@ -134,6 +134,9 @@ internal sealed class AppOptions
     /// <summary>Scripted runs only (<c>--coast</c>): the speed the own hull is set coasting at, dampeners off.</summary>
     public float? CoastSpeed { get; set; }
 
+    /// <summary>Scripted runs only (<c>--cold-cloud</c>): the own hull is set in the middle of the nearest cold gas cloud.</summary>
+    public bool ColdCloud { get; set; }
+
     /// <summary>Scripted runs only (<c>--hurt-fleet</c>): seconds into the run at which the other owned hulls are hurt.</summary>
     public float? HurtFleetSeconds { get; set; }
 
@@ -239,6 +242,12 @@ internal sealed class AppOptions
 
     /// <summary>Scripted runs only (<c>--fuel-tip</c>): the fuel whose cell of the fuel row shows its details, as the pointer on it would.</summary>
     public Prospect.Game.World.FuelKind FuelTip { get; set; }
+
+    /// <summary>
+    /// Scripted runs only (<c>--heat-tip</c>): zero shows the boost heat row's details, 1 to 10 the tooltip of that
+    /// action group's cell, as the pointer on it would; null shows neither.
+    /// </summary>
+    public int? HeatTip { get; set; }
 
     /// <summary>With <c>--hurt-fleet</c>, <c>--hurt-kind tank</c> takes the flown hull's last fuel tank instead.</summary>
     public bool HurtFleetTank { get; set; }
@@ -604,6 +613,9 @@ internal sealed class App : IDisposable
     /// <summary>The fuel whose details a scripted run shows (<c>--fuel-tip</c>), or none.</summary>
     public Prospect.Game.World.FuelKind ScriptedFuelTip => _options.FuelTip;
 
+    /// <summary>The heat details a scripted run shows (<c>--heat-tip</c>): zero for boost heat, 1 to 10 for that action group's cell, or null.</summary>
+    public int? ScriptedHeatTip => _options.HeatTip;
+
     /// <summary>True when a scripted run asked for tips; a capture or benchmark shows none otherwise.</summary>
     public bool TipsInScriptedRuns => _options.TipsSample is not null;
 
@@ -755,6 +767,7 @@ internal sealed class App : IDisposable
                 ScriptedShieldBreakSeconds = _options.BreakShieldSeconds,
                 ScriptedRamSpeed = _options.RamSpeed,
                 ScriptedCoastSpeed = _options.CoastSpeed,
+                ScriptedColdCloud = _options.ColdCloud,
                 // The drone scan and laser captures only need the hull put above the rock: the scrape's placement, with no scraping.
                 ScriptedRockScrapeRadius = Devices.Muted && _options.OpenView is "rock-scrape" or "drone-scan" or "laser" or "laser-command" or "ore" ? _options.RockScrapeRadius : null,
                 ScriptedRockScrapeStandoff = _options.RockScrapeStandoff,
@@ -1905,8 +1918,12 @@ internal sealed class App : IDisposable
                     for (var c = 0; c < snapshot.OreChunkCount; c++) if (snapshot.OreChunks[c].TractorHull != 0) pulled++;
                     Console.WriteLine($"capture {_capturesTaken:D2} ore at {_sinceSplash:F1}s: chunks {snapshot.OreChunkCount} ({pulled} in a beam), bins hold {ShipSheet.OreHeld(World.Own.Ore.Span):F0} kg of {ShipSheet.OreCapacity(snapshot.Content.Designs[World.Own.Design]):F0} kg, mass {World.Own.Stats.Mass:F2} t");
                 }
-                if (_options.OpenView is "laser" or "laser-command" or "ore" && snapshot is not null)
+                if ((_options.OpenView is "laser" or "laser-command" or "ore" || _options.HeatTip is not null || _options.ColdCloud) && snapshot is not null)
+                {
                     Console.WriteLine($"capture {_capturesTaken:D2} laser: groups on {World.ActionGroupsOn}, firing {World.LasersFiring}, beams {snapshot.LaserBeamCount}, edits {World.RockEditsKnown}, chunks {snapshot.OreChunkCount}, energy {World.Own.Energy:F1}, own speed {World.Own.Velocity.Length():F2} m/s");
+                    var hottest = LaserHeat.Hottest(snapshot.LaserHeat, ulong.MaxValue, out _);
+                    Console.WriteLine($"capture {_capturesTaken:D2} heat at {_sinceSplash:F1}s: hottest laser {hottest * 100f:F0} %, shut down {System.Numerics.BitOperations.PopCount(snapshot.LaserHeat.Locked)}, boost {World.Own.Heat * 100f:F0} %, cold cloud {(World.Own.Environment & HullEnvironment.InColdCloud) != 0}");
+                }
                 if (_options.OpenView == "rock-scrape")
                 {
                     var work = World.RockPatchWork;

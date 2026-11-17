@@ -8,7 +8,8 @@ namespace Prospect.Client.Screens;
 
 /// <summary>
 /// How the interface shows action groups, from <c>content/visuals/action_groups.json</c>: the strip's cell, its
-/// colours for a group that is off, on, firing and cutting, the words of every part kind and the popup's figures.
+/// colours for a group that is off, on, firing, cutting and overheated, its heat bar, the words of every part kind and
+/// the popup's figures.
 /// Client data; nothing here decides what fires, which is the server's. Words are encoded to UTF-8 once, at load.
 /// </summary>
 internal sealed class ActionGroupLook
@@ -64,6 +65,67 @@ internal sealed class ActionGroupLook
     /// <summary>The size of the cutting mark's square, in unscaled pixels.</summary>
     public float MarkPixels { get; init; }
 
+    /// <summary>The height of a cell's heat bar, in unscaled pixels, and how strongly its empty track shows.</summary>
+    public float HeatBarPixels { get; init; }
+
+    public float HeatTrackAlpha { get; init; }
+
+    /// <summary>The heat bar's colour while cool, from <see cref="HeatWarmFrom"/> and from <see cref="HeatHotFrom"/> (shares of full heat).</summary>
+    public uint HeatCoolRgb { get; private set; }
+
+    public uint HeatWarmRgb { get; private set; }
+
+    public uint HeatHotRgb { get; private set; }
+
+    public float HeatWarmFrom { get; init; }
+
+    public float HeatHotFrom { get; init; }
+
+    /// <summary>The accent of a cell whose lasers are all shut down by heat, how strongly it is drawn, and the colour of a cold cloud's line.</summary>
+    public uint OverheatedRgb { get; private set; }
+
+    public float OverheatedAlpha { get; init; }
+
+    public uint ColdRgb { get; private set; }
+
+    [JsonPropertyName("heatCoolColor")]
+    public string HeatCoolColorFile { get; init; } = "";
+
+    [JsonPropertyName("heatWarmColor")]
+    public string HeatWarmColorFile { get; init; } = "";
+
+    [JsonPropertyName("heatHotColor")]
+    public string HeatHotColorFile { get; init; } = "";
+
+    [JsonPropertyName("overheatedColor")]
+    public string OverheatedColorFile { get; init; } = "";
+
+    [JsonPropertyName("coldColor")]
+    public string ColdColorFile { get; init; } = "";
+
+    /// <summary>What an overheated cell says in place of its parts, and the shorter word for a narrow cell.</summary>
+    [JsonPropertyName("overheatedLabel")]
+    public string OverheatedLabelFile { get; init; } = "";
+
+    [JsonPropertyName("overheatedShortLabel")]
+    public string OverheatedShortLabelFile { get; init; } = "";
+
+    private byte[] _overheated = [], _overheatedShort = [];
+
+    /// <summary>The overheated cell's word, encoded.</summary>
+    [JsonIgnore]
+    public ReadOnlySpan<byte> OverheatedLabel => _overheated;
+
+    /// <summary>The overheated cell's shorter word, encoded.</summary>
+    [JsonIgnore]
+    public ReadOnlySpan<byte> OverheatedShortLabel => _overheatedShort;
+
+    /// <summary>The width of a cell's tooltip, in unscaled pixels.</summary>
+    public float TipWidth { get; init; }
+
+    /// <summary>The heat bar's colour at <paramref name="heat"/> (0 to 1): cool, warm or hot, in steps so it never passes through a muddy blend.</summary>
+    public uint HeatRgb(float heat) => heat >= HeatHotFrom ? HeatHotRgb : heat >= HeatWarmFrom ? HeatWarmRgb : HeatCoolRgb;
+
     /// <summary>The popup's width, how many parts it shows before it scrolls, and the height of a selector row, in unscaled pixels.</summary>
     public float PopupWidth { get; init; }
 
@@ -113,6 +175,18 @@ internal sealed class ActionGroupLook
             throw new InvalidDataException($"{path}: alphas are 0 to 1");
         if (!(MarkPixels is >= 2 and <= 16) || !(PopupWidth is >= 300 and <= 700) || PopupVisibleRows is < 1 or > 16 || !(SelectorHeight is >= 18 and <= 48))
             throw new InvalidDataException($"{path}: markPixels is 2 to 16, popupWidth 300 to 700, popupVisibleRows 1 to 16, selectorHeight 18 to 48");
+        if (!(HeatBarPixels is >= 1 and <= 8) || !Unit(HeatTrackAlpha) || !Unit(OverheatedAlpha) || !(HeatWarmFrom is > 0 and < 1) || !(HeatHotFrom < 1) || !(HeatHotFrom > HeatWarmFrom)
+            || !(TipWidth is >= 240 and <= 600))
+            throw new InvalidDataException($"{path}: heatBarPixels is 1 to 8, heatTrackAlpha and overheatedAlpha 0 to 1, heatWarmFrom above 0, heatHotFrom above it and below 1, tipWidth 240 to 600");
+        if (string.IsNullOrWhiteSpace(OverheatedLabelFile) || OverheatedLabelFile.Length > 12 || string.IsNullOrWhiteSpace(OverheatedShortLabelFile) || OverheatedShortLabelFile.Length > 6)
+            throw new InvalidDataException($"{path}: overheatedLabel is 1 to 12 characters and overheatedShortLabel 1 to 6");
+        _overheated = Encoding.UTF8.GetBytes(OverheatedLabelFile);
+        _overheatedShort = Encoding.UTF8.GetBytes(OverheatedShortLabelFile);
+        HeatCoolRgb = Rgb(path, "heatCool", HeatCoolColorFile);
+        HeatWarmRgb = Rgb(path, "heatWarm", HeatWarmColorFile);
+        HeatHotRgb = Rgb(path, "heatHot", HeatHotColorFile);
+        OverheatedRgb = Rgb(path, "overheated", OverheatedColorFile);
+        ColdRgb = Rgb(path, "cold", ColdColorFile);
         OffRgb = Rgb(path, "off", OffColorFile);
         OnRgb = Rgb(path, "on", OnColorFile);
         FiringRgb = Rgb(path, "firing", FiringColorFile);

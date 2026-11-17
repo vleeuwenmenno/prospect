@@ -658,6 +658,7 @@ internal sealed partial class ClientWorld : IDisposable
         ReadOnlySpan<float> levels = header.OwnTanks;
         _blocks.SetTanks(_ownBlocks, levels[..header.OwnTankCount]);
         own.State.Fuel = TankFuel.Total(_blocks.Tanks(_ownBlocks), OwnDesign.Tanks);
+        _ownLasers = header.Lasers();
         Reconcile(own.State, own.Order, header.ServerTick, header.AppliedOrderId);
     }
 
@@ -868,6 +869,8 @@ internal sealed partial class ClientWorld : IDisposable
             if (mine)
                 _near.State(i).Fuel = _near.Flight(i).FuelCapacity;
             _near.Info(i).Order = mine ? record.Order : default;
+            _near.Info(i).Cold = (record.Environment & HullEnvironment.InColdCloud) != 0;
+            _near.Flight(i).Cold = _near.Info(i).Cold;
             var age = Math.Clamp(_predictionTick - serverTick, 0, NearStaleTicks);
             for (var step = 0; step < age; step++)
             {
@@ -1074,6 +1077,7 @@ internal sealed partial class ClientWorld : IDisposable
         _near.Info(0).FittedRevision = _blocks.Revision(_ownBlocks);
         _near.State(0) = own;
         _near.Flight(0) = _flight;
+        _near.Info(0).Lasers = _ownLasers;
         _canonicalCount = 1;
         _canonical[0] = 0;
 
@@ -1119,7 +1123,10 @@ internal sealed partial class ClientWorld : IDisposable
             var mine = remote.Owner == _playerId;
             info.Order = mine || sample.State.Jump == JumpPhase.Tunnel ? sample.Order : default;
             state = sample.State;
-            _near.Flight(index) = remote.Flight;
+            info.Cold = (sample.Environment & HullEnvironment.InColdCloud) != 0;
+            var flight = remote.Flight;
+            flight.Cold = info.Cold;
+            _near.Flight(index) = flight;
 
             // The player's other hulls are flown by the server, and how is known: fly them the same way up to
             // now. Somebody else's hull may have a pilot; all that can be said of it is that it keeps going.
@@ -1128,7 +1135,7 @@ internal sealed partial class ClientWorld : IDisposable
             for (var age = snapshotTick - sample.Tick; age > 0; age--)
             {
                 HullSim.AdvanceShieldClock(ref state);
-                HullSim.Step(ref state, ref info.Order, mine ? Hold : Coast, remote.Flight, snapshotTick - age + 1);
+                HullSim.Step(ref state, ref info.Order, mine ? Hold : Coast, flight, snapshotTick - age + 1);
             }
         }
         _field.SetTraversal(_canonical.AsSpan(0, _canonicalCount));
@@ -1153,7 +1160,11 @@ internal sealed partial class ClientWorld : IDisposable
             _near.Info(0).TractorDemand += spec.Power(TractorSimulation.Mass(_content.Cargo, item));
         }
         _near.Info(0).TractorDemand += OwnChunkDemand();
-        _near.Info(0).LaserDemand = OwnLaserDemand(_laserClock);
+        ref var flown = ref _near.Info(0);
+        flown.LaserDemand = OwnLaserDemand(_laserClock, flown.Lasers.Locked, out flown.Lasers.Firing);
+
+        // Heat goes by the environment the server last reported for the hull, as the server's own step does.
+        flown.Cold = (_ownEnvironment & HullEnvironment.InColdCloud) != 0;
         _field.BeginRound();
         for (var at = 0; at < _canonicalCount; at++)
         {

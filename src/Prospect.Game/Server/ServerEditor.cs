@@ -678,6 +678,7 @@ public sealed partial class ServerHost
         info.OrderId = connection.OrderId;
         info.DamageTick = oldInfo.DamageTick;
         info.EscapeDrone = oldInfo.EscapeDrone;
+        CarryLaserHeat(oldInfo, ref info);
         CarryBays(old, next);
         _hulls.Destroy(old);
 

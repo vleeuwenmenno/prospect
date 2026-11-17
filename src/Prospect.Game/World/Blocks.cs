@@ -157,6 +157,21 @@ public sealed record FlightRules
     public required float BoostEnergyFloor { get; init; }
     public required float BoostHeatSeconds { get; init; }
     public required float CoolSeconds { get; init; }
+
+    /// <summary>
+    /// What a cold gas cloud does to heat, for a hull whose centre is inside one: how many times as fast boost heat
+    /// and laser heat build (at most 1) and how many times as fast they are shed (at least 1). Both 1 without the
+    /// figures, which leaves a cold cloud with no effect on heat.
+    /// </summary>
+    public float ColdCloudHeating { get; init; } = 1f;
+
+    public float ColdCloudCooling { get; init; } = 1f;
+
+    /// <summary>
+    /// Seconds between two looks at whether a hull is inside a cold cloud. The server keeps the answer with the
+    /// hull between looks, so the flight step never asks the gas.
+    /// </summary>
+    public float ColdCloudCheckSeconds { get; init; } = 0.25f;
     public required float ShieldRechargeDelaySeconds { get; init; }
 
     /// <summary>
@@ -301,6 +316,9 @@ public sealed class BlockCatalog
             BoostEnergyFloor = Math.Clamp(r.GetProperty("boostEnergyFloor"u8).GetSingle(), 0f, 1f),
             BoostHeatSeconds = r.GetProperty("boostHeatSeconds"u8).GetSingle(),
             CoolSeconds = r.GetProperty("coolSeconds"u8).GetSingle(),
+            ColdCloudHeating = r.TryGetProperty("coldCloudHeating"u8, out var coldHeating) ? coldHeating.GetSingle() : 1f,
+            ColdCloudCooling = r.TryGetProperty("coldCloudCooling"u8, out var coldCooling) ? coldCooling.GetSingle() : 1f,
+            ColdCloudCheckSeconds = r.TryGetProperty("coldCloudCheckSeconds"u8, out var coldCheck) ? coldCheck.GetSingle() : 0.25f,
             ShieldRechargeDelaySeconds = r.GetProperty("shieldRechargeDelaySeconds"u8).GetSingle(),
             ShieldRestartFraction = r.GetProperty("shieldRestartFraction"u8).GetSingle(),
             ShieldRestartPowerMultiplier = r.GetProperty("shieldRestartPowerMultiplier"u8).GetSingle(),
@@ -325,6 +343,9 @@ public sealed class BlockCatalog
             FtlArrivalReach = r.GetProperty("ftlArrivalReach"u8).GetSingle(),
             FtlArrivalPulseMass = r.GetProperty("ftlArrivalPulseMass"u8).GetSingle(),
         };
+        if (!(rules.ColdCloudHeating > 0f && rules.ColdCloudHeating <= 1f) || !(rules.ColdCloudCooling >= 1f && rules.ColdCloudCooling <= 100f)
+            || !(rules.ColdCloudCheckSeconds >= 1f / 60f && rules.ColdCloudCheckSeconds <= 10f))
+            throw new InvalidDataException($"{path}: coldCloudHeating is above 0 and at most 1, coldCloudCooling 1 to 100, coldCloudCheckSeconds a sixtieth of a second to 10.");
         if (!float.IsFinite(rules.DentThreshold) || rules.DentThreshold <= 0 || !float.IsFinite(rules.DentFullDamage) || rules.DentFullDamage < rules.DentThreshold
             || !float.IsFinite(rules.DentMaxDepth) || rules.DentMaxDepth <= 0 || rules.DentMaxDepth > 0.5f)
             throw new InvalidDataException("Invalid visual dent limits.");

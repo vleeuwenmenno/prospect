@@ -95,12 +95,14 @@ internal static class ActionGroupPanel
     private static void DrawCell(ImDrawListPtr draw, in ActionGroupCell cell, ReadOnlySpan<byte> key, float2 min, float2 size, bool hot, ActionGroupLook look)
     {
         var ui = Kit.Ui;
-        var tone = cell.Firing ? look.FiringRgb : cell.On ? look.OnRgb : look.OffRgb;
-        var alpha = cell.Firing ? look.FiringAlpha : cell.On ? look.OnAlpha : look.OffAlpha;
+        // Overheated wins over on and firing: the group fires nothing until a laser has cooled.
+        var overheated = cell.Overheated;
+        var tone = overheated ? look.OverheatedRgb : cell.Firing ? look.FiringRgb : cell.On ? look.OnRgb : look.OffRgb;
+        var alpha = overheated ? look.OverheatedAlpha : cell.Firing ? look.FiringAlpha : cell.On ? look.OnAlpha : look.OffAlpha;
         var previous = Kit.Fade;
         Kit.Fade = previous * (hot ? 1f : alpha);
         var max = min + size;
-        Hud.Plate(draw, min, max, tone, cell.On || hot);
+        Hud.Plate(draw, min, max, tone, cell.On || hot || overheated);
         draw.AddRectFilled(min + new float2(0, Kit.Px(4)), min + new float2(Kit.Px(3), size.Y - Kit.Px(4)), Kit.Color(tone));
         if (cell.On)
             draw.AddRectFilled(min + new float2(Kit.Px(3), Kit.Px(3)), max - new float2(Kit.Px(1), Kit.Px(3)), Kit.Color(tone, cell.Firing ? 0.3f : 0.14f));
@@ -113,9 +115,30 @@ internal static class ActionGroupPanel
         var room = max.X - labelLeft - Kit.Px(Theme.Space2) - Kit.Px(look.MarkPixels) - Kit.Px(Theme.Space1);
         var kind = look.Kind(cell.Kind);
         // The whole wording while it fits; only the count where it does not. The widest wording is measured, so cells agree.
-        var label = Kit.Measure(ui.SansMedium, Theme.FontCaption, Kit.F($"{kind} x{ActionGroups.Count}")).X <= room ? Kit.F($"{kind} x{cell.Parts}") : Kit.F($"x{cell.Parts}");
-        Kit.ClippedText(draw, ui.SansMedium, Theme.FontCaption, new float2(labelLeft, y), cell.On ? Theme.Text : Theme.TextDim, label, Math.Max(0f, room));
+        var whole = Kit.Measure(ui.SansMedium, Theme.FontCaption, Kit.F($"{kind} x{ActionGroups.Count}")).X <= room;
+        var label = overheated ? (whole && Kit.Measure(ui.SansMedium, Theme.FontCaption, look.OverheatedLabel).X <= room ? look.OverheatedLabel : look.OverheatedShortLabel)
+            : whole ? Kit.F($"{kind} x{cell.Parts}") : Kit.F($"x{cell.Parts}");
+        Kit.ClippedText(draw, ui.SansMedium, Theme.FontCaption, new float2(labelLeft, y), overheated ? tone : cell.On ? Theme.Text : Theme.TextDim, label, Math.Max(0f, room));
         Kit.Fade = previous;
+
+        // The heat of the group's hottest laser, along the cell's foot. Like the cutting mark it does not dim with the
+        // cell: a group that is off still has to cool. A shut-down group shows the mark it must cool to.
+        if (cell.Heat > 0f || overheated)
+        {
+            // Clear of the chamfered corner at the cell's lower left.
+            var barLeft = min.X + Kit.Px(Theme.Chamfer);
+            var barRight = max.X - Kit.Px(1);
+            var barBottom = max.Y - Kit.Px(3);
+            var barTop = barBottom - Kit.Px(look.HeatBarPixels);
+            var heatTone = overheated ? look.OverheatedRgb : look.HeatRgb(cell.Heat);
+            draw.AddRectFilled(new float2(barLeft, barTop), new float2(barRight, barBottom), Kit.Color(heatTone, look.HeatTrackAlpha));
+            draw.AddRectFilled(new float2(barLeft, barTop), new float2(barLeft + MathF.Round((barRight - barLeft) * Math.Clamp(cell.Heat, 0f, 1f)), barBottom), Kit.Color(heatTone));
+            if (cell.Locked > 0 && cell.UnlockHeat > 0f)
+            {
+                var markX = barLeft + MathF.Round((barRight - barLeft) * cell.UnlockHeat);
+                draw.AddRectFilled(new float2(markX, barTop - Kit.Px(2)), new float2(markX + Kit.Px(1), barBottom), Kit.Color(Theme.Text));
+            }
+        }
 
         // A laser of the group is cutting rock: a mark that does not dim with the cell.
         if (cell.Cutting)
@@ -130,23 +153,28 @@ internal static class ActionGroupPanel
     /// The tooltip of the cell of <paramref name="cell"/> under the pointer: its key and state, each laser in it with
     /// its figures, and what a click does. Drawn on <paramref name="draw"/> (the foreground list), it takes no input.
     /// </summary>
+    /// <remarks>
+    /// Each laser's line ends with its heat, or says it is overheated and the heat it fires again at. While the hull
+    /// is inside a cold cloud (<paramref name="cold"/>) a line says how much faster heat is shed there.
+    /// </remarks>
     public static void DrawTip(ImDrawListPtr draw, SessionSnapshot snapshot, uint hull, HullDesign design, in ActionGroupCell cell, ReadOnlySpan<byte> key,
-        in HudRect cellRect, float2 display, ActionGroupLook look)
+        in HudRect cellRect, float2 display, ActionGroupLook look, bool cold = false, float coldCooling = 1f)
     {
         var ui = Kit.Ui;
         var pad = Kit.Px(Theme.Space3);
         var line = Kit.Px(16);
-        var width = Math.Min(Kit.Px(300), display.X - Kit.Px(Theme.Space4) * 2);
-        var height = pad * 2 + Kit.Px(18) + cell.Parts * line + line + Kit.Px(4);
+        var width = Math.Min(Kit.Px(look.TipWidth), display.X - Kit.Px(Theme.Space4) * 2);
+        var height = pad * 2 + Kit.Px(18) + cell.Parts * line + (cold ? line : 0f) + line + Kit.Px(4);
         var left = Math.Clamp(cellRect.Left + cellRect.Width * 0.5f - width * 0.5f, Kit.Px(Theme.Space4), Math.Max(Kit.Px(Theme.Space4), display.X - width - Kit.Px(Theme.Space4)));
         var top = Math.Max(Kit.Px(Theme.Space4), cellRect.Top - Kit.Px(Theme.Space2) - height);
         var min = new float2(left, top);
-        var tone = cell.Firing ? look.FiringRgb : cell.On ? look.OnRgb : look.OffRgb;
-        Hud.Plate(draw, min, min + new float2(width, height), tone, cell.On);
+        var overheated = cell.Overheated;
+        var tone = overheated ? look.OverheatedRgb : cell.Firing ? look.FiringRgb : cell.On ? look.OnRgb : look.OffRgb;
+        Hud.Plate(draw, min, min + new float2(width, height), tone, cell.On || overheated);
         var inner = width - pad * 2;
         var at = min + new float2(pad, pad);
-        var state = cell.Firing ? "FIRING"u8 : cell.On ? "ON"u8 : "OFF"u8;
-        Kit.ClippedText(draw, ui.SansMedium, Theme.FontCaption, at, cell.On ? tone : Theme.Text, Kit.F($"GROUP {key}   {state}"), inner);
+        var state = overheated ? "OVERHEATED"u8 : cell.Firing ? "FIRING"u8 : cell.On ? "ON"u8 : "OFF"u8;
+        Kit.ClippedText(draw, ui.SansMedium, Theme.FontCaption, at, cell.On || overheated ? tone : Theme.Text, Kit.F($"GROUP {key}   {state}"), inner);
         at.Y += Kit.Px(22);
         var parts = Math.Min(design.Lasers.Length, ActionGroupsMessage.MaxParts);
         for (var part = 0; part < parts; part++)
@@ -154,9 +182,19 @@ internal static class ActionGroupPanel
             if (snapshot.GroupOf(hull, design, part) != cell.Group) continue;
             var laser = design.Mounts[design.Lasers[part]].Type.Laser!;
             var cutting = ActionGroupStrip.IsCutting(snapshot, hull, part);
+            var heat = ActionGroupStrip.HeatOf(snapshot, hull, part) * 100f;
             var kind = look.Kind(ActionPartKind.Laser);
-            Kit.ClippedText(draw, ui.Mono, Theme.FontCaption, at, cutting ? look.CuttingRgb : Theme.TextDim,
-                cutting ? Kit.F($"{kind} {part + 1}   CUTTING") : Kit.F($"{kind} {part + 1}   RANGE {laser.Range:0} M   {laser.Power:0.#} MW"), inner);
+            if (ActionGroupStrip.IsLocked(snapshot, hull, part))
+                Kit.ClippedText(draw, ui.Mono, Theme.FontCaption, at, look.OverheatedRgb, Kit.F($"{kind} {part + 1}   OVERHEATED {heat:0} %   FIRES AGAIN AT {laser.UnlockHeat * 100f:0} %"), inner);
+            else
+                Kit.ClippedText(draw, ui.Mono, Theme.FontCaption, at, cutting ? look.CuttingRgb : Theme.TextDim,
+                    cutting ? Kit.F($"{kind} {part + 1}   CUTTING   HEAT {heat:0} %") : Kit.F($"{kind} {part + 1}   RANGE {laser.Range:0} M   {laser.Power:0.#} MW   HEAT {heat:0} %"), inner);
+            at.Y += line;
+        }
+
+        if (cold)
+        {
+            Kit.ClippedText(draw, ui.Mono, Theme.FontCaption, at, look.ColdRgb, Kit.F($"COLD CLOUD: COOLING \u00d7{coldCooling:0.#}"), inner);
             at.Y += line;
         }
 
@@ -209,6 +247,18 @@ internal static class ActionGroupPanel
             Kit.Text(draw, ui.SansMedium, Theme.FontCaption, origin, Theme.Text, Kit.F($"{kind} {part + 1}"));
             var x = origin.X + Math.Max(titleSize.X + Kit.Px(Theme.Space3), Kit.Px(84));
             var room = origin.X + width - x;
+
+            // The laser's heat at the row's right end, left of the cutting mark; the words before it give way.
+            var heat = ActionGroupStrip.HeatOf(snapshot, hull, part);
+            var locked = ActionGroupStrip.IsLocked(snapshot, hull, part);
+            if (heat > 0f || locked)
+            {
+                var heatText = locked ? Kit.F($"OVERHEATED {heat * 100f:0} %") : Kit.F($"HEAT {heat * 100f:0} %");
+                var heatWidth = Kit.Measure(ui.Mono, Theme.FontCaption, heatText).X;
+                var heatX = origin.X + width - Kit.Px(look.MarkPixels) - Kit.Px(Theme.Space2) - heatWidth;
+                Kit.Text(draw, ui.Mono, Theme.FontCaption, new float2(heatX, origin.Y), locked ? look.OverheatedRgb : look.HeatRgb(heat), heatText);
+                room = Math.Max(0f, heatX - Kit.Px(Theme.Space2) - x);
+            }
             if (group == ActionGroups.None)
                 Kit.ClippedText(draw, ui.Mono, Theme.FontCaption, new float2(x, origin.Y), Theme.TextMute, overridden == ActionGroups.None ? "DOES NOT FIRE   SET ON THIS SHIP"u8 : "DOES NOT FIRE   DESIGN"u8, room);
             else

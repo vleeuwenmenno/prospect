@@ -29,6 +29,25 @@ public sealed partial class ServerHost
         }
     }
 
+    /// <summary>
+    /// Looks, for a share of the hulls each tick, whether the hull's centre is inside a cold gas cloud, and keeps the
+    /// answer with the hull (<see cref="HullInfo.Cold"/>) for its flight steps: heat builds slower and sheds faster
+    /// there. Every hull is looked at once in the content's <c>coldCloudCheckSeconds</c>, staggered by slot, so the
+    /// step never asks the gas and a tick asks it for few hulls. The same smooth envelope as a hull's replicated
+    /// environment (<see cref="GasSensors.EnvironmentAt"/>), which is what a predicting client goes by.
+    /// </summary>
+    private void TickColdClouds()
+    {
+        if (_sensorGas is null) return;
+        var cadence = Math.Max(1, (int)MathF.Round(_content.Rules.ColdCloudCheckSeconds * Prospect.Engine.Time.TickLoop.SimulationHz));
+        for (var i = (int)((cadence - _tick % cadence) % cadence); i < _hulls.Slots; i += cadence)
+        {
+            if (!_hulls.IsAliveAt(i)) continue;
+            var position = _hulls.State(i).Position;
+            _hulls.Info(i).Cold = (GasSensors.EnvironmentAt(Galaxy, _sensorGas.At(position), _content.Exploration, position, _tick) & HullEnvironment.InColdCloud) != 0;
+        }
+    }
+
     internal bool Covered(uint owner, Double3 position)
     {
         if (!_sensorConnections.TryGetValue(owner, out var connection) || connection.State != ConnectionState.Active

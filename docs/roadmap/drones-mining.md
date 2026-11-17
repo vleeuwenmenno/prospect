@@ -132,6 +132,10 @@ Built: the popup, "Pick up cargo" and "Pick up ores" (R4a).
 - While any group is on, left mouse fires every group that is on. With all off, left mouse aligns to view as today.
 - A part's group is set per mount in the build menu and saved with the design. The Ship window (`I`) lists the
   groups with their keys and parts, and can change a group without a rebuild.
+- A laser heats while it fires and cools while it does not. At full heat it shuts down until it has cooled to a
+  mark set in content. Heat is per laser, so two groups can take turns.
+- A cold gas cloud cools: inside one, lasers and the boost drive heat slower and cool faster, by content figures.
+- Laser heat is the laser's own. Rock heat (cracking, I2) is a different thing and is still to build.
 
 ### Drone scans
 
@@ -373,6 +377,29 @@ How to work on it is in `AGENTS.md`, "Mining lasers, action groups and ore chunk
 - Chunks: a fixed pool of 256 apart from loose containers, drifting, bouncing off rocks and hull blocks, replicated
   by sensor cover and saved.
 - Wire: protocol 68, messages 44 to 48. Save: codec 20.
+- Laser heat (added after R4, protocol 72): see "Laser heat and cold clouds" below.
+
+### Laser heat and cold clouds
+
+- Each laser has a heat from 0 to 1, kept with its hull. It rises while the laser fires and falls while it does not.
+- At 1 the laser shuts down: it neither fires nor draws. It fires again once it has cooled to its mark.
+- One rule, `LaserHeat.Step`, runs for the server's hulls and for the hull a client predicts.
+- The server sends the flown hull's laser heat in every snapshot's header. No other hull's is sent.
+- The action group strip shows a heat bar under each group and marks a group whose lasers are all shut down.
+
+Cold gas clouds:
+
+- A hull whose centre is inside a cold cloud heats slower and cools faster: boost heat and laser heat alike.
+- The server looks once every `coldCloudCheckSeconds` for each hull and keeps the answer with the hull.
+- A client goes by the environment flag every hull record already carries. Nothing new is sent for it.
+- The boost heat tooltip, a group's tooltip and the cold cloud status icon say so while it applies.
+
+Limits:
+
+- Laser heat is not saved. A loaded world's lasers are cool.
+- An edited ship's lasers all start as hot as the old ship's hottest. A repair keeps each laser's own heat.
+- The server's look is up to a quarter second old, so heat at a cloud's edge can differ from the client's for a
+  moment. The next snapshot corrects it.
 
 ### Why a pool of its own for chunks
 
@@ -386,7 +413,9 @@ How to work on it is in `AGENTS.md`, "Mining lasers, action groups and ore chunk
 | --- | --- |
 | Laser range, gimbal | 60 m, 40° off its face |
 | Cut radius, rate | 0.5 m, 0.25 m deep a second |
-| Power while firing | 3 MW, paid all or nothing after the tractors |
+| Power while firing | 6 MW, paid all or nothing after the tractors |
+| Heat | 20 s of firing to overheat, 15 s to cool from full, fires again at 30 % |
+| Cold cloud | heat builds at half the rate and is shed twice as fast |
 | Scrape | 0.25 m bite, at least 0.15 s apart; a new stroke after 0.5 s off the rock |
 | Chunk | 300 kg of one ore; thrown out from the rock's centre at 2 m/s |
 | Chunks | 64 a sector, 256 a world, 30 minutes unattended |
@@ -402,9 +431,15 @@ How to work on it is in `AGENTS.md`, "Mining lasers, action groups and ore chunk
 - Each ore of a cut makes its own chunk with the rock it came in, so two ores of one cut count that rock twice.
 - Partial ore is forgotten when the laser moves to another rock or stops for good.
 - A rock fills up: 2,048 scrapes a rock, 65,536 a world. A full rock still shows the beam and yields nothing.
-- No heat (I2), no weapons in groups yet, no turret models: the emitter is fixed, the beam turns within its gimbal.
+- No rock heat or cracking (I2), no weapons in groups yet, no turret models: the emitter is fixed, the beam turns
+  within its gimbal.
+- The Prospector's two lasers take about 7 MW more than its generators spare: its 240 MJ battery lasts about 35 s
+  of cutting, less with the tractor beams pulling chunks. Heat stops a burn after 20 s; the battery sets the pace
+  of a long cut.
 - Power is paid all or nothing each tick: a laser on a flat battery fires on the ticks the generator's trickle pays
-  for, and a beam cut short loses the cut it had not yet made into a scrape.
+  for, and a beam cut short loses the cut it had not yet made into a scrape. With 6 MW lasers the Prospector gets
+  there in about half a minute: fire held on a flat battery flickers, cuts nothing and keeps the battery flat
+  (see "Open").
 - Chunk contacts generate one sector at a time, as loose containers do: chunks spread over two sectors take turns.
 - Group changes are not mirrored in the editor (placing is).
 - The F10 debug scrape stays: `make bench` and the `--open rock-scrape` captures still use it.
@@ -454,7 +489,8 @@ allocation.
 - Drone answers for a chunk use the container's words ("fetching", "delivered", "no rack room").
 - A chunk is taken whole or not at all. A chunk heavier than the bins' room, or than a beam's limit (100 t), is
   never taken. A lean chunk is large: 300 kg of ore at a 5 % grade is 6 t.
-- The bins fill fast on the Prospector: two lasers fill 19.2 t in about 40 s on a lean rock.
+- The bins fill in bursts on the Prospector: two lasers free about 15 t in the first minute on a lean rock. Heat
+  stops a burn after 20 s and the battery is flat after about 35 s of cutting.
 - The room check counts every chunk the ship's beams hold against the ore asked for, whatever ore they are. It can
   refuse a chunk that would have fitted. A beam can also take a chunk and let it go again, when a chunk of another
   ore reached the last empty bin first.
@@ -470,7 +506,10 @@ allocation.
   its figures are in `visuals/propulsion.json`.
 - The figures for crust, veins and pockets. First guesses are in `content/galaxy/interiors.json`; tune from
   `--open rock-interior` captures.
-- The heat game's figures: heat rate, cooling, the window, what overheating does.
+- The heat game's figures (rock heat, I2): heat rate, cooling, the window, what overheating does. Laser heat is
+  built and is not this.
+- Whether lasers should cut out at an empty battery and wait for the battery to pass a floor, as boost does.
+  Today fire held on a flat battery flickers and cuts nothing.
 - The Ore Cargo window's layout.
 - Where markers fade out, and whether the command view shows chunks as icons too.
 - Automated mining by NPCs and captains: out of scope now; only the order model above is designed for it.

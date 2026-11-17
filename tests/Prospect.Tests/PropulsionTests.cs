@@ -1377,7 +1377,7 @@ public sealed class PropulsionTests
         header.OwnTanks[1] = 0f;
         header.OwnTanks[2] = 999.25f;
         header.Write(ref writer);
-        Assert.Equal(25 + 1 + 3 * 4, writer.Length);
+        Assert.Equal(25 + 1 + 3 * 4 + 1, writer.Length);
         Assert.Equal(header.WireSize, writer.Length);
         var reader = new NetReader(writer.Written[1..]);
         Assert.True(SnapshotHeader.TryRead(ref reader, out var read));
@@ -1385,14 +1385,15 @@ public sealed class PropulsionTests
         for (var i = 0; i < 3; i++)
             Assert.Equal(BitConverter.SingleToUInt32Bits(header.OwnTanks[i]), BitConverter.SingleToUInt32Bits(read.OwnTanks[i]));
 
-        // A hull without tanks costs one byte, and one with as many as a design may have fills the bound.
+        // A hull without tanks or lasers costs a byte for each count, and one with as many of both as a design may
+        // have fills the bound (the lasers' part is LaserHeatTests' to hold).
         writer = new NetWriter(buffer);
         (header with { OwnTankCount = 0 }).Write(ref writer);
-        Assert.Equal(26, writer.Length);
+        Assert.Equal(27, writer.Length);
         writer = new NetWriter(buffer);
-        (header with { OwnTankCount = TankFuel.MaxTanks }).Write(ref writer);
+        (header with { OwnTankCount = TankFuel.MaxTanks, OwnLaserCount = LaserHeat.MaxLasers }).Write(ref writer);
         Assert.Equal(SnapshotHeader.MaxWireSize, writer.Length);
-        Assert.Equal(25 + 1 + 255 * 4, SnapshotHeader.MaxWireSize);
+        Assert.Equal(25 + 1 + 255 * 4 + 1 + 64 * 2 + 8, SnapshotHeader.MaxWireSize);
         reader = new NetReader(writer.Written[1..]);
         Assert.True(SnapshotHeader.TryRead(ref reader, out read));
         Assert.Equal(TankFuel.MaxTanks, read.OwnTankCount);
@@ -1435,8 +1436,9 @@ public sealed class PropulsionTests
             Assert.False(HullRecord.TryRead(ref reader, out _));
         }
 
-        // 255 records without health still fit one snapshot beside a header with every tank a design may have:
-        // that is what holds a design to 255 tanks, and a record to no more than what it carries now.
+        // 255 records without health still fit one snapshot beside a header with every tank a design may have and
+        // the heat of every laser: that is what holds a design to 255 tanks, and a record to no more than what it
+        // carries now.
         Assert.True(SnapshotHeader.MaxWireSize + byte.MaxValue * (HullRecord.MaxWireSize - HullRecord.MaxHealth * 6) < 65536);
         Assert.False(SnapshotHeader.MaxWireSize + byte.MaxValue * (HullRecord.MaxWireSize - HullRecord.MaxHealth * 6 + 1) < 65536);
     }

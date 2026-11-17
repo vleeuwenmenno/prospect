@@ -32,7 +32,10 @@ public sealed class MiningLaserContentTests
         Assert.Equal(0f, type.Thrust);
         Assert.Equal(0f, type.PowerDraw);
         Assert.Null(type.Tractor);
-        Assert.Equal((60f, 0.5f, 0.25f, 3f, 40f, ModuleQuality.Common), (laser.Range, laser.CutRadius, laser.CutRate, laser.Power, laser.GimbalDegrees, laser.Quality));
+        Assert.Equal((60f, 0.5f, 0.25f, 6f, 40f, ModuleQuality.Common), (laser.Range, laser.CutRadius, laser.CutRate, laser.Power, laser.GimbalDegrees, laser.Quality));
+
+        // Its heat: twenty seconds of firing to overheat, fifteen to cool from full, and shut down until 30 %.
+        Assert.Equal((1f / 20f, 1f / 15f, 0.3f), (laser.HeatRate, laser.CoolRate, laser.UnlockHeat));
         Assert.Equal(MathF.Cos(40f * MathF.PI / 180f), laser.GimbalCosine);
         Assert.True(ActionGroups.Groupable(type));
         Assert.False(ActionGroups.Groupable(Shipped.Blocks.Get("coldGasThruster")));
@@ -49,8 +52,12 @@ public sealed class MiningLaserContentTests
         Assert.Equal(60f * 1.3f, rare.Range, 3);
         Assert.Equal(0.5f * 1.2f, rare.CutRadius, 4);
         Assert.Equal(0.25f * 1.7f, rare.CutRate, 4);
-        Assert.Equal(3f * 1.2f, rare.Power, 4);
+        Assert.Equal(MiningFixtures.LaserPower * 1.2f, rare.Power, 4);
         Assert.Equal(40f, rare.GimbalDegrees);
+
+        // No tier scales a laser's heat: it is the laser's own.
+        var common = Shipped.Blocks.Get("miningLaser").Laser!;
+        Assert.Equal((common.HeatRate, common.CoolRate, common.UnlockHeat), (rare.HeatRate, rare.CoolRate, rare.UnlockHeat));
         Assert.NotEqual(Shipped.Identity, content.Identity);
     }
 

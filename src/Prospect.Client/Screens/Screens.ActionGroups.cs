@@ -16,6 +16,7 @@ internal sealed partial class ScreenHost
     private readonly ActionGroupKeys _actionGroupKeys = new();
     private bool _actionGroupsOpen;
     private bool _tipSawActionGroup;
+    private bool _tipSawOverheat;
 
     /// <summary>Whether the popup that changes a laser's group is open; Escape closes it before it backs out of anything else.</summary>
     internal bool ActionGroupsOpen => _actionGroupsOpen;
@@ -77,10 +78,14 @@ internal sealed partial class ScreenHost
         var design = content.Designs[own.Design];
         if (result.Pressed != 0)
             _actionGroupsOpen = !_actionGroupsOpen;
-        if (result.Hovered != 0 && !_actionGroupsOpen && _actionGroups.TryGet(result.Hovered, out var cell))
+
+        // A scripted run's pointer is muted: it asks for one group's tooltip instead of resting on its cell.
+        var hovered = _app.ScriptedHeatTip is > 0 and var asked ? asked : result.Hovered;
+        if (hovered != 0 && !_actionGroupsOpen && _actionGroups.TryGet(hovered, out var cell))
         {
-            var at = ActionGroupStrip.CellRect(rect, IndexOfGroup(result.Hovered), cellWidth, Kit.Px(look.Gap));
-            ActionGroupPanel.DrawTip(ImGui.GetForegroundDrawList(), snapshot, own.Id, design, cell, _actionGroupKeys.Name(cell.Group), at, _ui.DisplaySize, look);
+            var at = ActionGroupStrip.CellRect(rect, IndexOfGroup(hovered), cellWidth, Kit.Px(look.Gap));
+            ActionGroupPanel.DrawTip(ImGui.GetForegroundDrawList(), snapshot, own.Id, design, cell, _actionGroupKeys.Name(cell.Group), at, _ui.DisplaySize, look,
+                (own.Environment & HullEnvironment.InColdCloud) != 0, snapshot.Flight.ColdCooling);
         }
 
         if (_actionGroupsOpen && Bridge is { } bridge)

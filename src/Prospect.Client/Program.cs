@@ -71,6 +71,8 @@ internal static class Program
           --capture-hit-age <s>   With --capture/--bench: wait for a real shield hit to reach this age (0 to 1 s)
           --ram <m/s>            Unsaved private scripted run: settle by a giant at 3 s, strike it at 6 s (0 to 100 m/s)
           --coast <m/s>          Unsaved private scripted run: dampeners off, own hull set coasting along its nose at 2 s (0 to 400 m/s)
+          --cold-cloud           Unsaved private scripted run: own hull set at rest in the middle of the nearest cold gas cloud at 2.5 s
+                                  (within 4 sectors of the start: use --sector 43,0,38 with the default seed)
           --map-cell <pixels>     With --capture or --bench and a map view: open the map at this many pixels per sector (1.4 to 190)
           --close-map-at <sec>    With --capture or --bench and a map view: close the map at this time after the splash (captures of the first frames back in the world)
           --cancel-scan-at <sec>  With --capture or --bench and a scan view (scan, scan-pilot): cancel the scan at this time after the splash, as the scan key pressed again would
@@ -101,6 +103,8 @@ internal static class Program
                                   bipropellant, as a click on that fuel's cell of the fuel row does
           --fuel-tip <fuel>       With --capture or --bench, pilot view: show that fuel's details, as the pointer on
                                   its cell does
+          --heat-tip <what>       With --capture or --bench, pilot view: show the boost heat row's details (boost)
+                                  or the tooltip of an action group's cell (its digit), as the pointer on it does
           --cut-hull <sec>        Scripted unsaved private local game: cut the flown hull across its middle.
           --hurt-fleet <sec>      With --capture or --bench: hurt the other owned hulls that many seconds in;
                                   --hurt-kind damaged, broken, or tank (the flown hull loses its last fuel tank)
@@ -444,6 +448,9 @@ internal static class Program
                     options.DroneScanCameraAt = scanCameraAt;
                     i++;
                     break;
+                case "--cold-cloud":
+                    options.ColdCloud = true;
+                    break;
                 case "--coast" when hasValue && float.TryParse(args[i + 1], out var coastSpeed) && coastSpeed is >= 0f and <= 400f:
                     options.CoastSpeed = coastSpeed;
                     i++;
@@ -519,6 +526,11 @@ internal static class Program
                     break;
                 case "--fuel-tip" when hasValue && ParseFuel(args[i + 1]) is var tipped and not Prospect.Game.World.FuelKind.None:
                     options.FuelTip = tipped;
+                    i++;
+                    break;
+                case "--heat-tip" when hasValue && (args[i + 1] == "boost" || args[i + 1].Length == 1 && char.IsAsciiDigit(args[i + 1][0])):
+                    // A digit is the key of the group: 0 is the tenth.
+                    options.HeatTip = args[i + 1] == "boost" ? 0 : args[i + 1][0] == '0' ? 10 : args[i + 1][0] - '0';
                     i++;
                     break;
                 case "--thrust" when hasValue && Prospect.Client.World.ScriptedThrust.TryParse(args[i + 1], out var thrust):
@@ -654,14 +666,17 @@ internal static class Program
         if (options.HoldThrust is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--hold-thrust works only with --capture or --bench: it replaces the pilot's forward key.");
 
-        if ((options.BreakShieldSeconds is not null || options.RamSpeed is not null || options.CoastSpeed is not null) && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
-            return Fail("--break-shield, --ram and --coast work only with --capture or --bench, in an unsaved private local game.");
+        if ((options.BreakShieldSeconds is not null || options.RamSpeed is not null || options.CoastSpeed is not null || options.ColdCloud) && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
+            return Fail("--break-shield, --ram, --coast and --cold-cloud work only with --capture or --bench, in an unsaved private local game.");
 
         if ((options.Thrust is not null || options.Zoom is not null || options.LookHeight is not null || options.CaptureHitAge is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--thrust and --zoom work only with --capture or --bench.");
 
         if ((options.FuelCallout != Prospect.Game.World.FuelKind.None || options.FuelTip != Prospect.Game.World.FuelKind.None) && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--fuel-callout and --fuel-tip work only with --capture or --bench.");
+
+        if (options.HeatTip is not null && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--heat-tip works only with --capture or --bench.");
 
         if (options.JettisonSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
             || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null || options.OpenView is not ("cargo" or "edit-cargo")))

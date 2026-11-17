@@ -78,8 +78,12 @@ power use for a scan, and checking places against other rocks or ships.
 Rocks can be mined with a mining laser: a small part mounted on a block's face, in an action group (1 to 9 and 0)
 chosen per part in the editor. The number keys turn groups on and off; while any group is on, the left mouse button
 fires every group that is on at the view's centre, and with all off it turns the hull onto the view as before. A
-laser reaches 60 m, turns at most 40° off its face, draws 3 MW while it fires, and cuts a groove 1 m wide into the
-first rock its beam meets, seen by everyone who has the rock in view and saved with the world. What it cuts away
+laser reaches 60 m, turns at most 40° off its face, draws 6 MW while it fires, and cuts a groove 1 m wide into the
+first rock its beam meets, seen by everyone who has the rock in view and saved with the world. A laser heats while
+it fires: after 20 s it has overheated and shuts down until it has cooled to 30 %, about 10 s (figures per laser in
+`blocks.json`: `heatSeconds`, `coolSeconds`, `unlockHeat`). Heat is per laser, so lasers in two groups can take
+turns. The Prospector's two lasers take about 7 MW more than its generators spare, so its battery lasts about 35 s
+of cutting, less while the tractor beams pull chunks. Laser heat is not saved: a loaded world's lasers are cool. What it cuts away
 yields ore from the rock's interior; every 300 kg of one ore breaks off as a loose ore chunk that drifts and bounces
 off rocks and ships. Each chunk in sensor cover wears a diamond in its ore's colour, fading with distance (chunks off
 screen show as small arrows at the window's edge, with how many lie that way); a shown pointer over one shows its ore,
@@ -389,7 +393,8 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   drawn (idle, thrust and boost, shield recharge or restart, the jump drive). It reads out even while a full battery
   turns the surplus away, so a shield recharging off spare power is visible. A strip under the bar draws that flow,
   with a muted blue mark for the shield's share. The heat bar turns from cyan to red and says
-  when boost is overheated (with the mark where it unlocks) or out of energy. The boost heat row also says
+  when boost is overheated (with the mark where it unlocks) or out of energy. Inside a cold gas cloud boost heats
+  slower and cools faster, and the tooltip shows the rates that apply there. The boost heat row also says
   whether the dampeners are on; off is amber. With `Shift` held in the pilot view, the bar under the cursor is
   lit and its live figures show above the console: shield charge, recharge rate, delay after damage, draw and
   restart rule; hull points, mass and safe impact speed; stored energy, the battery's own rate, generation, each draw (idle, thrust or boost, shield
@@ -696,7 +701,9 @@ The number keys `1` to `9` and `0` turn action groups on and off (remappable act
 each one with its key, whether it is on, and its parts ("LASER x2"). While any group is on, the left mouse
 button fires every group that is on instead of aligning the ship; with all off it aligns as before. With the
 pointer shown (`Shift`, interface mode or the command view), clicking the strip opens a popup that changes which
-group each laser fires with, without a rebuild.
+group each laser fires with, without a rebuild. A bar along the foot of each cell shows the heat of the group's
+hottest laser (cyan, amber, then red); a group whose lasers have all overheated turns red, says "OVERHEAT" and
+marks the heat it fires again at. The cell's tooltip and the popup give each laser's heat.
 
 A ship near the reticle is bracketed; the middle mouse button targets it and shows its shield and hull. A target
 out of view, behind you, or under a panel, the jump strip or the console, shows as an arrow at the edge of the clear
@@ -1078,7 +1085,10 @@ This status is an observation at open, not hosting authorization. Saved multipla
 
 The commented default server file is `content/server/server-settings.jsonc`; copy it and pass `--settings <file>`. JSON comments and trailing commas are accepted.
 
-Gas-kind simulation is present: cold/normal mixtures, shared icicle shapes and lightning sensor bursts.
+Gas-kind simulation is present: cold/normal mixtures, shared icicle shapes and lightning sensor bursts. A cold
+cloud cools: a ship inside one builds boost heat and laser heat at half the rate and sheds it twice as fast
+(`coldCloudHeating`, `coldCloudCooling` in `content/blocks/blocks.json`); the boost heat tooltip and an action
+group's tooltip say "COLD CLOUD: COOLING ×2" while it applies.
 The renderer draws the kinds: lightning clouds flash and throw branching bolts on the server's burst clock, cold clouds are bluish
 white with an ice halo and glints, overlapping cold and normal clouds are integrated together along each ray, and icicles are drawn
 as the exact ice shard. Fleet/RTS status indicators for the environment flags and the sensor outline's tracking of bursts await

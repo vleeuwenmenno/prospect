@@ -176,6 +176,14 @@ public sealed class SessionSnapshot(GameContent content)
     public int LaserBeamCount;
     public long LaserBeamTick = -1;
 
+    /// <summary>
+    /// The heat of the flown hull's mining lasers (<see cref="LaserHeatHull"/>, its packed handle; zero for none):
+    /// each laser's heat and which are shut down, the server's figures stepped on by prediction with the server's
+    /// own rule (<see cref="Prospect.Game.World.LaserHeat"/>). No other hull's is known.
+    /// </summary>
+    public LaserHeatState LaserHeat;
+    public uint LaserHeatHull;
+
     /// <summary>Snapshot-owned loose ore chunks, filtered by the server's sensor coverage.</summary>
     public readonly OreChunk[] OreChunks = new OreChunk[Prospect.Game.World.OreChunks.Capacity];
     public int OreChunkCount;
