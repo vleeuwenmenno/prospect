@@ -36,9 +36,8 @@ The energy tooltip lists TRACTORS. No pickup key or pickup by touch; no allow-li
 
 Drone bays (editor, Storage tab) are box blocks with one hatch: it faces away from the face the bay is placed on,
 and the model shows it (frame, orange doors, a light). A Common bay keeps 4 drones, launches 2 at once and rebuilds
-a lost one in 90 s; tiers are content, only Common is in the palette. `.` (or a click on the DRONES chip over the
-console) launches every drone inside; they leave through the hatch and hold station 14 m out in front of it. `,` (or
-the chip while drones are out) calls them home: they line up in front of the hatch, fly in and dock. A blocked hatch
+a lost one in 90 s; tiers are content, only Common is in the palette. `.` launches every drone inside; they leave through the hatch and hold station 14 m out in front of it. `,` calls
+them home: they line up in front of the hatch, fly in and dock. A blocked hatch
 (a block or a part of the ship in front of it) refuses a launch, and the chip says why. Drones are small real hulls
 flown by the server: they collide, can be destroyed (the bay rebuilds them) and use power. A player has at most 12
 out. A jump calls them home; one still out when the ship leaves is lost. A saved world docks every drone.
@@ -50,6 +49,15 @@ lift it together, faster the more they are. They bring it 10 m out in front of t
 the beam stows it as it stows any container. The DRONES chip shows how many are fetching, and why a fetch is refused:
 no tractor beam, no rack room, too heavy, too few drones, someone else's claim, already taken, out of range. Drones wait
 out a container's pickup delay before lifting it. Losing a carrier, or the ship jumping, drops the container where it is.
+
+A click on the DRONES chip (pointer shown: `Shift` or `Tab`) opens the drone settings popup over it: a Launch / Recall
+button (the same as `.` and `,`), the "Pick up cargo" checkbox, and how many drones are in, out and fetching, the
+rebuild timer and the server's last answer. A click on the chip again, a click elsewhere or `Esc` closes it. With
+"Pick up cargo" on, the ship's drones fetch loose containers on their own, one at a time, whenever one is in range and
+in sensor sight, is yours to take (no one else's claim, pickup delay over) and is out of reach of your own tractor beam
+(which takes it by itself). A container a fetch is refused for is left alone for 20 s. Recalling by hand holds it off
+for 30 s, or until you launch again. The setting is per ship and is saved with the world. There is no "Pick up ores"
+box yet: ore chunks do not exist until the mining laser (R4).
 A saved world keeps a carried container loose where it was. Not built: a ship without a tractor beam cannot be fetched
 to, choosing the hold point in the interface, a drone panel, drone battery limits, scans and charges (later drone steps),
 and any avoidance: a drone flies straight to its place and may bump the ship it came from.

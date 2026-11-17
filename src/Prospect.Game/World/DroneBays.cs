@@ -133,6 +133,24 @@ public sealed record DroneRules
     /// <summary>The longest a fetch may take before its drones give up and come home.</summary>
     public required float FetchSeconds { get; init; }
 
+    /// <summary>
+    /// How many loose containers a hull with auto pickup on looks at in one tick, from a rotating start, so every
+    /// body of the 256-body pool is seen in at most a few seconds and no tick pays for all of them.
+    /// </summary>
+    public required int AutoPickupWindow { get; init; }
+
+    /// <summary>Seconds a container that a fetch was refused for is left alone by one hull's auto pickup.</summary>
+    public required float AutoPickupRetrySeconds { get; init; }
+
+    /// <summary>Seconds auto pickup waits after its owner recalls the drones by hand, so a recall means something.</summary>
+    public required float AutoPickupPauseSeconds { get; init; }
+
+    /// <summary>Ticks a refused container is skipped, at least one.</summary>
+    public long AutoPickupRetryTicks => Math.Max(1, (long)Math.Ceiling(AutoPickupRetrySeconds * TickLoop.SimulationHz));
+
+    /// <summary>Ticks auto pickup waits after a manual recall.</summary>
+    public long AutoPickupPauseTicks => (long)Math.Ceiling(AutoPickupPauseSeconds * TickLoop.SimulationHz);
+
     /// <summary>Ticks a fetch may take, at least one.</summary>
     public long FetchTicks => Math.Max(1, (long)Math.Ceiling(FetchSeconds * TickLoop.SimulationHz));
 
@@ -189,6 +207,9 @@ public sealed record DroneRules
             HandoverToleranceMetres = Number("handoverToleranceMetres", 0.05f, 50),
             HandoverSpeed = Number("handoverSpeed", 0.01f, 50),
             FetchSeconds = Number("fetchSeconds", 1, 86400),
+            AutoPickupWindow = Whole("autoPickupWindow", 1, FreeContainers.Capacity),
+            AutoPickupRetrySeconds = Number("autoPickupRetrySeconds", 1, 3600),
+            AutoPickupPauseSeconds = Number("autoPickupPauseSeconds", 0, 3600),
         };
         if (rules.HoldDistanceMetres > rules.MaxHoldDistanceMetres)
             throw new InvalidDataException("drones.json: holdDistanceMetres must not exceed maxHoldDistanceMetres");

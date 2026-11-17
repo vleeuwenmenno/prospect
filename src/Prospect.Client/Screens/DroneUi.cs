@@ -102,6 +102,58 @@ internal static class DroneUi
 }
 
 /// <summary>
+/// The drone settings popup, apart from drawing so it can be tested without fonts. A click on the DRONES chip opens it
+/// over the chip and a click on the chip again closes it; so do a press anywhere else that is not on the popup and
+/// Escape (<see cref="ScreenHost.BackStep.DronePopup"/>). It belongs to one hull: another hull, or a hull that has
+/// lost its bays, closes it. Like the fuel callout it stays open while the pointer is captured again; it only takes
+/// presses while the pointer is shown, which is when ImGui is given the mouse at all. What its buttons do is
+/// <see cref="DroneUi"/>'s: the same launch and recall as the keys, and the server's own setting for auto pickup, which
+/// the checkbox reads back from <see cref="BayView.AutoPickup"/> rather than keeping a copy of its own.
+/// </summary>
+internal sealed class DronePopup
+{
+    private uint _hull;
+
+    /// <summary>True while the popup is open.</summary>
+    public bool IsOpen { get; private set; }
+
+    /// <summary>Opens the popup, or closes it when it is open (a click on the chip).</summary>
+    public void Toggle() => IsOpen = !IsOpen;
+
+    /// <summary>Closes the popup.</summary>
+    public void Close() => IsOpen = false;
+
+    /// <summary>Keeps the popup to the hull it was opened on, and to a hull that still has bays (<paramref name="present"/>).</summary>
+    public void Follow(uint hull, bool present)
+    {
+        if (hull != _hull) { _hull = hull; IsOpen = false; }
+        if (!present) IsOpen = false;
+    }
+
+    /// <summary>
+    /// A press that was neither on the popup nor on the chip closes it. The chip's own press toggles it instead
+    /// (<see cref="Toggle"/>), so it is excluded here: otherwise a click on the chip would close the popup and then
+    /// open it again.
+    /// </summary>
+    public void Press(bool pressed, bool overPopup, bool overChip)
+    {
+        if (pressed && IsOpen && !overPopup && !overChip) IsOpen = false;
+    }
+
+    /// <summary>The popup's one button: recall while drones are out, otherwise launch what is inside, as the keys do.</summary>
+    public static void LaunchOrRecall(in BayView view, uint ownHull, PlayerInputBridge bridge)
+    {
+        view.Totals(out _, out var outside, out _, out _);
+        if (outside > 0) bridge.RecallDrones(ownHull);
+        else DroneUi.Launch(view, ownHull, bridge);
+    }
+
+    /// <summary>The checkbox flips the server's setting, read from the view: a lost message shows as a box that did not change.</summary>
+    public static void ToggleAutoPickup(in BayView view, uint ownHull, PlayerInputBridge bridge) =>
+        bridge.SetDroneAutoPickup(ownHull, !view.AutoPickup);
+}
+
+/// <summary>
 /// Keeps the newest answer the server gave to a drone command for a few seconds, so the chip can speak it. A new
 /// answer is a new <see cref="BayView.ReplySequence"/>; the first view seen sets the count without speaking.
 /// </summary>
@@ -126,4 +178,7 @@ internal sealed class DroneTracker
 
     /// <summary>The answer to speak, or <see cref="DroneReply.None"/> once it is <paramref name="seconds"/> old.</summary>
     public DroneReply Speaking(float seconds) => _age <= seconds ? _reply : DroneReply.None;
+
+    /// <summary>The newest answer however old (<see cref="DroneReply.None"/> before the first), for the popup's last-answer line.</summary>
+    public DroneReply Latest => _reply;
 }

@@ -184,6 +184,12 @@ public struct SavedHull
     /// <see cref="WorldSnapshot.BayRebuild"/>, and how many: every bay of its design, or none for a wreck.
     /// </summary>
     public int BayStart, Bays;
+
+    /// <summary>
+    /// Whether the hull's drones fetch loose containers on their own. Only a hull with bays may have it on; a load that
+    /// says otherwise is refused.
+    /// </summary>
+    public bool AutoPickup;
 }
 
 /// <summary>

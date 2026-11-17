@@ -242,6 +242,16 @@ internal sealed class AppOptions
     /// drones are sent, through the fetch key's bridge call, for the first loose container.
     /// </summary>
     public float? DroneFetchSeconds { get; set; }
+
+    /// <summary>
+    /// Scripted runs only (<c>--drone-autopickup</c>): seconds after the splash at which auto pickup is turned on for the
+    /// flown hull, through the popup checkbox's bridge call. With <c>--open cargo --jettison</c> the drones then fetch the
+    /// jettisoned container on their own.
+    /// </summary>
+    public float? DroneAutoPickupSeconds { get; set; }
+
+    /// <summary>Scripted runs only (<c>--drone-popup</c>): opens the drone settings popup over the DRONES chip once the chip is there.</summary>
+    public bool DronePopup { get; set; }
     public bool CargoSample { get; set; }
     /// <summary>Capture only: <c>--cargo-wide</c> loads a rack with one container of each resource and jettisons several.</summary>
     public bool CargoWide { get; set; }
@@ -1189,7 +1199,7 @@ internal sealed class App : IDisposable
         _window.SetFullscreen(monitor, new int2(mode.Width, mode.Height), mode.RefreshRate);
     }
 
-    private bool _dronesLaunched, _dronesRecalled, _benchmarkSawDrones, _dronesHome, _droneFetchSent, _benchmarkSawFetch;
+    private bool _dronesLaunched, _dronesRecalled, _benchmarkSawDrones, _dronesHome, _droneFetchSent, _benchmarkSawFetch, _droneAutoSent, _dronePopupRequested;
     private int _dronesOut;
 
     /// <summary>
@@ -1269,6 +1279,17 @@ internal sealed class App : IDisposable
         {
             _droneFetchSent = true;
             Session.Client.Input.FetchContainer(snapshot.Hulls[snapshot.OwnHull].Id, snapshot.FreeContainers[0].Id);
+        }
+        if (_options.DroneAutoPickupSeconds is { } autoAt && !_droneAutoSent && _sinceSplash >= autoAt && Session is not null
+            && snapshot is { OwnHull: >= 0 } && DroneUi.Present(snapshot.Bays, snapshot.Hulls[snapshot.OwnHull].Id))
+        {
+            _droneAutoSent = true;
+            Session.Client.Input.SetDroneAutoPickup(snapshot.Hulls[snapshot.OwnHull].Id, true);
+        }
+        if (_options.DronePopup && !_dronePopupRequested && _viewOpened && _sinceSplash >= 1f)
+        {
+            _dronePopupRequested = true;
+            _screens.RequestDronePopup();
         }
         if (_editDroneView && Session is not null && snapshot is { OwnHull: >= 0, OwnIsDrone: true })
         {

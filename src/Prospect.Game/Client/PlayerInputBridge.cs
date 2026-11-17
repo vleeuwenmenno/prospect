@@ -259,6 +259,35 @@ public sealed class PlayerInputBridge
         }
     }
 
+    private bool _hasDroneSettings;
+    private DroneSettingsMessage _droneSettings;
+
+    /// <summary>
+    /// Asks the server to turn auto pickup on or off for <paramref name="hull"/>: with it on, the hull's drones fetch
+    /// loose containers the owner may take on their own. The server's answer is <see cref="BayView.AutoPickup"/> in
+    /// <see cref="SessionSnapshot.Bays"/>. A newer setting replaces one not yet sent.
+    /// </summary>
+    public void SetDroneAutoPickup(uint hull, bool on)
+    {
+        if (hull == 0) return;
+        lock (_lock)
+        {
+            _droneSettings = new DroneSettingsMessage(hull, on);
+            _hasDroneSettings = true;
+        }
+    }
+
+    internal bool ConsumeDroneSettings(out DroneSettingsMessage message)
+    {
+        lock (_lock)
+        {
+            message = _droneSettings;
+            var pending = _hasDroneSettings;
+            _hasDroneSettings = false;
+            return pending;
+        }
+    }
+
     internal bool ConsumeDroneCommand(out DroneCommandMessage command)
     {
         lock (_lock)

@@ -299,7 +299,22 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `tools/prepare_drone_fetch_capture.py` then `--open cargo --jettison 5 --drone-fetch 12` (jettisoned at 6 m/s, out of
   beam range before its pickup delay ends; delivered about 42 s in); `make bench` runs it for 50 s.
   Interface: `LaunchDrones` (`.`), `RecallDrones` (`,`), the DRONES chip in the module strip (`DroneUi`,
-  `DroneTracker`). Tests: `DroneBayTests`, `BayModelTests`. Capture: `tools/prepare_drone_capture.py` then
+  `DroneTracker`). Tests: `DroneBayTests`, `BayModelTests`.
+  Drone settings popup and auto pickup: a click on the chip toggles `DronePopup` (font-free state: open, `Follow` the
+  hull, `Press` outside closes, never the chip's own press) and `DrawDronePopup` (`Screens.Modules.cs`, fixed height,
+  an ImGui window placed over the chip; Escape is `BackStep.DronePopup`). Its button is `DronePopup.LaunchOrRecall`
+  (the keys' own calls); its checkbox is `DronePopup.ToggleAutoPickup`, which asks `PlayerInputBridge.SetDroneAutoPickup`
+  and reads the answer back from `BayView.AutoPickup`, never a copy of its own. Server: per hull, `BayPage.AutoPickup`
+  (carried by `CarryBays`, saved: codec 19, `SavedHull.AutoPickup`, refused on a hull with no bays), set by
+  `ReceiveDroneSettings` (protocol 67, message 43, own `DroneSettingsNext` rate limit, owner's live non-drone
+  non-wreck hull with bays only). `ServerHost.TickAutoPickup` (`ServerDroneAuto.cs`) looks at `autoPickupWindow`
+  containers a tick from a rotating cursor and starts a fetch through `StartFetch`, the one body of the manual `/`
+  fetch: never a second path. Skips containers a tractor or drones have, the owner may not take (`MayPickup`), out of
+  range or sensor sight (`Covered`), reached by the hull's own beam (`TractorSimulation.Reaches`), or refused lately
+  (four-slot `AutoSkip`, `autoPickupRetrySeconds`). One fetch a hull at a time; a manual recall pauses it
+  (`autoPickupPauseSeconds`), a manual launch ends the pause. No ore box until R4 (no ore chunks, no stubs). Tests:
+  `DroneFetchTests` (auto pickup), `DronePopupTests`. Capture: `tools/prepare_drone_fetch_capture.py`, then
+  `--open cargo --jettison 5 --drone-autopickup 3 --drone-popup` (scripted runs only). Capture: `tools/prepare_drone_capture.py` then
   `--open drones` (launch 3 at 1.5 s, recall at `--drone-recall`, default 14 s) and `--open edit-bay` (a bay's ghost
   on a top face, hatch up); `make bench` runs `--open drones` on the prepared copy.
 - **Debug: add container (temporary, local games only):** `EditorRequestKind.AddContainer` asks for size/resource in
