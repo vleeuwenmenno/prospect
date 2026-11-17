@@ -199,6 +199,7 @@ internal sealed partial class ScreenHost
 
             DrawLocatorVision(draw, snapshot, world, 1f, world.CommandBlend > 0.5f);
             DrawScanHologram(draw, snapshot, world, 1f);
+            DrawOreMarkers(draw, snapshot, world);
             if (pilot > 0.01f)
                 DrawFlightReadouts(draw, snapshot, world, pilot);
             if (world.CommandBlend > 0.01f)
@@ -210,6 +211,7 @@ internal sealed partial class ScreenHost
             DrawFuelCallout(draw, snapshot, world);
             DrawCargoCallout(draw, snapshot, world);
             DrawContainerHover(snapshot, world);
+            DrawOreChunkHover(snapshot, world);
             DrawScanStrip(draw, snapshot, world, 1f, WorldInputEnabled && (world.Mode == ViewMode.Command || (world.Mode == ViewMode.Pilot && _app.PointerReleased)));
             DrawModuleStrip(draw, snapshot, world, 1f);
             DrawActionGroups(snapshot, world);

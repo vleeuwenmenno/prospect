@@ -90,6 +90,8 @@ internal static class Program
                                   fire button from --fire-at <sec> after the splash (default 3); --open laser puts the
                                   hull 25 m over a rock nose first and fires group 1, laser-command watches from the
                                   command camera (--rock-scrape-distance <m>, default 40)
+          --hover-chunk           With --open laser or laser-command and --capture or --bench: rest the pointer on the
+                                  first ore chunk in view, so its tooltip shows
           --align-at <sec>        With --capture or --bench, pilot view: click the align button for a moment this many
                                  seconds after the splash (use with --look <degrees>)
          --zoom <0.5..8>         With --capture or --bench, pilot view: the camera's distance, as the scroll wheel sets it
@@ -488,6 +490,9 @@ internal static class Program
                     options.HoverContainer = args[i + 1];
                     i++;
                     break;
+                case "--hover-chunk":
+                    options.HoverChunk = true;
+                    break;
                 case "--cargo-sample":
                     options.CargoSample = true;
                     break;
@@ -676,6 +681,10 @@ internal static class Program
         if ((options.CargoWide || options.HoverContainer is not null) && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
             || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null || options.OpenView is not ("cargo" or "edit-cargo")))
             return Fail("--cargo-wide and --hover-container require --capture or --bench and --open cargo or edit-cargo in an unsaved private local game.");
+
+        if (options.HoverChunk && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
+            || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null || options.OpenView is not ("laser" or "laser-command")))
+            return Fail("--hover-chunk requires --capture or --bench and --open laser or laser-command in an unsaved private local game.");
 
         if (options.CargoSample && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
             || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null || options.OpenView != "cargo-window"))
