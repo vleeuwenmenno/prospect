@@ -136,6 +136,8 @@ Built: the popup, "Pick up cargo" and "Pick up ores" (R4a).
 - A laser heats while it fires and cools while it does not. At full heat it shuts down until it has cooled to a
   mark set in content. Heat is per laser, so two groups can take turns.
 - A cold gas cloud cools: inside one, lasers and the boost drive heat slower and cool faster, by content figures.
+- Lasers that run the battery empty shut off and wait. They fire again once the battery has refilled to a floor set
+  in content (20 %), as boost waits for its own. See "Lasers wait for power".
 - Laser heat is the laser's own. Rock heat (cracking, I2) is a different thing and is still to build.
 
 ### Drone scans
@@ -434,6 +436,25 @@ How to work on it is in `AGENTS.md`, "Mining lasers, action groups and ore chunk
 - The server sends the flown hull's laser heat in every snapshot's header. No other hull's is sent.
 - The action group strip shows a heat bar under each group and marks a group whose lasers are all shut down.
 
+### Lasers wait for power
+
+- Decided: an empty battery shuts the lasers off, and they wait for it. No flicker on the generator's trickle.
+- The wait starts in the tick lasers were asked to fire and the hull could not pay for them.
+- While it lasts no laser of the hull fires and none asks for power, so the battery fills as fast as it can.
+- It ends when the battery holds `laserResumeBattery` of its capacity (0.2 in `blocks.json`, rules).
+- The wait is the whole hull's, one flag: every group waits, whichever group ran the battery empty.
+
+How it is built:
+
+- One rule, in `LaserHeat.Step`, for the server's hulls and for the hull a client predicts.
+- The server's plan and the client's prediction ask `LaserHeat.MayFire` before they prepare any laser.
+- The server tells the pilot in the snapshot header: one bit of its flags byte, no byte added (protocol 75).
+- The action group cell says "NO POWER" and shows the battery's way to the floor. The tooltip gives both figures.
+- Not saved, like heat. A repair or an edit keeps the wait while the ship still has a laser.
+
+On the Prospector: the wait is for 48 MJ, about 9 s at rest, and buys about 7 s of cutting. While its tractor
+beams lead chunks in they take most of the spare power, and the first wait is about 30 s.
+
 Cold gas clouds:
 
 - A hull whose centre is inside a cold cloud heats slower and cools faster: boost heat and laser heat alike.
@@ -462,6 +483,7 @@ Limits:
 | Cut radius, rate | 0.5 m, 0.25 m deep a second |
 | Power while firing | 6 MW, paid all or nothing after the tractors |
 | Heat | 20 s of firing to overheat, 15 s to cool from full, fires again at 30 % |
+| Empty battery | lasers wait until it holds 20 % (`laserResumeBattery`) |
 | Cold cloud | heat builds at half the rate and is shed twice as fast |
 | Scrape | 0.25 m bite, at least 0.15 s apart; a new stroke after 0.5 s off the rock |
 | Chunk | 300 kg of one ore; thrown out from the rock's centre at 2 m/s |
@@ -484,10 +506,9 @@ Limits:
 - The Prospector's two lasers take about 7 MW more than its generators spare: its 240 MJ battery lasts about 35 s
   of cutting, less with the tractor beams pulling chunks. Heat stops a burn after 20 s; the battery sets the pace
   of a long cut.
-- Power is paid all or nothing each tick: a laser on a flat battery fires on the ticks the generator's trickle pays
-  for, and a beam cut short loses the cut it had not yet made into a scrape. With 6 MW lasers the Prospector gets
-  there in about half a minute: fire held on a flat battery flickers, cuts nothing and keeps the battery flat
-  (see "Open").
+- Power is paid all or nothing each tick, and a beam cut short loses the cut it had not yet made into a scrape.
+  With 6 MW lasers the Prospector's battery is empty in about half a minute; the lasers then wait for it
+  ("Lasers wait for power").
 - Chunk contacts generate one sector at a time, as loose containers do: chunks spread over two sectors take turns.
 - Group changes are not mirrored in the editor (placing is).
 - The F10 debug scrape stays: `make bench` and the `--open rock-scrape` captures still use it.
@@ -538,7 +559,7 @@ allocation.
 - A chunk is taken whole or not at all. A chunk heavier than the bins' room, or than a beam's limit (100 t), is
   never taken. A lean chunk is large: 300 kg of ore at a 5 % grade is 6 t.
 - The bins fill in bursts on the Prospector: two lasers free about 15 t in the first minute on a lean rock. Heat
-  stops a burn after 20 s and the battery is flat after about 35 s of cutting.
+  stops a burn after 20 s and the battery is empty after about 35 s of cutting; the lasers then wait for it.
 - The room check counts every chunk the ship's beams hold against the ore asked for, whatever ore they are. It can
   refuse a chunk that would have fitted. A beam can also take a chunk and let it go again, when a chunk of another
   ore reached the last empty bin first.
@@ -556,8 +577,6 @@ allocation.
   `--open rock-interior` captures.
 - The heat game's figures (rock heat, I2): heat rate, cooling, the window, what overheating does. Laser heat is
   built and is not this.
-- Whether lasers should cut out at an empty battery and wait for the battery to pass a floor, as boost does.
-  Today fire held on a flat battery flickers and cuts nothing.
 - Where markers fade out, and whether the command view shows chunks as icons too.
 - Automated mining by NPCs and captains: out of scope now; only the order model above is designed for it.
 

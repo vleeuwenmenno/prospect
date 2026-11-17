@@ -85,12 +85,14 @@ internal sealed partial class ClientWorld
     private bool BeamsFresh(long clientTick) => clientTick - _beamReceivedTick <= BeamHoldTicks;
 
     // The own hull's lasers for this predicted step: every own beam the server last reported fires, at its laser's
-    // power, unless prediction has that laser overheated already, as the server's plan leaves a shut-down laser out.
+    // power, unless prediction has that laser overheated already, as the server's plan leaves a shut-down laser out,
+    // or has the lasers waiting for the battery, when the plan leaves them all out.
     // The lasers that fire are what LaserHeat heats in the step; the others cool.
-    private float OwnLaserDemand(long clientTick, ulong locked, out ulong firing)
+    private float OwnLaserDemand(long clientTick, in LaserHeatState lasers, out ulong firing)
     {
         firing = 0;
-        if (!BeamsFresh(clientTick) || _ownHullId == 0) return 0;
+        if (!BeamsFresh(clientTick) || _ownHullId == 0 || !LaserHeat.MayFire(lasers)) return 0;
+        var locked = lasers.Locked;
         var design = OwnDesign;
         var count = LaserHeat.Count(design);
         var demand = 0f;

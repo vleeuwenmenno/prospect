@@ -189,6 +189,12 @@ public struct FlightParams
     /// </summary>
     public float BoostEnergyFloor;
 
+    /// <summary>
+    /// Megajoules the battery must hold again before mining lasers that ran it empty fire once more
+    /// (<see cref="LaserHeatState.AwaitingPower"/>), so they do not flicker on what the generator trickles in.
+    /// </summary>
+    public float LaserEnergyFloor;
+
     /// <summary>Minimum closing speed for visual shield contact feedback.</summary>
     public float ShieldContactSpeed;
 

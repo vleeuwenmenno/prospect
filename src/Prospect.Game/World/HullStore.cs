@@ -84,8 +84,9 @@ public struct HullInfo
     public float LaserDemand;
 
     /// <summary>
-    /// The heat of the hull's mining lasers and which of them are shut down by it, stepped with the hull by
-    /// <see cref="LaserHeat.Step"/>; and the lasers asked to fire in the step to come. Never saved.
+    /// The heat of the hull's mining lasers, which of them are shut down by it and whether they wait for the battery,
+    /// stepped with the hull by <see cref="LaserHeat.Step"/>; and the lasers asked to fire in the step to come.
+    /// Never saved.
     /// </summary>
     public LaserHeatState Lasers;
 

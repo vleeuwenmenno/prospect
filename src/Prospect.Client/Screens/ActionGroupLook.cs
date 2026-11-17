@@ -8,8 +8,8 @@ namespace Prospect.Client.Screens;
 
 /// <summary>
 /// How the interface shows action groups, from <c>content/visuals/action_groups.json</c>: the strip's cell, its
-/// colours for a group that is off, on, firing, cutting and overheated, its heat bar, the words of every part kind and
-/// the popup's figures.
+/// colours for a group that is off, on, firing, cutting, overheated and waiting for power, its heat bar, the words of
+/// every part kind and the popup's figures.
 /// Client data; nothing here decides what fires, which is the server's. Words are encoded to UTF-8 once, at load.
 /// </summary>
 internal sealed class ActionGroupLook
@@ -110,7 +110,30 @@ internal sealed class ActionGroupLook
     [JsonPropertyName("overheatedShortLabel")]
     public string OverheatedShortLabelFile { get; init; } = "";
 
-    private byte[] _overheated = [], _overheatedShort = [];
+    /// <summary>The accent of a cell whose lasers wait for the battery, and how strongly it is drawn.</summary>
+    public uint NoPowerRgb { get; private set; }
+
+    public float NoPowerAlpha { get; init; }
+
+    [JsonPropertyName("noPowerColor")]
+    public string NoPowerColorFile { get; init; } = "";
+
+    /// <summary>What a cell says in place of its parts while its lasers wait for the battery, and the shorter word for a narrow cell.</summary>
+    [JsonPropertyName("noPowerLabel")]
+    public string NoPowerLabelFile { get; init; } = "";
+
+    [JsonPropertyName("noPowerShortLabel")]
+    public string NoPowerShortLabelFile { get; init; } = "";
+
+    private byte[] _overheated = [], _overheatedShort = [], _noPower = [], _noPowerShort = [];
+
+    /// <summary>The word of a cell that waits for power, encoded.</summary>
+    [JsonIgnore]
+    public ReadOnlySpan<byte> NoPowerLabel => _noPower;
+
+    /// <summary>The shorter word of a cell that waits for power, encoded.</summary>
+    [JsonIgnore]
+    public ReadOnlySpan<byte> NoPowerShortLabel => _noPowerShort;
 
     /// <summary>The overheated cell's word, encoded.</summary>
     [JsonIgnore]
@@ -180,6 +203,11 @@ internal sealed class ActionGroupLook
             throw new InvalidDataException($"{path}: heatBarPixels is 1 to 8, heatTrackAlpha and overheatedAlpha 0 to 1, heatWarmFrom above 0, heatHotFrom above it and below 1, tipWidth 240 to 600");
         if (string.IsNullOrWhiteSpace(OverheatedLabelFile) || OverheatedLabelFile.Length > 12 || string.IsNullOrWhiteSpace(OverheatedShortLabelFile) || OverheatedShortLabelFile.Length > 6)
             throw new InvalidDataException($"{path}: overheatedLabel is 1 to 12 characters and overheatedShortLabel 1 to 6");
+        if (!Unit(NoPowerAlpha) || string.IsNullOrWhiteSpace(NoPowerLabelFile) || NoPowerLabelFile.Length > 12 || string.IsNullOrWhiteSpace(NoPowerShortLabelFile) || NoPowerShortLabelFile.Length > 6)
+            throw new InvalidDataException($"{path}: noPowerAlpha is 0 to 1, noPowerLabel 1 to 12 characters and noPowerShortLabel 1 to 6");
+        _noPower = Encoding.UTF8.GetBytes(NoPowerLabelFile);
+        _noPowerShort = Encoding.UTF8.GetBytes(NoPowerShortLabelFile);
+        NoPowerRgb = Rgb(path, "noPower", NoPowerColorFile);
         _overheated = Encoding.UTF8.GetBytes(OverheatedLabelFile);
         _overheatedShort = Encoding.UTF8.GetBytes(OverheatedShortLabelFile);
         HeatCoolRgb = Rgb(path, "heatCool", HeatCoolColorFile);

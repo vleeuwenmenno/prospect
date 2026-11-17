@@ -8,6 +8,7 @@
     "boostPowerMultiplier": 4.5,
     "boostFuelMultiplier": 4.5,
     "boostEnergyFloor": 0.05,
+    "laserResumeBattery": 0.2,
     "boostHeatSeconds": 6,
     "coolSeconds": 9,
     "coldCloudHeating": 0.5,

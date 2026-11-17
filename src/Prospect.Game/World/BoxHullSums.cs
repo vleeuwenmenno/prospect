@@ -631,6 +631,7 @@ public sealed class BoxHullSums
             BoostPowerMultiplier = rules.BoostPowerMultiplier,
             EnergyStorage = storage,
             BoostEnergyFloor = rules.BoostEnergyFloor * storage,
+            LaserEnergyFloor = rules.LaserResumeBattery * storage,
             ShieldContactSpeed = rules.ShieldContactSpeed,
             ShieldImpactEnergyFraction = rules.ShieldImpactEnergyFraction,
             CollisionSafeSpeed = rules.CollisionSafeSpeed,

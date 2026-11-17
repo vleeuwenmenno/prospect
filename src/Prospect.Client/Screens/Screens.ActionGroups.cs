@@ -17,6 +17,7 @@ internal sealed partial class ScreenHost
     private bool _actionGroupsOpen;
     private bool _tipSawActionGroup;
     private bool _tipSawOverheat;
+    private bool _tipSawNoPower;
 
     /// <summary>Whether the popup that changes a laser's group is open; Escape closes it before it backs out of anything else.</summary>
     internal bool ActionGroupsOpen => _actionGroupsOpen;

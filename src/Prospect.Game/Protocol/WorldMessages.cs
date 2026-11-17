@@ -351,6 +351,9 @@ public struct SnapshotHeader
     /// lasers, two bytes of heat for each and a bit for each that is shut down.
     /// </summary>
     public const int MaxWireSize = 25 + 1 + TankFuel.MaxTanks * sizeof(float) + 1 + LaserHeat.MaxLasers * sizeof(ushort) + LaserHeat.MaxLasers / 8;
+
+    // The bits of the header's one byte of flags.
+    private const byte DroneBit = 1, AwaitingPowerBit = 2;
     public long ServerTick;
     public uint ControlEpoch;
     public ushort AppliedOrderId;
@@ -385,13 +388,19 @@ public struct SnapshotHeader
     /// <summary>
     /// How many lasers the design of <see cref="OwnHull"/> has heat for, at most <see cref="LaserHeat.MaxLasers"/>,
     /// each one's heat in sixteen bits (<see cref="OwnLaserHeat"/>, in the order of <see cref="HullDesign.Lasers"/>),
-    /// and a bit for each that overheated and is shut down. The receiver steps its own hull's laser heat on with the
+    /// and a bit for each that overheated and is shut down, with <see cref="OwnLasersAwaitingPower"/>. The receiver steps its own hull's laser heat on with the
     /// server's rule (<see cref="LaserHeat.Step"/>), so it is sent the figures of the same tick as the hull's state.
     /// No other hull's laser heat is sent.
     /// </summary>
     public byte OwnLaserCount;
     public LaserHeatWire OwnLaserHeat;
     public ulong OwnLasersLocked;
+
+    /// <summary>
+    /// True while the lasers of <see cref="OwnHull"/> wait for its battery (<see cref="LaserHeatState.AwaitingPower"/>):
+    /// the second bit of the byte that says the hull is a drone, so the header is no longer for carrying it.
+    /// </summary>
+    public bool OwnLasersAwaitingPower;
 
     /// <summary>Room for the heat of each laser of one hull as it travels: 0 is cool, 65535 overheated.</summary>
     [System.Runtime.CompilerServices.InlineArray(LaserHeat.MaxLasers)]
@@ -405,12 +414,13 @@ public struct SnapshotHeader
         for (var part = 0; part < count; part++)
             OwnLaserHeat[part] = (ushort)MathF.Round(Math.Clamp(lasers.Heat[part], 0f, 1f) * ushort.MaxValue);
         OwnLasersLocked = count == LaserHeat.MaxLasers ? lasers.Locked : lasers.Locked & ((1UL << count) - 1);
+        OwnLasersAwaitingPower = lasers.AwaitingPower && count > 0;
     }
 
     /// <summary>The lasers' heat as the receiver keeps it; nothing is asked to fire.</summary>
     public readonly LaserHeatState Lasers()
     {
-        var lasers = new LaserHeatState { Locked = OwnLasersLocked };
+        var lasers = new LaserHeatState { Locked = OwnLasersLocked, AwaitingPower = OwnLasersAwaitingPower };
         for (var part = 0; part < OwnLaserCount; part++)
             lasers.Heat[part] = OwnLaserHeat[part] / (float)ushort.MaxValue;
         return lasers;
@@ -428,7 +438,7 @@ public struct SnapshotHeader
         writer.WriteUInt32(AckedInput);
         writer.WriteUInt32(OwnHull);
         writer.WriteByte(HullCount);
-        writer.WriteByte(OwnIsDrone ? (byte)1 : (byte)0);
+        writer.WriteByte((byte)((OwnIsDrone ? DroneBit : 0) | (OwnLasersAwaitingPower ? AwaitingPowerBit : 0)));
         writer.WriteByte(OwnTankCount);
         for (var i = 0; i < OwnTankCount; i++)
             writer.WriteSingle(OwnTanks[i]);
@@ -449,7 +459,8 @@ public struct SnapshotHeader
         header.OwnHull = reader.ReadUInt32();
         header.HullCount = reader.ReadByte();
         var flags = reader.ReadByte();
-        header.OwnIsDrone = flags == 1;
+        header.OwnIsDrone = (flags & DroneBit) != 0;
+        header.OwnLasersAwaitingPower = (flags & AwaitingPowerBit) != 0;
         header.OwnTankCount = reader.ReadByte();
 
         // Each figure a number that is not negative; whether it fits its tank is for whoever knows the design.
@@ -468,9 +479,10 @@ public struct SnapshotHeader
             header.OwnLaserHeat[i] = reader.ReadUInt16();
         for (var i = 0; i < (header.OwnLaserCount + 7) / 8; i++)
             header.OwnLasersLocked |= (ulong)reader.ReadByte() << i * 8;
-        var lasers = header.OwnLaserCount == LaserHeat.MaxLasers || header.OwnLasersLocked >> header.OwnLaserCount == 0;
+        var lasers = (header.OwnLaserCount == LaserHeat.MaxLasers || header.OwnLasersLocked >> header.OwnLaserCount == 0)
+            && (header.OwnLaserCount > 0 || !header.OwnLasersAwaitingPower);
 
-        return reader.IsValid && flags <= 1 && header.ServerTick >= 0 && header.ServerTick <= long.MaxValue - 256 && tanks && lasers;
+        return reader.IsValid && flags <= (DroneBit | AwaitingPowerBit) && header.ServerTick >= 0 && header.ServerTick <= long.MaxValue - 256 && tanks && lasers;
     }
 }
 

@@ -282,8 +282,9 @@ public sealed class HullField
         info.Power = body.Power;
         info.Fuel = body.Fuel;
 
-        // Laser heat follows what the flight step paid for: the lasers asked to fire heat, the others cool.
-        LaserHeat.Step(ref info.Lasers, body.Design, info.Power.Laser > 0f, info.Cold, _hulls.Flight(index), HullSim.Dt);
+        // Laser heat follows what the flight step paid for: the lasers asked to fire heat, the others cool. Lasers
+        // the battery could not pay wait until it holds its floor again.
+        LaserHeat.Step(ref info.Lasers, body.Design, info.Power.Laser > 0f, own.Energy, info.Cold, _hulls.Flight(index), HullSim.Dt);
         if (body.Damaged)
             info.DamageTick = (long)tick;
         Refit(index);

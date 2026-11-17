@@ -156,6 +156,12 @@ public sealed record FlightRules
 
     /// <summary>Share of the battery's capacity it must hold before boost will engage, from 0 to 1.</summary>
     public required float BoostEnergyFloor { get; init; }
+
+    /// <summary>
+    /// Share of the battery's capacity it must hold again before mining lasers that ran it empty fire once more, from
+    /// 0 to 1. Zero without the figure: lasers then wait only for a tick the battery can pay.
+    /// </summary>
+    public float LaserResumeBattery { get; init; }
     public required float BoostHeatSeconds { get; init; }
     public required float CoolSeconds { get; init; }
 
@@ -329,6 +335,7 @@ public sealed class BlockCatalog
             BoostPowerMultiplier = r.GetProperty("boostPowerMultiplier"u8).GetSingle(),
             BoostFuelMultiplier = r.GetProperty("boostFuelMultiplier"u8).GetSingle(),
             BoostEnergyFloor = Math.Clamp(r.GetProperty("boostEnergyFloor"u8).GetSingle(), 0f, 1f),
+            LaserResumeBattery = r.TryGetProperty("laserResumeBattery"u8, out var laserResume) ? laserResume.GetSingle() : 0f,
             BoostHeatSeconds = r.GetProperty("boostHeatSeconds"u8).GetSingle(),
             CoolSeconds = r.GetProperty("coolSeconds"u8).GetSingle(),
             ColdCloudHeating = r.TryGetProperty("coldCloudHeating"u8, out var coldHeating) ? coldHeating.GetSingle() : 1f,
@@ -361,6 +368,8 @@ public sealed class BlockCatalog
         if (!(rules.ColdCloudHeating > 0f && rules.ColdCloudHeating <= 1f) || !(rules.ColdCloudCooling >= 1f && rules.ColdCloudCooling <= 100f)
             || !(rules.ColdCloudCheckSeconds >= 1f / 60f && rules.ColdCloudCheckSeconds <= 10f))
             throw new InvalidDataException($"{path}: coldCloudHeating is above 0 and at most 1, coldCloudCooling 1 to 100, coldCloudCheckSeconds a sixtieth of a second to 10.");
+        if (!(rules.LaserResumeBattery >= 0f && rules.LaserResumeBattery <= 1f))
+            throw new InvalidDataException($"{path}: laserResumeBattery is a share of the battery, 0 to 1.");
         if (!float.IsFinite(rules.DentThreshold) || rules.DentThreshold <= 0 || !float.IsFinite(rules.DentFullDamage) || rules.DentFullDamage < rules.DentThreshold
             || !float.IsFinite(rules.DentMaxDepth) || rules.DentMaxDepth <= 0 || rules.DentMaxDepth > 0.5f)
             throw new InvalidDataException("Invalid visual dent limits.");

@@ -87,7 +87,10 @@ first rock its beam meets, seen by everyone who has the rock in view and saved w
 it fires: after 20 s it has overheated and shuts down until it has cooled to 30 %, about 10 s (figures per laser in
 `blocks.json`: `heatSeconds`, `coolSeconds`, `unlockHeat`). Heat is per laser, so lasers in two groups can take
 turns. The Prospector's two lasers take about 7 MW more than its generators spare, so its battery lasts about 35 s
-of cutting, less while the tractor beams pull chunks. Laser heat is not saved: a loaded world's lasers are cool. What it cuts away
+of cutting, less while the tractor beams pull chunks. Lasers that run the battery empty shut off and wait: they fire
+again once it has refilled to 20 % (`laserResumeBattery` in `content/blocks/blocks.json`), about 9 s on the
+Prospector at rest, longer while its tractor beams draw. Laser heat and that wait are not saved: a loaded world's
+lasers are cool and ready. What it cuts away
 yields ore from the rock's interior; every 300 kg of one ore breaks off as a loose ore chunk that drifts and bounces
 off rocks and ships. Each chunk in sensor cover wears a diamond in its ore's colour, fading with distance (chunks off
 screen show as small arrows at the window's edge, with how many lie that way); a shown pointer over one shows its ore,
@@ -722,7 +725,9 @@ button fires every group that is on instead of aligning the ship; with all off i
 pointer shown (`Shift`, interface mode or the command view), clicking the strip opens a popup that changes which
 group each laser fires with, without a rebuild. A bar along the foot of each cell shows the heat of the group's
 hottest laser (cyan, amber, then red); a group whose lasers have all overheated turns red, says "OVERHEAT" and
-marks the heat it fires again at. The cell's tooltip and the popup give each laser's heat.
+marks the heat it fires again at. While the lasers wait for an emptied battery the cell turns violet, says
+"NO POWER" and its bar shows the battery on its way to where they fire again. The cell's tooltip and the popup give
+each laser's heat, and the tooltip the battery and the level the lasers wait for.
 
 A ship near the reticle is bracketed; the middle mouse button targets it and shows its shield and hull. A target
 out of view, behind you, or under a panel, the jump strip or the console, shows as an arrow at the edge of the clear

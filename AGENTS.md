@@ -175,7 +175,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `AlignToView` button fires them and does not align (the align lock still aligns); the intent goes through
   `PlayerInputBridge.AimLasers` when it changes (`LaserAimMessage` 44: groups, camera offset, unit ray).
   The server: `PlanLasers` before the hull round (flown hull, owner, no transit, part's block there, group on,
-  not overheated, `LaserSpec.WithinGimbal`, own hull clear by `TractorReach.Clear`; demand into `HullInfo.LaserDemand`), the flight
+  not overheated, the hull's lasers not waiting for power (`LaserHeat.MayFire`), `LaserSpec.WithinGimbal`, own hull clear by `TractorReach.Clear`; demand into `HullInfo.LaserDemand`), the flight
   step bills `PowerFlow.Laser` all or nothing after the tractors, `FireLasers` after the round fires from the hull's
   new pose toward the aim found before (`LaserAim`, `RockRay.First`) and cuts through `ScrapeRock` only, strokes
   chained so the wire sends 9 B a scrape. Ore: `MiningRules.ScrapeKg` shared out by `RockInterior.Sample` at the
@@ -210,12 +210,35 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   - Interface: `ActionGroupCell.Heat` / `Locked` / `Overheated` / `UnlockHeat`, the bar and the red OVERHEAT cell in
     `ActionGroupPanel.DrawCell`, per-laser heat in `DrawTip` and the section rows. `ConsoleTip.Heat` shows the rates
     that apply and "COLD CLOUD: COOLING ×N"; `DrawTip` shows the same line. Tip `laserOverheated`.
-  - Tests: `LaserHeatTests` (rule, cold, content, header, two session tests), `ActionGroupStripTests`.
+  - Tests: `LaserHeatTests` (rule, cold, content, header, three session tests), `ActionGroupStripTests`.
   - Capture: `--open laser` (each capture prints the hottest laser, how many are shut down, boost heat and whether
     the hull is in a cold cloud; overheats about 23 s in, fires again about 34 s in). `--heat-tip boost|<digit>`
     shows the boost heat tooltip or that group's tooltip. `--cold-cloud` (unsaved private local game) sets the hull
     in the middle of the nearest cold cloud at 2.5 s: `--sector 43,0,38 --cold-cloud --fire-group 1 --heat-tip 1`,
     or `--thrust forward,boost --thrust-at 4 --heat-tip boost`.
+- **Lasers wait for power:** lasers that run the battery empty shut off and fire again once it has refilled to a floor.
+  - Decided by the user: as boost waits. Without it, fire held on a flat battery flickered on the generator's trickle.
+  - State is `LaserHeatState.AwaitingPower` (one flag a hull, in `HullInfo.Lasers`). The rule is in `LaserHeat.Step`:
+    a step in which lasers were asked (`Firing` not zero) and not paid (`PowerFlow.Laser` zero) sets it; the first
+    step that ends with `HullState.Energy` at `FlightParams.LaserEnergyFloor` or above clears it. Never set or clear
+    it elsewhere.
+  - Whoever prepares a hull's lasers asks `LaserHeat.MayFire` and leaves every laser out while it waits: the
+    server's `PlanLasers` (no beam, no demand) and the client's `OwnLaserDemand`. A new caller must ask it too.
+  - The floor is content: `rules.laserResumeBattery` in `blocks.json` (0.2, a share of the battery, 0 to 1;
+    `FlightRules.LaserResumeBattery`). A file without it has no floor. `ContentIdentity.EvaluatorVersion` is 23.
+  - Wire: protocol 75. Bit 1 of the snapshot header's flags byte (`SnapshotHeader.OwnLasersAwaitingPower`; bit 0 is
+    the drone flag). No byte added. A header that sets it for a hull with no laser is refused.
+  - Not saved, like heat. `LaserHeat.Carry` keeps the wait through a repair or an edit while the hull has a laser.
+  - Interface: `ActionGroupCell.AwaitingPower` / `NoPower` / `Battery` / `ResumeBattery` / `PowerProgress`, read by
+    `ActionGroupStrip.AwaitsPower` from `SessionSnapshot.LaserHeat`, `Flight` and the own hull's energy. The cell
+    says "NO POWER" and its foot bar shows the battery's way to the floor (in the heat bar's place); OVERHEAT comes
+    first. `DrawTip` adds "BATTERY n %   LASERS FIRE AGAIN AT n %"; the section rows say it too. Figures:
+    `noPowerColor`, `noPowerAlpha`, `noPowerLabel`, `noPowerShortLabel` in `action_groups.json`. Tip `laserNoPower`.
+  - Tests: `LaserHeatTests` (rule, field, carry, content, header flag, a session test in which server and
+    predicting client agree through the whole cycle), `ActionGroupStripTests`, `DefaultShipTests`.
+  - Capture: `--open laser` or `--open ore` (each capture prints "waiting for power" and the battery). The battery
+    is empty about 36 s in, the lasers fire again about 66 s in (the tractor beams take most of the spare power while
+    they lead chunks in) and wait again about 71 s in. `--heat-tip 1` shows the tooltip.
 - **Ore chunk marks (R4, client only):** no wire or save change. `WorldView.UpdateOreMarkers` (`WorldView.OreMarkers.cs`, end
   of `Update`) places every chunk in `OreChunkVisuals` once a frame into a fixed `OreMarker` set, from the very pose
   `DrawOreChunks` draws the mesh at (`OreChunkVisuals.ShownTick`), so a mark sits on the chunk. Rules are font-free in
@@ -269,7 +292,8 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   - Tests: `OreCollectionTests`, `OreModelTests`, the ore test in `EditorSessionTests`, `DefaultShipTests`.
   - Capture: `--open ore` on the shipped build (the laser view; each capture prints chunks, chunks in a beam and what
     the bins hold; about 8.5 t at 40 s and 14.7 t at 60 s. The capture holds fire, so heat stops the lasers from
-    23 s to 34 s and the battery is flat from about 36 s: nothing more is cut after that). `--ore-window` (captures only, scratch `XDG_CONFIG_HOME`: a pinned window
+    23 s to 34 s and the battery is empty from about 36 s: the lasers wait for power until about 66 s, cut for about
+    5 s and wait again). `--ore-window` (captures only, scratch `XDG_CONFIG_HOME`: a pinned window
     is saved) pins the Ship window on its ORE section. Gaps in `docs/roadmap/drones-mining.md`, "R4 as built".
 - **Debug: scrape rock (temporary, local games only):** `MessageId.RockScrape` (42, `RockScrapeRequest`: rays in the
   rock's frame) through `PlayerInputBridge.DebugScrape`; `ServerHost.DebugScrape` checks `AllowDebugFill`, the
@@ -877,7 +901,8 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
     `PlayerInputBridge.SetActionGroup`. It shows the server's answer, never the click. The Ship window calls it too.
   - Tip: `actionGroupReady`, fired when the hull first has a group. Tests: `ActionGroupStripTests`, `FrameOrderTests`.
   - Heat: each cell has a bar for its hottest laser and turns red ("OVERHEAT") when all its lasers are shut down;
-    see "Laser heat and cold clouds". Figures are `heat*`, `overheated*`, `coldColor` and `tipWidth` in the look file.
+    see "Laser heat and cold clouds". A cell says "NO POWER" while the lasers wait for the battery; see "Lasers wait
+    for power". Figures are `heat*`, `overheated*`, `coldColor` and `tipWidth` in the look file.
   - Check with `--open action-groups` and `--open action-groups-popup` on the shipped ship (two lasers in group 1), at `"UiScale"` 1 and 2.
 - **A new action or key:** add it to `content/input/bindings.json` and to `content/input/controls.json` (tab, label,
   scope; a fixed mouse or chord row goes there too). Loading refuses an action the catalogue lacks. Read it through
@@ -931,7 +956,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   the `pod` of `fleet.json`), and no starting fleet. It carries every part a ship can take (FTL drives of one kind
   only: hyperspace), two mining lasers in group 1 among them, and an ore hopper on the stern deck (intake up, in
   view of both tractor beams) with four 1 x 1 x 2 ore bins under the keel. `DefaultShipTests` holds that, its tractor
-  reach, the hopper's intake, bay hatch and lasers (straight ahead within the gimbal and clear of the hull; both firing net -6.8 MW at rest, so the 240 MJ battery lasts about 35 s of cutting and a laser overheats after 20 s), and
+  reach, the hopper's intake, bay hatch and lasers (straight ahead within the gimbal and clear of the hull; both firing net -6.8 MW at rest, so the 240 MJ battery lasts about 35 s of cutting and a laser overheats after 20 s; emptied, the lasers wait for 48 MJ, about 9 s at rest, for about 7 s more), and
   prints its figures (`SHIP` lines); `PowerFlowTests`, `PropulsionTests` and `EditorPanelTests` (its one warning: braking with its ion parts
   overloads, as the drone's strafing does) hold its balance. Its spare power is pinned between 4.8 and 5.45 MW by the
   scan tests (a scan must turn the net flow negative), which is why it has twelve cells of gyros. Ship files are not

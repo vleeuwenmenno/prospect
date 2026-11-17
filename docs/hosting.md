@@ -932,7 +932,8 @@ Protocol 40 sizes: Editor at most 135 B (64 UTF-16 units for 32 Unicode scalars)
 
 Protocol 42 adds one flags byte to the snapshot header (25 B): bit 0 is set while the receiving client's own hull
 is its escape drone, also after the drone was edited into another design. Only a drone may ask for a new ship, so
-the client offers the New ship dialog only then (`SessionSnapshot.OwnIsDrone`). Other bits must be zero.
+the client offers the New ship dialog only then (`SessionSnapshot.OwnIsDrone`). Protocol 75 uses bit 1 ("Lasers
+wait for power" below). Other bits must be zero.
 
 ### Interface (decided)
 
@@ -1170,3 +1171,13 @@ Active module spending is shared with client prediction through `ModuleScanRules
   `heatSeconds`, `coolSeconds` and `unlockHeat`, and the rules' `coldCloudHeating`, `coldCloudCooling` and
   `coldCloudCheckSeconds`.
 - Not saved: no saved-state layout changed. A loaded world's lasers are cool.
+
+### Lasers wait for power (protocol 75)
+
+- Bit 1 of the snapshot header's flags byte is set while the flown hull's lasers wait for its battery. No byte added.
+- A header that sets it for a hull with no laser, or sets a bit above it, is refused.
+- The client steps the wait on with the server's rule (`LaserHeat.Step`); the next header replaces it.
+- Disclosure: only the flown hull's wait is sent. Another hull's is known by its beams stopping, nothing more.
+- Content identity: evaluator 23. The figure is `laserResumeBattery` in the rules of `blocks/blocks.json`, which
+  is hashed already.
+- Not saved: no saved-state layout changed. A loaded world's lasers wait for nothing.

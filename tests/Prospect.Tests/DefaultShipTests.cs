@@ -139,6 +139,15 @@ public sealed class DefaultShipTests(ITestOutputHelper output)
         Assert.Equal(draw, flow.Laser);
         Assert.Equal(net, flow.Net, 4);
         output.WriteLine($"SHIP lasers: {pod.Lasers.Length} in group 1, {draw:0} MW firing, net {net:0.0} MW at rest, battery {flight.EnergyStorage / -net:0} s, overheats in {burn:0} s, fires again after {rest:0.0} s");
+
+        // Lasers that ran the battery empty wait for a fifth of it: about ten seconds at rest, for a burst of about
+        // seven. A wait that is worth more cutting than the trickle it replaces, and short enough to sit out.
+        var floor = flight.LaserEnergyFloor;
+        var refill = floor / (flight.PowerGenerated - flight.IdlePower);
+        Assert.Equal(flight.EnergyStorage * 0.2f, floor, 3);
+        Assert.InRange(refill, 6f, 14f);
+        Assert.InRange(floor / -net, 5f, 10f);
+        output.WriteLine($"SHIP lasers out of power: wait for {floor:0} MJ of {flight.EnergyStorage:0} MJ, {refill:0.0} s at rest, then {floor / -net:0.0} s of cutting");
     }
 
     [Fact]

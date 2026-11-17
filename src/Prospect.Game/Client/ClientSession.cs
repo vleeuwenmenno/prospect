@@ -178,8 +178,8 @@ public sealed class SessionSnapshot(GameContent content)
 
     /// <summary>
     /// The heat of the flown hull's mining lasers (<see cref="LaserHeatHull"/>, its packed handle; zero for none):
-    /// each laser's heat and which are shut down, the server's figures stepped on by prediction with the server's
-    /// own rule (<see cref="Prospect.Game.World.LaserHeat"/>). No other hull's is known.
+    /// each laser's heat, which are shut down and whether they wait for the battery, the server's figures stepped on
+    /// by prediction with the server's own rule (<see cref="Prospect.Game.World.LaserHeat"/>). No other hull's is known.
     /// </summary>
     public LaserHeatState LaserHeat;
     public uint LaserHeatHull;
