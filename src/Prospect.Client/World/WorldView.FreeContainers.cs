@@ -24,11 +24,16 @@ internal sealed partial class WorldView
         foreach (var item in _freeVisuals.Items)
             if (item.Id == id)
             {
-                container = _freeVisuals.Pose(item, (_snapshot?.ServerTickPrecise ?? 0) + _frameAlpha);
+                container = ContainerPose(item);
                 return true;
             }
         container = default; return false;
     }
+    /// <summary>The one pose a loose container is drawn, picked, hovered and beamed at (<see cref="FreeContainerVisuals.ShownTick"/>).</summary>
+    private FreeContainer ContainerPose(in FreeContainer item) => _snapshot is { } snapshot
+        ? _freeVisuals.Pose(item, FreeContainerVisuals.ShownTick(item, snapshot.Hulls.AsSpan(0, snapshot.HullCount), snapshot.OwnHull, snapshot.ServerTickPrecise, _frameAlpha))
+        : item;
+
     private uint PickFreeContainer(SessionSnapshot snapshot, float2 pointer, out float distance)
     {
         var nx = pointer.X / _screen.X * 2 - 1;
@@ -39,7 +44,7 @@ internal sealed partial class WorldView
         foreach (var item in _freeVisuals.Items)
         {
             if (!_partModels.TryGetContainer(item.Size, out _)) continue;
-            var pose = _freeVisuals.Pose(item, snapshot.ServerTickPrecise + _frameAlpha);
+            var pose = ContainerPose(item);
             var hit = TargetPicking.Container(ray, CameraPosition, pose, snapshot.Content.Cargo, NearPlane);
             if (hit >= distance) continue;
             distance = hit; id = item.Id;
@@ -77,7 +82,7 @@ internal sealed partial class WorldView
         DrawnFreeContainers = 0;
         foreach (var item in _freeVisuals.Items)
         {
-            var pose = _freeVisuals.Pose(item, snapshot.ServerTickPrecise + _frameAlpha);
+            var pose = ContainerPose(item);
             var position = pose.Position.RelativeTo(camera);
             if (!Visible(position, FreeContainers.Half(snapshot.Content.Cargo, item.Size).Length(), _viewport.X / _viewport.Y, out _)
                 || !_partModels.TryGetContainer(item.Size, item.Resource, out var mesh)) continue;

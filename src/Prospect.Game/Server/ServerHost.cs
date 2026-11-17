@@ -25,6 +25,9 @@ public sealed class ServerConfig
     /// <summary>Capture-only impact speed against a large rock, in an unsaved local game.</summary>
     public float? ScriptedRamSpeed { get; init; }
 
+    /// <summary>Capture-only: the player's hull is set coasting along its nose at this speed, once, in an unsaved local game.</summary>
+    public float? ScriptedCoastSpeed { get; init; }
+
     public int ScriptedExhaustShield { get; init; }
 
     /// <summary>
@@ -470,6 +473,12 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                     throw new InvalidDataException("A scripted ram needs an unsaved private in-process server and a speed of 0 to 100 m/s.");
                 _scriptedRamSpeed = ramSpeed;
             }
+            if (config.ScriptedCoastSpeed is { } coastSpeed)
+            {
+                if (!(coastSpeed >= 0 && coastSpeed <= 400) || config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
+                    throw new InvalidDataException("A scripted coast needs an unsaved private in-process server and a speed of 0 to 400 m/s.");
+                _scriptedCoastSpeed = coastSpeed;
+            }
             if (config.ScriptedShieldBreakSeconds is { } breakAt)
             {
                 if (!(breakAt >= 0f && breakAt <= 600f) || config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
@@ -845,6 +854,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         TickVisualBenchmark(tick);
         TickScriptedShieldBreak(tick);
         TickScriptedRam(tick);
+        TickScriptedCoast(tick);
         TickScriptedExhaustShield();
         TickScriptedFleetHurt(tick);
 
