@@ -298,6 +298,13 @@ internal sealed class AppOptions
     /// </summary>
     public bool OreWindow { get; set; }
     public bool CargoSample { get; set; }
+
+    /// <summary>
+    /// Captures only (<c>--cargo-tab containers|ore</c>, with <c>--open cargo-window</c> or <c>--open ore</c>): the tab the Cargo
+    /// window shows; with <c>--open ore</c> it is pinned, so the bins fill in view. Use a scratch <c>XDG_CONFIG_HOME</c>: the
+    /// tab and the pin are saved with the settings.
+    /// </summary>
+    public string? CargoTab { get; set; }
     /// <summary>Capture only: <c>--cargo-wide</c> loads a rack with one container of each resource and jettisons several.</summary>
     public bool CargoWide { get; set; }
     /// <summary>Capture only: <c>--ore-sheet</c> draws ore chunks of every resource at three grades before the camera.</summary>
@@ -1523,6 +1530,7 @@ internal sealed class App : IDisposable
                 // The pilot view: the server puts the hull over a rock, and the scripted group fires from --fire-at on.
                 // A capture of the ore view may pin the Ship window on its ORE section, where the bins fill.
                 if (view == "ore" && _options.OreWindow) _screens.OpenShipWindowOnOre();
+                if (view == "ore" && _options.CargoTab is { } oreTab) _screens.OpenCargoWindowPinned(oreTab == "ore" ? CargoTab.Ore : CargoTab.Containers);
             }
             else if (view == "rock-scrape")
             {
@@ -1654,7 +1662,7 @@ internal sealed class App : IDisposable
                 }
                 else
                 {
-                    _screens.OpenCargoWindow();
+                    _screens.OpenCargoWindow(false, _options.CargoTab is { } cargoTab ? cargoTab == "ore" ? CargoTab.Ore : CargoTab.Containers : null);
                 }
             }
             else if (view == "players")

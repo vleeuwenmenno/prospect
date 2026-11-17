@@ -28,7 +28,7 @@ of a stowed container do not hide it from the cursor yet.
 Cleanup defaults to 60 unattended minutes (`containerLifetimeMinutes`, 0 means never).
 Place a Tractor beam face mount from the editor's Hull tab. It automatically pulls nearby free containers into
 racks it can see and fit them in. Every release waits 10 seconds before pickup; unclaimed cargo is open to anyone.
-The Cargo window (`U` or the Cargo tab) shows the flown ship's hold and lets you jettison containers (`Jettison` or `Jettison, keep claim`).
+The Cargo window (`U` or the Cargo tab) shows the flown ship's hold on its CONTAINERS tab and lets you jettison containers (`Jettison` or `Jettison, keep claim`). Its ORE tab shows the ore bins; the window remembers the tab.
 Six tractor qualities scale range, pull, maximum mass and power: Common starts at 40 m; Alien Tech reaches 100 m.
 Power rises with load mass. The mount is a turret: an octagonal base, a yoke and a head with three glowing bars that
 turns and tilts toward what its beam holds, and rests looking along the hull. One size only; tier badges are not built yet.
@@ -101,8 +101,9 @@ like a drone bay's hatch. A tractor beam that sees the intake takes loose chunks
 container: it leads a chunk to a point outside the intake and then in, and the chunk's kilograms go into a bin of
 that ore, else an empty one. A chunk is taken only when the bins have room for all of it, so a full ship stops
 pulling. Ore in the bins weighs the ship down. The Ship window (`I`) lists each bin's ore, grade and kilograms
-under ORE. Bins and the "Pick up ores" setting are saved with the world, and an edit or repair keeps the ore where
-its bins remain. Not there: selling, moving or dumping ore, the Ore Cargo window and a preview in the editor of ore an
+under ORE, and the Cargo window's ORE tab (`U`) shows a totals row per ore (kilograms, grade weighted by mass, bins used of all
+bins) and a tile per bin in the ore's colour with a fill bar; an empty bin reads EMPTY. Bins and the "Pick up ores" setting are saved with the world, and an edit or repair keeps the ore where
+its bins remain. Not there: selling, moving or dumping ore and a preview in the editor of ore an
 edit would dump. A rock holds at most 2,048 scrapes and a world 65,536
 (`content/rules/rock_edits.json`); laser and chunk figures are in `content/rules/mining.json` and `blocks.json`. See
 [drones and mining](docs/roadmap/drones-mining.md).

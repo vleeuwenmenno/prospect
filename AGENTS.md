@@ -127,6 +127,14 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `PartModels` builds real container meshes on a worker; own holds draw in flight and editor. No drone rack.
   The Cargo window (`SocialPane.Cargo`, `ToggleCargo`, `U`, `--open cargo-window`) uses font-free `CargoHoldView` for hold totals, size-stepped tile layout, selection lifetime and FTL gating; `DrawCargoPane` renders tiles coloured by `Galaxy.Resources[i].Color` and calls `PlayerInputBridge.JettisonCargo` (`Abandon` / `KeepClaim`).
   The selected tile is called out on the ship by `CargoCallout` (font-free: follows `CargoHoldView.SelectedIndex` while the window is shown; hull or `OwnCargoTick` change, window closed, second click on the tile and Escape through `BackStep.CargoCallout` clear it). The box is `CargoSlots.Centre`/`Half`, the one rule `WorldView.DrawCargo` draws containers by, never a second packing rule. `DrawCargoCallout` (`Screens.CargoCallout.cs`) shares `BeginCalloutClip`, `DrawCalloutLabelFrame`, `DrawBlockOutline` and `FuelCalloutLayout.Place` with the fuel callout; figures are the `callout*` ones plus `cargoCalloutOutline*` in `power.json`. Check with `--open cargo-window --cargo-sample --capture ...` (first tile auto-selected). Tests: `CargoCalloutTests`.
+  The window has two tabs, CONTAINERS (all of the above) and ORE. The tab is `FloatingWindow.Tab` (saved as `WindowState.Tab`
+  by `WindowLayout`, clamped to `ClientSettings.MaxWindowTab`; `OreHoldView.TabOf` turns anything but 1 into CONTAINERS); the
+  strip is drawn by `DrawCargoTabs` from `OreHoldView.TabRect`. On ORE `DrawCargoPane` lets go of the container selection
+  every frame, so no callout is left on the ship. The ORE tab is `DrawOreTab` over the font-free `OreHoldView`: totals per
+  ore (kg, grade weighted by mass, bins used), a tile per bin, wrapped layout, all from `HullView.Ore` and the design's bins
+  (held and capacity through `ShipSheet`, never a second sum), in fixed buffers. Figures are `content/visuals/cargo_window.json`
+  (`CargoWindowLook`). Capture: `--open cargo-window --cargo-tab ore|containers`, or `--open ore --cargo-tab ore` (pinned,
+  bins fill; scratch `XDG_CONFIG_HOME`, the tab is saved). Tests: `OreHoldViewTests`, `InterfaceWindowTests`, `FrameOrderTests`.
   Tests: `CargoHoldTests`, `CargoFlightTests`, `CargoWireTests`, `CargoWindowTests`, `EditorSessionTests`, `WreckageTests`, `SaveLifecycleTests`, `FrameOrderTests`.
 
 
@@ -265,7 +273,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
     what finds no room is dumped and logged. The editor does not preview it.
   - Client: Ship window ORE section (`ShipSheet.Section.Ore`, `HullView.Ore`), cards and roles `PartRole.Bin` /
     `Hopper`, models `PropulsionModels.BuildHopper` / `BuildBin` (`hopper` and `bin` in `visuals/propulsion.json`),
-    beams to held chunks in `WorldView.DrawTractorBeams`.
+    beams to held chunks in `WorldView.DrawTractorBeams`; the Cargo window's ORE tab shows the same bins as tiles (see "Cargo holds").
   - Tests: `OreCollectionTests`, `OreModelTests`, the ore test in `EditorSessionTests`, `DefaultShipTests`.
   - Capture: `--open ore` on the shipped build (the laser view; each capture prints chunks, chunks in a beam and what
     the bins hold; about 8.5 t at 40 s and 14.7 t at 60 s. The capture holds fire, so heat stops the lasers from

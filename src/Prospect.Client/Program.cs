@@ -515,6 +515,10 @@ internal static class Program
                 case "--cargo-sample":
                     options.CargoSample = true;
                     break;
+                case "--cargo-tab" when hasValue && args[i + 1] is "containers" or "ore":
+                    options.CargoTab = args[i + 1];
+                    i++;
+                    break;
                 case "--cut-hull" when hasValue && float.TryParse(args[i + 1], out var cutAt) && cutAt is >= 0f and <= 600f:
                     options.HurtFleetSeconds = cutAt;
                     options.CutHull = true;
@@ -709,6 +713,9 @@ internal static class Program
 
         if (options.OreWindow && (options.CapturePath is null || options.OpenView != "ore"))
             return Fail("--ore-window works only with --capture and --open ore.");
+
+        if (options.CargoTab is not null && (options.CapturePath is null || options.OpenView is not ("cargo-window" or "ore")))
+            return Fail("--cargo-tab works only with --capture and --open cargo-window or ore.");
 
         if (options.DronePopup && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--drone-popup works only with --capture or --bench.");

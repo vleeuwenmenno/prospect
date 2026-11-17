@@ -58,6 +58,12 @@ internal sealed class FloatingWindow
     /// <summary>True once the window has been placed.</summary>
     public bool Placed;
 
+    /// <summary>
+    /// The tab a window with tabs shows (the Cargo window's CONTAINERS or ORE), kept with the rest of its state; a
+    /// window without tabs leaves it at 0.
+    /// </summary>
+    public int Tab;
+
     private uint _titleItem;
     private int _preparedFrame = -1;
 

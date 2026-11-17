@@ -10,16 +10,24 @@ namespace Prospect.Client.Screens;
 internal sealed partial class ScreenHost
 {
     private readonly CargoHoldView _cargoView = new();
+    private readonly OreHoldView _oreView = new();
     private bool _cargoSelectPending;
 
     /// <summary>
-    /// The Cargo window: shows the flown ship's hold as a grid of size-stepped, resource-coloured container tiles,
-    /// with a details panel and Jettison / Jettison, keep claim actions.
+    /// The Cargo window, in two tabs. CONTAINERS shows the flown ship's hold as a grid of size-stepped,
+    /// resource-coloured container tiles, with a details panel and Jettison / Jettison, keep claim actions. ORE shows
+    /// the ore bins: a totals row per ore and a tile per bin.
     /// </summary>
     private void DrawCargoPane(SessionSnapshot snapshot)
     {
         _cargoView.Update(snapshot);
-        if (_cargoSelectPending && _cargoView.ContainerCount > 0)
+        var tab = OreHoldView.TabOf(Pane(SocialPane.Cargo).Tab);
+        if (tab == CargoTab.Ore)
+        {
+            // A container selected before the tab changed would leave its callout on the ship with no tile to show for it.
+            _cargoView.ClearSelection();
+        }
+        else if (_cargoSelectPending && _cargoView.ContainerCount > 0)
         {
             _cargoView.Select(0);
             _cargoSelectPending = false;
@@ -33,6 +41,14 @@ internal sealed partial class ScreenHost
         if (!_cargoView.HasHull)
         {
             Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "No ship flown."u8, width / Kit.Scale);
+            EndPane();
+            return;
+        }
+
+        tab = DrawCargoTabs(draw, width, tab, interactive);
+        if (tab == CargoTab.Ore)
+        {
+            DrawOreTab(snapshot, width);
             EndPane();
             return;
         }
@@ -81,6 +97,161 @@ internal sealed partial class ScreenHost
         Kit.Space(Theme.Space2);
         DrawCargoDetails(snapshot, hull, width, interactive);
         EndPane();
+    }
+
+    /// <summary>
+    /// The tab strip at the top of the Cargo window. A press on a tab is the window's saved state (<see cref="FloatingWindow.Tab"/>);
+    /// returns the tab now shown.
+    /// </summary>
+    private CargoTab DrawCargoTabs(ImDrawListPtr draw, float width, CargoTab shown, bool interactive)
+    {
+        var look = CargoWindowLook.Current;
+        var origin = ImGui.GetCursorScreenPos();
+        var height = 0f;
+        for (var i = 0; i < OreHoldView.TabCount; i++)
+        {
+            var tab = (CargoTab)i;
+            var rect = OreHoldView.TabRect(tab, width, Kit.Scale, look);
+            var min = origin + new float2(rect.X, rect.Y);
+            var max = min + new float2(rect.Width, rect.Height);
+            height = rect.Height;
+            ImGui.SetCursorScreenPos(min);
+            ImGui.PushID(i);
+            var pressed = ImGui.InvisibleButton("##cargotab"u8, new float2(rect.Width, rect.Height));
+            var hot = interactive && ImGui.IsItemHovered();
+            ImGui.PopID();
+            if (pressed && interactive && shown != tab)
+            {
+                Pane(SocialPane.Cargo).Tab = i;
+                shown = tab;
+            }
+
+            var selected = shown == tab;
+            if (selected)
+                draw.AddRectFilled(min, max, Kit.Color(Theme.PanelRaised, 0.9f));
+            else if (hot)
+                draw.AddRectFilled(min, max, Kit.Color(Theme.PanelRaised, 0.5f));
+            draw.AddRectFilled(new float2(min.X, max.Y - Kit.Px(2)), max, Kit.Color(selected ? Theme.Accent : Theme.Line, selected ? 1f : 0.5f));
+            ReadOnlySpan<byte> label = tab == CargoTab.Ore ? "ORE"u8 : "CONTAINERS"u8;
+            var size = Kit.Measure(_ui.SansMedium, Theme.FontSmall, label);
+            Kit.Text(draw, _ui.SansMedium, Theme.FontSmall, min + new float2((rect.Width - size.X) * 0.5f, (rect.Height - size.Y) * 0.5f),
+                selected ? Theme.Text : hot ? Theme.Text : Theme.TextDim, label);
+        }
+
+        ImGui.SetCursorScreenPos(origin);
+        ImGui.Dummy(new float2(width, height));
+        Kit.Space(Theme.Space2);
+        return shown;
+    }
+
+    /// <summary>
+    /// The ORE tab: bins used and kilograms held, a row per ore (kilograms, grade weighted by mass, bins it fills of
+    /// all the bins), then a tile per bin in the ore's colour with a fill bar. Read from <see cref="OreHoldView"/>,
+    /// which reads only what the server told the client of the flown hull's bins.
+    /// </summary>
+    private void DrawOreTab(SessionSnapshot snapshot, float width)
+    {
+        _oreView.Update(snapshot);
+        if (_oreView.BinCount == 0)
+        {
+            Kit.Paragraph(_ui.Sans, Theme.FontSmall, Theme.TextMute, "This ship has no ore bins."u8, width / Kit.Scale);
+            return;
+        }
+
+        var look = CargoWindowLook.Current;
+        var flags = FloatingWindow.ChildFlags(FloatingInput.Passive);
+        ImGui.BeginChild("##oretab"u8, new float2(width, Math.Max(Kit.Px(48), ImGui.GetContentRegionAvail().Y)), ImGuiChildFlags.None, flags);
+        var draw = ImGui.GetWindowDrawList();
+        var inner = Math.Max(1f, ImGui.GetContentRegionAvail().X - Kit.Px(Theme.Space2));
+        var resources = (snapshot.Galaxy ?? snapshot.Content.Galaxy).Resources;
+
+        var headerAt = ImGui.GetCursorScreenPos();
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, headerAt, Theme.TextDim, Kit.F($"BINS   {_oreView.BinsUsed} / {_oreView.BinCount} USED"));
+        var heldText = Kit.F($"{_oreView.HeldKg:0} / {_oreView.CapacityKg:0} kg");
+        var heldSize = Kit.Measure(_ui.Mono, Theme.FontCaption, heldText);
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(headerAt.X + inner - heldSize.X, headerAt.Y), Theme.Text, heldText);
+        var headerHeight = Kit.Px(24);
+        draw.AddLine(new float2(headerAt.X, headerAt.Y + headerHeight - Kit.Px(4)), new float2(headerAt.X + inner, headerAt.Y + headerHeight - Kit.Px(4)), Kit.Color(Theme.Line, 0.7f));
+        ImGui.Dummy(new float2(inner, headerHeight));
+
+        // One row per ore held: swatch and name, then the figures in fixed columns from the right edge.
+        var rowHeight = Kit.Px(look.OreRowHeight);
+        var totals = _oreView.Totals;
+        if (totals.Length == 0)
+        {
+            var at = ImGui.GetCursorScreenPos();
+            Kit.Text(draw, _ui.Sans, Theme.FontSmall, at + new float2(0, Kit.Px(2)), Theme.TextMute, "No ore held."u8);
+            ImGui.Dummy(new float2(inner, rowHeight));
+        }
+
+        for (var i = 0; i < totals.Length; i++)
+        {
+            var total = totals[i];
+            var at = ImGui.GetCursorScreenPos();
+            var color = StarColor(resources[total.Resource].Color);
+            draw.AddCircleFilled(at + new float2(Kit.Px(5), rowHeight * 0.5f), Kit.Px(4), Kit.Color(color), 12);
+            var binsText = Kit.F($"{total.Bins} / {_oreView.BinCount} bins");
+            var binsSize = Kit.Measure(_ui.Mono, Theme.FontCaption, binsText);
+            var binsLeft = at.X + inner - binsSize.X;
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(binsLeft, at.Y + (rowHeight - binsSize.Y) * 0.5f), Theme.TextDim, binsText);
+            var gradeText = Kit.F($"grade {total.Grade * 100f:0} %");
+            var gradeSize = Kit.Measure(_ui.Mono, Theme.FontCaption, gradeText);
+            var gradeLeft = at.X + inner - Kit.Px(88) - gradeSize.X;
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(gradeLeft, at.Y + (rowHeight - gradeSize.Y) * 0.5f), Theme.TextDim, gradeText);
+            var kgText = Kit.F($"{total.Kg:0} kg");
+            var kgSize = Kit.Measure(_ui.Mono, Theme.FontCaption, kgText);
+            var kgLeft = gradeLeft - Kit.Px(Theme.Space3) - kgSize.X;
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(kgLeft, at.Y + (rowHeight - kgSize.Y) * 0.5f), Theme.Text, kgText);
+            Kit.ClippedText(draw, _ui.SansMedium, Theme.FontSmall, at + new float2(Kit.Px(14), Kit.Px(2)), Theme.Text, Kit.F($"{resources[total.Resource].Name}"), Math.Max(1f, kgLeft - at.X - Kit.Px(20)));
+            ImGui.Dummy(new float2(inner, rowHeight));
+        }
+
+        Kit.Space(Theme.Space2);
+        var origin = ImGui.GetCursorScreenPos();
+        var layoutHeight = _oreView.Layout(inner, Kit.Scale, look);
+        var tiles = _oreView.Tiles;
+        for (var i = 0; i < tiles.Length; i++)
+        {
+            var tile = tiles[i];
+            var min = origin + new float2(tile.X, tile.Y);
+            var max = min + new float2(tile.Width, tile.Height);
+            var empty = tile.IsEmpty;
+            var color = empty ? Theme.TextMute : StarColor(resources[tile.Resource].Color);
+            draw.AddRectFilled(min, max, Kit.Color(Theme.Panel, empty ? 0.88f * look.OreEmptyAlpha : 0.88f));
+            if (!empty)
+            {
+                draw.AddRectFilled(min, max, Kit.Color(color, look.OreTintAlpha));
+                draw.AddRectFilled(min, new float2(min.X + Kit.Px(3), max.Y), Kit.Color(color, 0.95f));
+            }
+
+            draw.AddRect(min, max, Kit.Color(Theme.Line, empty ? 0.6f : 1f));
+            var left = min.X + Kit.Px(7);
+            var textWidth = Math.Max(1f, tile.Width - Kit.Px(11));
+            if (empty)
+                Kit.ClippedText(draw, _ui.SansMedium, Theme.FontSmall, new float2(left, min.Y + Kit.Px(4)), Theme.TextMute, "EMPTY"u8, textWidth);
+            else
+            {
+                var gradeText = Kit.F($"{tile.Grade * 100f:0} %");
+                var gradeSize = Kit.Measure(_ui.Mono, Theme.FontCaption, gradeText);
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(max.X - Kit.Px(5) - gradeSize.X, min.Y + Kit.Px(5)), Theme.TextDim, gradeText);
+                Kit.ClippedText(draw, _ui.SansMedium, Theme.FontSmall, new float2(left, min.Y + Kit.Px(4)), Theme.Text,
+                    Kit.F($"{resources[tile.Resource].Name}"), Math.Max(1f, textWidth - gradeSize.X - Kit.Px(Theme.Space1)));
+            }
+
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, new float2(left, min.Y + Kit.Px(22)), empty ? Theme.TextMute : Theme.TextDim,
+                Kit.F($"{tile.Kg:0} / {tile.Capacity:0} kg"), textWidth);
+            var barPad = Kit.Px(5);
+            var barHeight = Kit.Px(look.OreBarHeight);
+            var barMin = new float2(min.X + Kit.Px(7), max.Y - barPad - barHeight);
+            var barMax = new float2(max.X - barPad, max.Y - barPad);
+            draw.AddRectFilled(barMin, barMax, Kit.Color(Theme.Line, 0.85f));
+            if (tile.Fill > 0f)
+                draw.AddRectFilled(barMin, new float2(barMin.X + (barMax.X - barMin.X) * tile.Fill, barMax.Y), Kit.Color(color, 0.95f));
+        }
+
+        ImGui.SetCursorScreenPos(origin);
+        ImGui.Dummy(new float2(inner, Math.Max(1f, layoutHeight)));
+        ImGui.EndChild();
     }
 
     private void DrawCargoGrid(SessionSnapshot snapshot, in HullView hull, float width, float gridWidth, float layoutHeight, float height, bool interactive)
