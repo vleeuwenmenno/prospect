@@ -70,6 +70,7 @@ internal static class Program
           --capture-every <sec>   Time between numbered screenshots (default 0.25)
           --capture-hit-age <s>   With --capture/--bench: wait for a real shield hit to reach this age (0 to 1 s)
           --ram <m/s>            Unsaved private scripted run: settle by a giant at 3 s, strike it at 6 s (0 to 100 m/s)
+          --coast <m/s>          Unsaved private scripted run: dampeners off, own hull set coasting along its nose at 2 s (0 to 400 m/s)
           --map-cell <pixels>     With --capture or --bench and a map view: open the map at this many pixels per sector (1.4 to 190)
           --close-map-at <sec>    With --capture or --bench and a map view: close the map at this time after the splash (captures of the first frames back in the world)
           --cancel-scan-at <sec>  With --capture or --bench and a scan view (scan, scan-pilot): cancel the scan at this time after the splash, as the scan key pressed again would
@@ -217,7 +218,13 @@ internal static class Program
                 case "--exhaust-kind" when hasValue && args[i + 1] is "engine" or "hot" or "cold" or "ion":
                     options.ExhaustKind = args[++i];
                     break;
-                case "--open" when hasValue && args[i + 1] is "exhaust-rock" or "rock-scrape" or "exhaust-shield" or "exhaust-shield-cold" or "command" or "drone" or "map" or "map-ftl" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "edit-drone" or "edit-fill" or "edit-fill-done" or "edit-turn" or "edit-ion" or "edit-tank" or "edit-cargo" or "cargo" or "edit-rack" or "edit-tank-long" or "edit-tank-slab" or "edit-tank-fuel" or "edit-palette-tip" or "edit-scanner" or "edit-mount" or "edit-mirror" or "edit-box-select" or "edit-select-all" or "edit-menu" or "edit-resize" or "edit-dump" or "edit-save" or "edit-load" or "edit-load-confirm" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "cargo-window" or "modules" or "module-command" or "gas" or "pinned-gas" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
+                case "--rock-interior-size" when hasValue && args[i + 1] is "small" or "medium" or "giant":
+                    options.RockInteriorSize = args[++i];
+                    break;
+                case "--rock-interior-resource" when hasValue:
+                    options.RockInteriorResource = args[++i];
+                    break;
+                case "--open" when hasValue && args[i + 1] is "rock-interior" or "exhaust-rock" or "rock-scrape" or "exhaust-shield" or "exhaust-shield-cold" or "command" or "drone" or "map" or "map-ftl" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "edit-drone" or "edit-fill" or "edit-fill-done" or "edit-turn" or "edit-ion" or "edit-tank" or "edit-cargo" or "cargo" or "edit-rack" or "edit-tank-long" or "edit-tank-slab" or "edit-tank-fuel" or "edit-palette-tip" or "edit-scanner" or "edit-bay" or "drones" or "edit-mount" or "edit-mirror" or "edit-box-select" or "edit-select-all" or "edit-menu" or "edit-resize" or "edit-dump" or "edit-save" or "edit-load" or "edit-load-confirm" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "cargo-window" or "modules" or "module-command" or "gas" or "pinned-gas" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:
@@ -411,12 +418,20 @@ internal static class Program
                     options.RockScrapeDistance = scrapeDistance;
                     i++;
                     break;
+                case "--coast" when hasValue && float.TryParse(args[i + 1], out var coastSpeed) && coastSpeed is >= 0f and <= 400f:
+                    options.CoastSpeed = coastSpeed;
+                    i++;
+                    break;
                 case "--ram" when hasValue && float.TryParse(args[i + 1], out var ramSpeed) && ramSpeed is >= 0f and <= 100f:
                     options.RamSpeed = ramSpeed;
                     i++;
                     break;
                 case "--break-shield" when hasValue && float.TryParse(args[i + 1], out var breakAt) && breakAt is >= 0f and <= 600f:
                     options.BreakShieldSeconds = breakAt;
+                    i++;
+                    break;
+                case "--drone-recall" when hasValue && float.TryParse(args[i + 1], out var recallAt) && recallAt is >= 2f and <= 600f:
+                    options.DroneRecallSeconds = recallAt;
                     i++;
                     break;
                 case "--jettison" when hasValue && float.TryParse(args[i + 1], out var jettisonAt) && jettisonAt is >= 4f and <= 600f:
@@ -529,6 +544,9 @@ internal static class Program
             }
         }
 
+        if (options.OpenView == "rock-interior" && options.CapturePath is null)
+            return Fail("--open rock-interior works only with --capture.");
+
         if (options.OpenView == "exhaust-rock" && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--open exhaust-rock works only with --capture or --bench.");
 
@@ -581,8 +599,8 @@ internal static class Program
         if (options.HoldThrust is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--hold-thrust works only with --capture or --bench: it replaces the pilot's forward key.");
 
-        if ((options.BreakShieldSeconds is not null || options.RamSpeed is not null) && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
-            return Fail("--break-shield and --ram work only with --capture or --bench, in an unsaved private local game.");
+        if ((options.BreakShieldSeconds is not null || options.RamSpeed is not null || options.CoastSpeed is not null) && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
+            return Fail("--break-shield, --ram and --coast work only with --capture or --bench, in an unsaved private local game.");
 
         if ((options.Thrust is not null || options.Zoom is not null || options.LookHeight is not null || options.CaptureHitAge is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--thrust and --zoom work only with --capture or --bench.");

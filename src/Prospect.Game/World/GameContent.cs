@@ -24,10 +24,14 @@ public sealed class GameContent
         ExplorationRules exploration,
         CargoCatalog cargo,
         ContentIdentity saveIdentity,
+        DroneRules drones,
+        int workDrone,
         RockEditing.RockEditRules rockEdits
     )
     {
         RockEdits = rockEdits;
+        Drones = drones;
+        WorkDroneDesign = workDrone;
         Cargo = cargo;
         SaveIdentity = saveIdentity;
         Exploration = exploration.ForSectorSize(galaxy.SectorSize);
@@ -100,6 +104,12 @@ public sealed class GameContent
     /// <summary>Index of the design of the small craft a player flies after leaving a hull.</summary>
     public int DroneDesign { get; }
 
+    /// <summary>Index of the design of the drones a drone bay keeps and launches.</summary>
+    public int WorkDroneDesign { get; }
+
+    /// <summary>How drones leave, hold, come home and are limited (<c>content/blocks/drones.json</c>).</summary>
+    public DroneRules Drones { get; }
+
     /// <summary>Designs of the hulls a new player is given besides the pod.</summary>
     public int[] StartingFleet { get; }
 
@@ -131,12 +141,12 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length];
         for (var i = 0; i < designs.Length; i++)
             designs[i] = Designs[i].WithRules(rules);
-        return new GameContent(Galaxy.Under(SettingCatalog, clean), Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, RockEdits);
+        return new GameContent(Galaxy.Under(SettingCatalog, clean), Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, WorkDroneDesign, RockEdits);
     }
 
-    internal GameContent WithCatalogue(HullDesign[] designs, int pod, int drone, int[] fleet) =>
+    internal GameContent WithCatalogue(HullDesign[] designs, int pod, int drone, int[] fleet, int workDrone) =>
         new(Galaxy, Blocks, SettingCatalog, Settings, Rules, (HullDesign[])designs.Clone(), pod, drone,
-            (int[])fleet.Clone(), Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, RockEdits);
+            (int[])fleet.Clone(), Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, workDrone, RockEdits);
 
     /// <summary>
     /// This content with one more design at the end of the catalogue. Every design it had keeps its number and is
@@ -148,7 +158,7 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length + 1];
         Designs.CopyTo(designs, 0);
         designs[^1] = design;
-        return new GameContent(Galaxy, Blocks, SettingCatalog, Settings, Rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, RockEdits);
+        return new GameContent(Galaxy, Blocks, SettingCatalog, Settings, Rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, WorkDroneDesign, RockEdits);
     }
 
     /// <summary>Loads the content shipped beside the executable.</summary>
@@ -161,6 +171,7 @@ public sealed class GameContent
     public static GameContent Load(string directory)
     {
         AsteroidShape.Prepare();
+        RockInteriorSurface.Prepare();
         // Every file the server and the client must agree on is loaded through this, which is what puts it in
         // the identity: a file the shared simulation reads cannot be added here and left out there. The order
         // of the calls is the order the files are hashed in.
@@ -185,6 +196,7 @@ public sealed class GameContent
 
         var cargo = CargoCatalog.Parse(Shared("blocks", "cargo.json"));
         var blocks = BlockCatalog.Parse(Shared("blocks", "blocks.json"), At("blocks", "blocks.json"));
+        var drones = DroneRules.Parse(Shared("blocks", "drones.json"));
         foreach (var type in blocks.Types)
             if (type.Cargo > 0 && (type.Cargo != CargoPacking.Capacity(cargo, new GridSize(1, 1, 1), 1f)
                 || !type.BoxOnly || (type.SizeRules.TryGetValue("cargo", out var exponent) && exponent != 1)))
@@ -221,6 +233,7 @@ public sealed class GameContent
             throw new InvalidDataException("fleet.json: needs between 1 and 255 designs");
 
         var galaxy = Galaxy.Parse(Shared("galaxy", "galaxy.json"), At("galaxy", "galaxy.json")).Under(settingCatalog, settings);
+        galaxy = galaxy.WithInteriors(RockInteriorRules.Parse(Shared("galaxy", "interiors.json"), At("galaxy", "interiors.json")));
         foreach (var resource in galaxy.Resources)
             if (cargo.Density(resource.Id) <= 0)
                 throw new InvalidDataException("Every galaxy resource needs a cargo density.");
@@ -252,8 +265,19 @@ public sealed class GameContent
             exploration,
             cargo,
             saveIdentity.Build(),
+            drones,
+            WorkDrone(Index(root.GetProperty("workDrone"u8).GetString()!)),
             rockEdits
         );
+
+        // The drone a bay launches is a small craft of drone parts with no drive to leave its base behind with.
+        int WorkDrone(int index)
+        {
+            var design = designs[index];
+            if (design.Class != HullClass.Fighter || design.Flight.Ftl != FtlKind.None)
+                throw new InvalidDataException("fleet.json: workDrone must be a small craft without a jump drive");
+            return index;
+        }
     }
 }
 

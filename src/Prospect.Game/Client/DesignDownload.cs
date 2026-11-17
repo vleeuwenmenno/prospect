@@ -15,7 +15,7 @@ internal sealed class DesignDownload : IDisposable
     private HullDesign[]? _designs;
     private byte[][]? _hashes;
     private int[]? _sizes, _fleet;
-    private int _pod, _drone, _index, _offset, _total;
+    private int _pod, _drone, _workDrone, _index, _offset, _total;
     private long _nextRequest;
     internal bool Failed { get; private set; }
     internal GameContent? Result { get; private set; }
@@ -57,9 +57,9 @@ internal sealed class DesignDownload : IDisposable
     private void ReadManifest(ReadOnlySpan<byte> bytes)
     {
         var reader = new NetReader(bytes);
-        var count = reader.ReadByte(); _pod = reader.ReadByte(); _drone = reader.ReadByte();
+        var count = reader.ReadByte(); _pod = reader.ReadByte(); _drone = reader.ReadByte(); _workDrone = reader.ReadByte();
         var fleetCount = reader.ReadByte();
-        if (count == 0 || _pod >= count || _drone >= count || reader.Remaining != fleetCount + count * 36)
+        if (count == 0 || _pod >= count || _drone >= count || _workDrone >= count || reader.Remaining != fleetCount + count * 36)
         { Failed = true; return; }
         // Scan totals before allocating decoded catalogue arrays, including entries already cached.
         var scan = reader;
@@ -108,7 +108,7 @@ internal sealed class DesignDownload : IDisposable
         while (_index < _designs.Length && _designs[_index] is not null) _index++;
         if (_index == _designs.Length)
         {
-            Result = _content.WithCatalogue(_designs, _pod, _drone, _fleet!);
+            Result = _content.WithCatalogue(_designs, _pod, _drone, _fleet!, _workDrone);
             return;
         }
         Request((byte)_index, transport, buffer, tick);

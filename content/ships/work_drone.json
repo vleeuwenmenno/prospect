@@ -1,0 +1,31 @@
+{
+  "version": 5,
+  "name": "Work Drone",
+  "class": "fighter",
+  "blockSize": 0.25,
+  "color": [0.78, 0.62, 0.22],
+  "blocks": [
+    { "at": [0, 0, 0], "type": "microcore" },
+    { "at": [1, 0, 0], "type": "microgenerator" },
+    { "at": [0, 1, 0], "type": "microbattery" },
+    { "at": [1, 1, 0], "type": "microgyro" },
+    { "at": [0, 0, 1], "type": "microhull" },
+    { "at": [1, 0, 1], "type": "microhull" },
+    { "at": [0, 1, 1], "type": "microhull" },
+    { "at": [1, 1, 1], "type": "microhull" }
+  ],
+  "mounts": [
+    { "on": 4, "face": "left", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 2, "face": "left", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 5, "face": "right", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 3, "face": "right", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 4, "face": "down", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 1, "face": "down", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 7, "face": "up", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 2, "face": "up", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 0, "face": "front", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 3, "face": "front", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 5, "face": "back", "at": [3, 3], "type": "microIonThruster" },
+    { "on": 6, "face": "back", "at": [3, 3], "type": "microIonThruster" }
+  ]
+}

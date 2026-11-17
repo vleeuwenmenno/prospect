@@ -1415,6 +1415,7 @@ public sealed class SqliteWorldStoreTests : IDisposable
             DesignCount = small.DesignCount,
             PodDesign = small.PodDesign,
             DroneDesign = small.DroneDesign,
+            WorkDroneDesign = small.WorkDroneDesign,
             StartingFleet = small.StartingFleet,
         };
         small.SettingValues.CopyTo(snapshot.SettingValues, 0);

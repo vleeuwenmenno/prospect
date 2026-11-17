@@ -35,7 +35,7 @@ Use the Makefile, not raw `dotnet` commands.
 | --- | --- |
 | `make setup` | First run on a machine: system packages for the OS (Vulkan; MoltenVK on macOS), the .NET SDK into `~/.dotnet`, restore. `make doctor` checks the toolchain and GPU. |
 | `make check` | Formatting, warnings-as-errors build and all tests. Must pass before work is called done. Takes about two minutes. |
-| `make bench` | Release benchmarks: an empty scene, resizing (`--bench-resize`), then editor cargo, Fuel menu, fuel-on-apply and mirror ghosts (four measured seconds each, after four seconds for scripted edits and workers to settle). Then, on a copy of the build whose pod has a tractor beam and racks (`tools/prepare_tractor_capture.py`), 25 s of cargo: jettison, drift, tractor pull and stow (`--open cargo --jettison 5`); it also fails unless the container was seen loose and is back in the hold. Last, 14 s of a rock being scraped thirty passes (`--open rock-scrape`): edits, bricks and patch rebuilds on every thread; it also fails unless all 480 edits came back from the server and the patch was rebuilt and is drawn. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
+| `make bench` | Release benchmarks: an empty scene, resizing (`--bench-resize`), then editor cargo, Fuel menu, fuel-on-apply and mirror ghosts (four measured seconds each, after four seconds for scripted edits and workers to settle). Then, on a copy of the build whose pod has a tractor beam and racks (`tools/prepare_tractor_capture.py`), 25 s of cargo: jettison, drift, tractor pull and stow (`--open cargo --jettison 5`); it also fails unless the container was seen loose and is back in the hold. Then, on a copy whose pod has a drone bay (`tools/prepare_drone_capture.py`), 25 s of drones: launch, hold station, recall and dock (`--open drones --drone-recall 12`); it also fails unless a drone was seen out and the bay is full again. Last, 14 s of a rock being scraped thirty passes (`--open rock-scrape`): edits, bricks and patch rebuilds on every thread; it also fails unless all 480 edits came back from the server and the patch was rebuilt and is drawn. Fails under 144 fps or on any managed allocation in the frame loop. Run it after touching anything that executes every frame or every tick. |
 | `make bench-scans` | Release benchmark with each module scan type repeating (gas, asteroid, locator), on a copy of the build whose pod carries the scanners (`tools/prepare_scan_bench.py`). Fails on any managed allocation on any thread, or under five completed scans. Run it after touching module scans, their server worker or the module interface. |
 | `make bench-gas` | Release benchmark inside gas clouds (ordinary from inside, pilot and command view, huge, lightning; cold and a pair reported only). Fails under 144 fps or on any managed allocation. Run it after touching the gas shaders or how gas is drawn. |
 | `make run ARGS="..."` | The client. `make server` is the dedicated server. |
@@ -142,13 +142,13 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   with doubles, `+ - * /` and `Math.Sqrt` in a fixed order: never `MathF`, `Vector3.Dot` or `Length` there, and never
   let which bricks exist depend on the base shape. Contact reads it through `RockCut` (`RockField.Edits`,
   `BoxCollision.Rock`, `FreeContainers.RockContact`, `RockPicking.Hit` with a cut): server and prediction, one code.
-  Wire: protocol 64, reliable message 39 `RockEditsMessage` (at most 64 edits, 1,362 bytes; 21 B a stroke start, 9 B
+  Wire: protocol 65, reliable message 41 `RockEditsMessage` (at most 64 edits, 1,362 bytes; 21 B a stroke start, 9 B
   a continuing segment), sent by `SendRockEdits` to each connection whose sensor reaches the rock's surface
   (`RockInView`, from the rock's place kept when it was first scraped: never generate a sector for it in the
   tick), in order and each once (`Connection.RockEditsSent`), at most 256 edits a tick; the client takes a
   run only if it continues what it holds (`ClientWorld.OnRockEdits`) and checks every edit against the rules.
   A client takes at most 8 edits a tick into its bricks; a longer list is replayed on a pool thread
-  (`RockEditReplay`) and copied in. Save: codec 17, `WorldSnapshot.EditedRocks`/`RockEdits`, limits
+  (`RockEditReplay`) and copied in. Save: codec 18, `WorldSnapshot.EditedRocks`/`RockEdits`, limits
   `SaveLimits.MaxEditedRocks`/`MaxRockEdits`; `RestoreRockEdits` is the load rule (every edit valid on a rock this
   galaxy has, else the save is refused) and rebuilds the bricks. Bricks are never sent or saved.
   Drawing: `RockPatches` (render side) reads the log through `SessionSnapshot.RockEdits`, keeps mirror bricks only its
@@ -162,7 +162,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   Ice shards cannot be scraped (`RockEditRules.Scrapable`). Tests: `RockEditTests`, `RockEditWireTests`,
   `RockEditSaveTests`, `RockEditSessionTests`, `SaveLifecycleTests`, `ContentIdentityTests`; `make bench` scrapes a rock.
   Cracks (R2) add a kind to `RockEditCodec` (3 is kept for it) and rocks past the generated list; nothing here builds them.
-- **Debug: scrape rock (temporary, local games only):** `MessageId.RockScrape` (40, `RockScrapeRequest`: rays in the
+- **Debug: scrape rock (temporary, local games only):** `MessageId.RockScrape` (42, `RockScrapeRequest`: rays in the
   rock's frame) through `PlayerInputBridge.DebugScrape`; `ServerHost.DebugScrape` checks `AllowDebugFill`, the
   in-process link, a live flown hull not in transit, the interval (`debug.intervalSeconds`), the radius, and that every
   hit lies within `debug.rangeMetres` of the hull, finds the surface itself (`RockPicking.Hit` with the cut) and calls
@@ -265,6 +265,27 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   and `FitsClass`), and placing a tank any other way remembers its fuel. The block types, wire, saves and designs are
   unchanged. `--open edit-tank-fuel` shows it. Paste, mirror and loading a
   saved design keep their own refusals; the server does not check the kind. `EditorPanelTests` holds it.
+- **Orders and drones:** an order is a `TaskOrder` (`World/Orders.cs`): task, phase, issuer, actor, base hull and bay,
+  point (base frame, metres from its pivot), subject, until. `ServerHost.TickDrones` (`ServerDrones.cs`) is the one
+  executor: it runs a fixed table of 256 before the hull round, whoever issued the order, and turns each into the
+  drone's `HullOrder` (`MoveTo`), so clients predict drones with the same autopilot. A new task (fetch, scan, charge,
+  a mining laser) is an `OrderTask` value and one executor case, never a new path. Bays: `BlockType.Bay` (`BaySpec`,
+  tiers in `bayTiers`, like tractors; only Common in the palette), box only, at most 16 a design (`limits.maxBays`),
+  listed in `HullDesign.Bays`. The hatch is the block's `DesignBox.Facing`, chosen at placement by
+  `RackDeck.Hatch` (opposite the rack-deck rule) through `ShipEditor.GhostFacing`, and mirrored like a thrust
+  part's. `DroneBayRules` holds the shared geometry (hatch, `HatchClear` through the collision tree, launch, staging,
+  dock and hold points). The server keeps a page of `BayRecord`s per hull with bays (`HullInfo.BayPage`): stocked,
+  out, pending, rebuild tick. `CreateHull` attaches it (full), `ReplaceHull` calls `CarryBays` before destroying the
+  old hull; lost bay blocks empty their bay. Drones are hulls of the `workDrone` design (`HullInfo.WorkDrone`):
+  never piloted, refused by `TakeControl` and fleet orders, left out of the fleet list, replicated as ordinary hulls
+  and seen through `MaySeeHull`. Caps are `blocks/drones.json` (shared): per player, and `HullReserve` below the
+  255-hull ceiling. Wire: protocol 64, `DroneCommandMessage` (39, reliable, after admission, one command per
+  `commandSeconds`) and `BayMessage` (40, the flown hull's bays and the newest `DroneReply`, reliable on change).
+  Save: codec 17 keeps each bay's drones and rebuild; drones out are docked by the capture and never saved.
+  Interface: `LaunchDrones` (`.`), `RecallDrones` (`,`), the DRONES chip in the module strip (`DroneUi`,
+  `DroneTracker`). Tests: `DroneBayTests`, `BayModelTests`. Capture: `tools/prepare_drone_capture.py` then
+  `--open drones` (launch 3 at 1.5 s, recall at `--drone-recall`, default 14 s) and `--open edit-bay` (a bay's ghost
+  on a top face, hatch up); `make bench` runs `--open drones` on the prepared copy.
 - **Debug: add container (temporary, local games only):** `EditorRequestKind.AddContainer` asks for size/resource in
   one existing selected rack. `ShipEditor.RequestContainer` sends through `PlayerInputBridge`; `ServerHost.AddContainer`
   checks the edit token, owner, controlled hull, in-process transport, `AllowDebugFill`, rate and `HasRoom`, then uses
@@ -487,7 +508,9 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
 - **Thrust, facing and fuel:** a thrust part pushes the hull the opposite way to its `DesignBox.Facing` (a mounted
   one, to the face it sits on) and burns its `BlockType.Fuel`; `BoxHullSums` keeps thrust and burn per push direction and fuel (`ThrustTable`), tank room
   and pump power per fuel, and `FlightModel.Step` is the one place that moves a hull and spends fuel,
-  dampener braking included. Fuel is kept per tank: a design lists its tanks in block order (`HullDesign.Tanks`,
+  dampener braking included. Rated speed caps thrust there (`speedBefore`, `speedCap`): thrust never raises speed past
+  the limit (boost: twice), only the dampeners shed speed above it, and dampeners off keep it (`FlightLimitTests`; this
+  arithmetic is why `ContentIdentity.EvaluatorVersion` went to 19). Fuel is kept per tank: a design lists its tanks in block order (`HullDesign.Tanks`,
   at most 255: `limits.maxTanks`, `TankFuel.MaxTanks`), a hull keeps the kilograms in each with its block state
   (`BlockStateStore.Tanks`, doubles; a lost tank holds nothing), and `HullState.Fuel` is only their sum per fuel
   (`TankFuel.Total`): whoever changes a tank writes the sum again, and nothing sends or saves it. A burn draws
@@ -628,6 +651,17 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `content/visuals/modules.json` (`rockColor`, `traceMarkPixels`, `composition*`). `RockCompositionTests` holds it.
   `ModuleObservationRules.Valid` holds the shape for the wire and the save. Rules in `docs/roadmap/modules.md`;
   `AsteroidCompositionTests` holds them.
+- **Rock interiors:** `RockInterior` (shared, query-only) describes crust, mantle, veins and pockets of a rock from
+  the seed, sector and rock index, on its own streams: never draw from the generation streams, and nothing here may
+  change a rock. Figures are `content/galaxy/interiors.json` (`RockInteriorRules`, shared, in the identity); the
+  surface it measures depth from is `RockInteriorSurface` (cube map per shape, `DetMath`), never `AsteroidShape`'s
+  `MathF` surface, because the layer of a point is a discrete choice. `Describe` once per rock, then `Sample` or
+  `Average`; neither takes memory. Shares must integrate to the rock's published composition within
+  `bulkTolerance`. `RockInteriorTests` holds it, with a recorded hash on frozen fixtures
+  (`tests/Prospect.Tests/fixtures/interiors.json`): change the interior on purpose, record the new hash. Check with
+  `--open rock-interior --rock-interior-size small|medium|giant [--rock-interior-resource <id>]`, captures only
+  (render-only fixture `RockInteriorCapture`). Rules in `docs/roadmap/drones-mining.md`, "I1".
+
 - **A new hull design:** add it to `content/ships/fleet.json`. Stats are derived from blocks; do not add stat
   fields to the design file.
 - **A new world setting:** one entry in `content/rules/settings.json`, its number applied in `FlightRules.Under` (flight) or `Galaxy.Under` / `AsteroidFieldsModule.Under` (generation),
@@ -967,8 +1001,12 @@ How to apply it:
   through `MaySeeContainer`/`Covered`, as used by `MaySeeHull`. No ownership bypass and no hull snapshot growth.
 - Codec 15 saves bodies, birth/age/id clocks, ClaimOwner and PickupReadyTick; tractor pulls restart on load. `containerLifetimeMinutes` defaults to 60, zero never;
   connected pilots within the base sensor radius pause aging. Oldest-first caps remain active.
-- `FreeContainerVisuals` interpolates and detects contact velocity changes; existing worker container meshes draw
-  the result. Middle-click shows the target panel. Tractor pickup is described below; no weapon support yet.
+- `FreeContainerVisuals` interpolates between the last two sets, flies the newest on at its velocity (at most
+  `MaxAheadTicks`) and detects contact velocity changes; existing worker container meshes draw the result. Every
+  drawing, pick, hover and beam end reads one pose, `WorldView.ContainerPose`, at `FreeContainerVisuals.ShownTick`: the
+  instant of the hull it is seen against (the beam's hull, else the own hull, which is predicted ahead), never the
+  server's tick less an interval. Drawn one interval behind, a container riding along at 240 m/s trailed by 37 m and
+  was out of beam range where it was drawn. Middle-click shows the target panel. Tractor pickup is described below; no weapon support yet.
 - Tests: `FreeContainerTests`, `FreeContainerWireTests`, `FreeContainerSaveTests`, `FreeContainerEjectionTests`,
   `FreeContainerVisualTests`, and two-client jettison in `EditorSessionTests`.
   Capture: `--open cargo --jettison 6`, or `--open cargo --hurt-fleet 7 --hurt-kind cargo`, always with `--capture`.
@@ -1010,7 +1048,12 @@ How to apply it:
   cannot see, for `stallSeconds` is released and gets `PickupReadyTick` = now + `retrySeconds`. `FreeContainer.TractorBest`
   and `TractorIdle` are server-only (not on the wire, not saved). Figures are the `tractor` entry of `blocks/cargo.json`
   (`TractorGuidance`, validated). `TractorReach.Rack` skips an aim point lying against another live box (a face
-  against a neighbour is a deck, not an entrance). Tests: `TractorGuideTests`.
+  against a neighbour is a deck, not an entrance). The pull runs after the hulls step and before the bodies drift, so it
+  measures a body where it will be at the end of the tick (`Position + Velocity * Dt`) against the hull's new pose;
+  the stale position sat `hull speed * Dt` astern (4 m at 240 m/s), lost sight behind the hull and stowed metres
+  off. Above a hull's rated speed `FlightModel` sheds speed faster than the beam's 4 m/s² can follow, so at boost
+  speed a held body can still be outrun. Tests: `TractorGuideTests`, `TractorSpeedTests` (coasting at 240 m/s, and
+  closing at 10 m/s on a body 100 m ahead).
 - Protocol 62 replicates pickup ownership and ready tick as well as transient pulls for beams and prediction;
   redact only transient pulls whose hull/design is unavailable to a client.
   Codec 15 preserves pickup ownership and ready tick; restore clears only transient pulls and restarts acquisition. `TractorPreview` caches the shared
@@ -1022,3 +1065,7 @@ How to apply it:
 Capture fixture: `tools/prepare_tractor_capture.py` copies a built client and equips its pod with a tractor,
 one reachable rack and one blocked rack. Run that copy with `--open cargo --jettison 6 --capture ...` for pickup,
 or `--open edit-cargo --capture ...` for reach guidance (both close the editor camera on the first rack after 0.3 s). Keep `agent.prospect` hidden as for other captures.
+At speed: add `--coast <m/s>` (0–400; scripted, unsaved private game: dampeners off, the server sets the own hull
+flying along its nose at 2 s) and `--sector -5,0,0` (no rocks), with `--look 60 --look-height 2 --zoom 1.5`; the
+tractor pod is rated 122 m/s, so for 240 raise `speedPerRootAcceleration` in the copy's `blocks.json` to 130. Each
+capture prints the container's offset from the own hull and the own speed.

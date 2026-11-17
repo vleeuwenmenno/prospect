@@ -1,0 +1,273 @@
+using System.Numerics;
+using System.Text.Json;
+using Prospect.Engine.Time;
+
+namespace Prospect.Game.World;
+
+/// <summary>
+/// One drone bay block's figures after its tier: how many drones it keeps, how many leave through its hatch at once,
+/// and how long it takes to build a lost one. Read from a block's <c>"bay"</c> entry and the catalogue's
+/// <c>bayTiers</c>, as <see cref="TractorSpec"/> reads tractors: one block type per tier is never needed.
+/// </summary>
+public sealed record BaySpec(int Capacity, int LaunchRate, float RebuildSeconds, ModuleQuality Quality = ModuleQuality.Common)
+{
+    /// <summary>Ticks a lost drone takes to rebuild, rounded up.</summary>
+    public long RebuildTicks => (long)Math.Ceiling(RebuildSeconds * TickLoop.SimulationHz);
+
+    /// <summary>Reads an optional bay entry; figures outside their bounds refuse the content.</summary>
+    public static BaySpec? Read(JsonElement block, JsonElement root)
+    {
+        if (!block.TryGetProperty("bay"u8, out var value)) return null;
+        var name = value.GetProperty("quality"u8).GetString();
+        var quality = name switch
+        {
+            "Common" => ModuleQuality.Common,
+            "Uncommon" => ModuleQuality.Uncommon,
+            "Rare" => ModuleQuality.Rare,
+            "Epic" => ModuleQuality.Epic,
+            "Legendary" => ModuleQuality.Legendary,
+            "Alien Tech" => ModuleQuality.AlienTech,
+            _ => throw new InvalidDataException("Unknown drone bay quality."),
+        };
+        var tier = root.GetProperty("bayTiers"u8).GetProperty(name!);
+        float Figure(string key, string scale)
+        {
+            var basis = value.GetProperty(key).GetSingle();
+            var multiplier = tier.GetProperty(scale).GetSingle();
+            var result = basis * multiplier;
+            if (!float.IsFinite(basis) || basis <= 0 || !float.IsFinite(multiplier) || multiplier <= 0 || !float.IsFinite(result) || result <= 0)
+                throw new InvalidDataException("Drone bay tuning must be finite and positive.");
+            return result;
+        }
+        var capacity = (int)MathF.Round(Figure("capacity", "capacity"));
+        var rate = (int)MathF.Round(Figure("launchRate", "launchRate"));
+        var rebuild = Figure("rebuildSeconds", "rebuildSeconds");
+        if (capacity is < 1 or > DroneBayRules.MaxCapacity || rate < 1 || rate > capacity || rebuild > 86400f)
+            throw new InvalidDataException($"A drone bay keeps 1 to {DroneBayRules.MaxCapacity} drones, launches 1 to its capacity at once and rebuilds one in at most a day.");
+        return new BaySpec(capacity, rate, rebuild, quality);
+    }
+}
+
+/// <summary>
+/// The figures drones fly and are kept by, from <c>content/blocks/drones.json</c>: how many a player may have out,
+/// how they leave a hatch, where they hold, and how they come home. The server decides with them; a client reads
+/// them only to show the same limits.
+/// </summary>
+public sealed record DroneRules
+{
+    /// <summary>Drones one player may have out at once, across every bay.</summary>
+    public required int MaxPerPlayer { get; init; }
+
+    /// <summary>Hull slots below the 255-hull ceiling a launch leaves free for ships, wrecks and escape drones.</summary>
+    public required int HullReserve { get; init; }
+
+    /// <summary>Seconds between two launches from one bay; each launches up to its rate.</summary>
+    public required float LaunchIntervalSeconds { get; init; }
+
+    /// <summary>Metres a second a drone leaves its hatch with, on top of the hull's own motion there.</summary>
+    public required float LaunchSpeed { get; init; }
+
+    /// <summary>How far in front of a hatch must be free of the hull's own blocks and mounts for a drone to pass.</summary>
+    public required float HatchClearanceMetres { get; init; }
+
+    /// <summary>Gap between a drone leaving and the hatch's face, and between drones leaving together.</summary>
+    public required float HatchMarginMetres { get; init; }
+
+    /// <summary>How far out from its hatch a drone holds when the player names no point.</summary>
+    public required float HoldDistanceMetres { get; init; }
+
+    /// <summary>Spacing of the drones that hold one point.</summary>
+    public required float HoldSpacingMetres { get; init; }
+
+    /// <summary>The farthest from the hull a player may ask drones to hold.</summary>
+    public required float MaxHoldDistanceMetres { get; init; }
+
+    /// <summary>How far a holding drone may drift from its place before it is flown back.</summary>
+    public required float HoldSlackMetres { get; init; }
+
+    /// <summary>How far out from its hatch a returning drone lines up before it flies straight in.</summary>
+    public required float StagingMetres { get; init; }
+
+    /// <summary>How near the staging point counts as lined up.</summary>
+    public required float StagingRadiusMetres { get; init; }
+
+    /// <summary>How near its docking point (just outside the hatch) a drone is taken in.</summary>
+    public required float DockRadiusMetres { get; init; }
+
+    /// <summary>How far behind the hatch a returning drone aims, so the autopilot never stops short of it.</summary>
+    public required float DockPushMetres { get; init; }
+
+    /// <summary>The least time between two drone commands of one player.</summary>
+    public required float CommandSeconds { get; init; }
+
+    /// <summary>Ticks between two launches from one bay, at least one.</summary>
+    public long LaunchIntervalTicks => Math.Max(1, (long)Math.Ceiling(LaunchIntervalSeconds * TickLoop.SimulationHz));
+
+    /// <summary>Ticks between two commands of one player, at least one.</summary>
+    public long CommandTicks => Math.Max(1, (long)Math.Ceiling(CommandSeconds * TickLoop.SimulationHz));
+
+    /// <summary>Reads the file's bytes; a figure out of its range refuses the content.</summary>
+    public static DroneRules Parse(ReadOnlySpan<byte> json)
+    {
+        var reader = new Utf8JsonReader(json);
+        using var document = JsonDocument.ParseValue(ref reader);
+        var root = document.RootElement;
+        float Number(string key, float low, float high)
+        {
+            var value = root.GetProperty(key).GetSingle();
+            if (!float.IsFinite(value) || value < low || value > high)
+                throw new InvalidDataException($"drones.json: {key} must be from {low} to {high}");
+            return value;
+        }
+        int Whole(string key, int low, int high)
+        {
+            var value = root.GetProperty(key).GetInt32();
+            if (value < low || value > high)
+                throw new InvalidDataException($"drones.json: {key} must be from {low} to {high}");
+            return value;
+        }
+        var rules = new DroneRules
+        {
+            MaxPerPlayer = Whole("maxPerPlayer", 0, DroneBayRules.MaxOrders),
+            HullReserve = Whole("hullReserve", 0, DroneBayRules.HullCeiling),
+            LaunchIntervalSeconds = Number("launchIntervalSeconds", 0, 60),
+            LaunchSpeed = Number("launchSpeed", 0, 50),
+            HatchClearanceMetres = Number("hatchClearanceMetres", 0, 100),
+            HatchMarginMetres = Number("hatchMarginMetres", 0, 10),
+            HoldDistanceMetres = Number("holdDistanceMetres", 1, 1000),
+            HoldSpacingMetres = Number("holdSpacingMetres", 0.5f, 100),
+            MaxHoldDistanceMetres = Number("maxHoldDistanceMetres", 1, 5000),
+            HoldSlackMetres = Number("holdSlackMetres", 0.1f, 100),
+            StagingMetres = Number("stagingMetres", 1, 100),
+            StagingRadiusMetres = Number("stagingRadiusMetres", 0.1f, 100),
+            DockRadiusMetres = Number("dockRadiusMetres", 0.05f, 10),
+            DockPushMetres = Number("dockPushMetres", 0, 50),
+            CommandSeconds = Number("commandSeconds", 0, 10),
+        };
+        if (rules.HoldDistanceMetres > rules.MaxHoldDistanceMetres)
+            throw new InvalidDataException("drones.json: holdDistanceMetres must not exceed maxHoldDistanceMetres");
+        return rules;
+    }
+}
+
+/// <summary>
+/// The shared geometry of drone bays: where a hatch is, whether it faces open space, where drones leave, line up
+/// and dock, and where each drone of a group holds. Points are in the hull's own frame, in metres from its pivot
+/// (<see cref="HullDesign.BlockOffsets"/>), unless named otherwise. Takes no memory.
+/// </summary>
+public static class DroneBayRules
+{
+    /// <summary>The most bays a design may have: the wire tells the pilot of every one.</summary>
+    public const int MaxBays = 16;
+
+    /// <summary>The most drones one bay keeps, whatever its tier.</summary>
+    public const int MaxCapacity = 32;
+
+    /// <summary>Hulls a world holds before nothing more is launched or wrecked: a snapshot names at most this many.</summary>
+    public const int HullCeiling = 255;
+
+    /// <summary>Orders the server can hold at once: one per hull below the ceiling.</summary>
+    public const int MaxOrders = 256;
+
+    /// <summary>The way a bay's hatch faces: the block's facing, chosen when it was placed.</summary>
+    public static BlockFacing Hatch(HullDesign design, int block) => design.Boxes[block].Facing;
+
+    /// <summary>The unit vector out of a face, in the hull's frame.</summary>
+    public static Vector3 Normal(BlockFacing face) => Facings.Vector(face);
+
+    /// <summary>The middle of a bay's hatch, on the block's face.</summary>
+    public static Vector3 HatchPoint(HullDesign design, int block)
+    {
+        var face = Hatch(design, block);
+        var axis = Facings.Axis(face);
+        var point = design.BlockOffsets[block];
+        point[axis] += Facings.Sign(face) * design.BlockHalfExtents[block][axis];
+        return point;
+    }
+
+    /// <summary>
+    /// Whether a bay's hatch faces open space: nothing of the hull it still has stands in the box that runs
+    /// <paramref name="clearance"/> metres out from the hatch's face, as wide as the face, and no part is mounted on
+    /// the hatch itself. Wedges count by their bounding boxes. Asks the design's collision tree, so a large hull
+    /// costs little; false once <paramref name="visits"/> tree nodes have been looked at without an answer.
+    /// </summary>
+    public static bool HatchClear(HullDesign design, ReadOnlySpan<ulong> alive, int block, float clearance, int visits)
+    {
+        var face = Hatch(design, block);
+        design.MountsOf(block, out var start, out var end);
+        var mounts = design.Mounts;
+        for (var i = start; i < end; i++)
+            if (mounts[i].Face == face) return false;
+        if (clearance <= 0) return true;
+        var axis = Facings.Axis(face);
+        var sign = Facings.Sign(face);
+        var centre = design.BlockOffsets[block];
+        var half = design.BlockHalfExtents[block];
+        const float inset = 1e-3f;
+        var low = centre - half + new Vector3(inset);
+        var high = centre + half - new Vector3(inset);
+        var plane = centre[axis] + sign * half[axis];
+        if (sign > 0) { low[axis] = plane + inset; high[axis] = plane + clearance; }
+        else { low[axis] = plane - clearance; high[axis] = plane - inset; }
+        var cursor = 0;
+        while (design.Collision.Next(ref cursor, low, high, alive, ref visits, out var other))
+        {
+            if (other == block) continue;
+            var c = design.BlockOffsets[other];
+            var h = design.BlockHalfExtents[other];
+            if (c.X - h.X < high.X && c.X + h.X > low.X && c.Y - h.Y < high.Y && c.Y + h.Y > low.Y && c.Z - h.Z < high.Z && c.Z + h.Z > low.Z)
+                return false;
+        }
+        if (visits <= 0) return false;
+
+        // A part mounted on another block's face can stand out into the way, as a block can.
+        for (var i = 0; i < mounts.Length; i++)
+        {
+            if (!BlockSet.Has(alive, mounts[i].Parent)) continue;
+            var c = design.MountOffsets[i];
+            var h = design.MountHalfExtents[i];
+            if (c.X - h.X < high.X && c.X + h.X > low.X && c.Y - h.Y < high.Y && c.Y + h.Y > low.Y && c.Z - h.Z < high.Z && c.Z + h.Z > low.Z)
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>Where the <paramref name="order"/>-th drone of one launch appears: in front of the hatch, one behind another.</summary>
+    public static Vector3 LaunchPoint(HullDesign design, int block, float droneRadius, float margin, int order) =>
+        HatchPoint(design, block) + Normal(Hatch(design, block)) * (droneRadius + margin + order * (2 * droneRadius + margin));
+
+    /// <summary>Where a returning drone lines up: straight out from the hatch.</summary>
+    public static Vector3 StagingPoint(HullDesign design, int block, float distance) =>
+        HatchPoint(design, block) + Normal(Hatch(design, block)) * distance;
+
+    /// <summary>Where a drone is taken in: just outside the hatch, by its own radius.</summary>
+    public static Vector3 DockPoint(HullDesign design, int block, float droneRadius) =>
+        HatchPoint(design, block) + Normal(Hatch(design, block)) * droneRadius;
+
+    /// <summary>Where a bay's drones hold when the player names no point: straight out from its hatch.</summary>
+    public static Vector3 DefaultHold(HullDesign design, int block, float distance) => StagingPoint(design, block, distance);
+
+    // A group's places around its point, nearest first: a five by five grid in the plane across the hatch, then the
+    // same again a layer out. Index n of a group takes entry n modulo the table's length, a layer per lap.
+    private static ReadOnlySpan<sbyte> Grid =>
+    [
+        0, 0, 1, 0, -1, 0, 0, 1, 0, -1, 1, 1, -1, -1, 1, -1, -1, 1,
+        2, 0, -2, 0, 0, 2, 0, -2, 2, 1, -2, -1, 1, 2, -1, -2, 2, -1, -2, 1, -1, 2, 1, -2,
+        2, 2, -2, -2, 2, -2, -2, 2,
+    ];
+
+    /// <summary>
+    /// The place of the <paramref name="slot"/>-th drone of a group holding <paramref name="point"/>, spread
+    /// <paramref name="spacing"/> apart in the plane across <paramref name="face"/>, a layer out per 25 drones.
+    /// </summary>
+    public static Vector3 HoldSlot(Vector3 point, BlockFacing face, int slot, float spacing)
+    {
+        var count = Grid.Length / 2;
+        var entry = slot % count;
+        var layer = slot / count;
+        var axis = Facings.Axis(face);
+        var u = Vector3.Zero; var v = Vector3.Zero;
+        u[(axis + 1) % 3] = 1; v[(axis + 2) % 3] = 1;
+        return point + (u * Grid[2 * entry] + v * Grid[2 * entry + 1]) * spacing + Normal(face) * (layer * spacing);
+    }
+}

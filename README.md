@@ -34,6 +34,17 @@ Power rises with load mass. Tier badges and the aiming turret visuals are not bu
 Editor lines show reachable racks; amber racks have no tractor access. Move the ship for blocked or distant cargo.
 The energy tooltip lists TRACTORS. No pickup key or pickup by touch; no allow-list/block-list filter yet.
 
+Drone bays (editor, Storage tab) are box blocks with one hatch: it faces away from the face the bay is placed on,
+and the model shows it (frame, orange doors, a light). A Common bay keeps 4 drones, launches 2 at once and rebuilds
+a lost one in 90 s; tiers are content, only Common is in the palette. `.` (or a click on the DRONES chip over the
+console) launches every drone inside; they leave through the hatch and hold station 14 m out in front of it. `,` (or
+the chip while drones are out) calls them home: they line up in front of the hatch, fly in and dock. A blocked hatch
+(a block or a part of the ship in front of it) refuses a launch, and the chip says why. Drones are small real hulls
+flown by the server: they collide, can be destroyed (the bay rebuilds them) and use power. A player has at most 12
+out. A jump calls them home; one still out when the ship leaves is lost. A saved world docks every drone. Not built:
+choosing the hold point in the interface, a drone panel, fetching cargo, scans and charges (later drone steps), and
+any avoidance: a drone flies straight to its place and may bump the ship it came from.
+
 
 Rocks can be scraped: a scrape cuts a groove into an asteroid for everyone who has it in view, hulls and loose
 containers touch the groove, and it is saved with the world. This is the foundation of mining and has no tool yet:
@@ -513,7 +524,7 @@ Not there yet: NAT traversal or automatic port forwarding (a host needs a UDP po
 saving hosted games (an unlisted or public game is not saved: a saved world cannot yet tell who a returning player
 is), playable saved multiplayer, deleting or renaming a world from the game, restoring a recovery copy
 from the game. Stations are not generated yet; gas reduces passive sensor reach; asteroids do not crack into pieces, and ore shows only as
-a tint. Asteroids come in a shared set of shapes until mining gives each one its own body. Mixed-size designs of hundreds of blocks now load, transfer, fly and take replicated damage.
+a tint. Asteroids come in a shared set of shapes until mining gives each one its own body. Every asteroid has a fixed interior from the seed (crust, mantle, veins of high-grade ore, sometimes a core pocket of its rarer mix-in, and unstable ice or gas pockets), but only as shared data: no scan, drill or crack reads it yet, and only `--open rock-interior` captures show it. Mixed-size designs of hundreds of blocks now load, transfer, fly and take replicated damage.
 Shared admission bounds geometry work, the intact shield shell and total catalogue resources before play.
 The default shell budget is 32,768 vertices and 196,608 indices per hull, and at most 910 blocks. A separate
 box-shaped part uses a triangulated rounded box of 80 surface vertices, so about four hundred separate boxes fit; separate
@@ -583,6 +594,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Asteroid scanner: scan the targeted asteroid (flight, command view) | `X` | |
 | Gas scanner: sample the gas cloud you are in or beside | `C` | |
 | Asteroid locator: pulse | `Y` | |
+| Drones: launch every drone in the bays / call them all home (flight, command view) | `.` / `,` | |
 | Gas window: clouds you have sampled | `F4` | |
 | Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |

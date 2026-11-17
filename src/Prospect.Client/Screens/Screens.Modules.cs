@@ -4,6 +4,7 @@ using Prospect.Client.Input;
 using Prospect.Client.Ui;
 using Prospect.Client.World;
 using Prospect.Game.Client;
+using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
 namespace Prospect.Client.Screens;
@@ -26,6 +27,11 @@ internal sealed partial class ScreenHost
     private readonly string[] _moduleKeyStrings = ["", "", ""];
     private int _moduleKeysVersion = -1;
     private ModuleTargets _moduleTargets;
+    private readonly DroneTracker _droneTrack = new();
+    private DroneChipState _droneState;
+    private byte[] _droneKeyName = [];
+    private byte[] _droneRecallKeyName = [];
+    private int _droneKeysVersion = -1;
     private bool _tipSawGasScanner;
     private bool _tipSawAsteroidTarget;
     private bool _tipSawLocator;
@@ -61,6 +67,16 @@ internal sealed partial class ScreenHost
         }
 
         _moduleTargets = targets;
+        _droneState = DroneUi.State(snapshot.Bays, own.Id);
+        _droneTrack.Update(snapshot.Bays, _ui.DeltaTime);
+        if (_droneKeysVersion != _app.Actions.Version)
+        {
+            _droneKeysVersion = _app.Actions.Version;
+            var launch = _app.Actions.Bindings(InputAction.LaunchDrones);
+            _droneKeyName = System.Text.Encoding.UTF8.GetBytes(launch.Length == 0 ? "UNBOUND" : launch[0].DisplayName.ToUpperInvariant());
+            var recall = _app.Actions.Bindings(InputAction.RecallDrones);
+            _droneRecallKeyName = System.Text.Encoding.UTF8.GetBytes(recall.Length == 0 ? "UNBOUND" : recall[0].DisplayName.ToUpperInvariant());
+        }
         var scan = snapshot.Modules.Scan;
         _moduleTrack.Update(scan, own.Id, (float)_moduleEquipment[2].Range, _ui.DeltaTime);
         for (var slot = 0; slot < 3; slot++)
@@ -85,8 +101,9 @@ internal sealed partial class ScreenHost
     /// The module keys. They work in the flight and command views, never over the editor, a dialog, a menu, the map,
     /// the controls page or while typing; a ready module asks the server, one that cannot says why on its chip.
     /// </summary>
-    private void HandleModuleKeys(PlayerInputBridge bridge)
+    private void HandleModuleKeys(PlayerInputBridge bridge, SessionSnapshot snapshot)
     {
+        DroneUi.HandleKeys(_app.Actions, _app.Devices, !_ui.WantsTextInput, snapshot.Bays, _app.World.Own.Id, bridge);
         for (var slot = 0; slot < 3; slot++)
         {
             var family = ModuleRules.Families[slot];
@@ -165,6 +182,9 @@ internal sealed partial class ScreenHost
         return n;
     }
 
+    /// <summary>Chips in the row over the console: one a module, and one for the drone bays when the ship has any.</summary>
+    private int StripChips() => ModulesPresent() + (_droneState != DroneChipState.Absent ? 1 : 0);
+
     /// <summary>
     /// Where the chip row is for <paramref name="present"/> modules: centred over the console. The chips and the
     /// tips that keep clear of them (<see cref="TipRegion.Console"/>) both read it, so they cannot disagree.
@@ -189,7 +209,7 @@ internal sealed partial class ScreenHost
     /// </summary>
     private void DrawModuleStrip(ImDrawListPtr background, SessionSnapshot snapshot, WorldView world, float alpha)
     {
-        var present = ModulesPresent();
+        var present = StripChips();
         if (present == 0)
             return;
         var look = ModuleStyle;
@@ -230,10 +250,86 @@ internal sealed partial class ScreenHost
                 RequestModule(slot, bridge);
         }
 
+        // The bays' chip comes last; a click launches every drone inside, or calls them home while some are out.
+        if (_droneState != DroneChipState.Absent)
+        {
+            var min = origin + new float2((width + gap) * shown, 0);
+            ImGui.PushID(3);
+            ImGui.SetCursorScreenPos(min);
+            var pressed = ImGui.InvisibleButton("##chip"u8, new float2(width, height));
+            var hot = ImGui.IsItemHovered();
+            ImGui.PopID();
+            DrawDroneChip(draw, min, new float2(width, height), hot, snapshot);
+            if (pressed && Bridge is { } bridge)
+            {
+                if (_droneState == DroneChipState.Out) bridge.RecallDrones(world.Own.Id);
+                else DroneUi.Launch(snapshot.Bays, world.Own.Id, bridge);
+            }
+        }
+
         Kit.Fade = previous;
         ImGui.End();
         if (hovered >= 0)
             DrawModuleTip(ImGui.GetForegroundDrawList(), hovered, hoveredMin, new float2(width, height), snapshot);
+    }
+
+    /// <summary>
+    /// The bays' chip: the key that acts now and what it does (launch while drones are inside, recall while any are
+    /// out), then drones out and inside, a rebuild, or the server's answer.
+    /// </summary>
+    private void DrawDroneChip(ImDrawListPtr draw, float2 min, float2 size, bool hot, SessionSnapshot snapshot)
+    {
+        var look = ModuleStyle;
+        var tier = look.Tier(ModuleQuality.Common);
+        var max = min + size;
+        var bays = snapshot.Bays;
+        bays.Totals(out var stocked, out var outside, out var pending, out var capacity);
+        var reply = _droneTrack.Speaking(look.Strip.ResultSeconds);
+        var previous = Kit.Fade;
+        Kit.Fade = previous * (hot ? 1f : _droneState == DroneChipState.Empty ? look.Strip.IdleAlpha : look.Strip.ReadyAlpha);
+        Hud.Plate(draw, min, max, tier.Rgb, hot);
+        draw.AddRectFilled(min + new float2(0, Kit.Px(4)), min + new float2(Kit.Px(3), size.Y - Kit.Px(4)), Kit.Color(tier.Rgb));
+        var pad = Kit.Px(Theme.Space2) + Kit.Px(3);
+        var inner = size.X - pad - Kit.Px(Theme.Space2);
+        var recalling = _droneState == DroneChipState.Out;
+        var key = recalling ? _droneRecallKeyName : _droneKeyName;
+        var keyWidth = Kit.Measure(_ui.Mono, Theme.FontCaption, key).X;
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, min + new float2(pad, Kit.Px(4)), Theme.Accent, key);
+        Kit.ClippedText(draw, _ui.SansMedium, Theme.FontCaption, min + new float2(pad + keyWidth + Kit.Px(Theme.Space2), Kit.Px(4)), Theme.Text, recalling ? "RECALL"u8 : "LAUNCH"u8, Math.Max(0f, inner - keyWidth - Kit.Px(Theme.Space2)));
+        var statusAt = min + new float2(pad, Kit.Px(20));
+        var rebuild = DroneUi.RebuildSeconds(bays, snapshot.ServerTick);
+        if (reply != DroneReply.None)
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, DroneUi.Refused(reply) ? Theme.Bad : Theme.Good, DroneUi.Words(reply), inner);
+        else if (_droneState == DroneChipState.Out)
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Info, Kit.F($"{outside} DRONES OUT  {stocked} IN"), inner);
+        else if (_droneState == DroneChipState.Ready)
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, pending > 0 ? Theme.Info : Theme.Good, Kit.F($"{stocked}/{capacity} DRONES IN"), inner);
+        else if (rebuild > 0)
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.TextDim, Kit.F($"REBUILD {rebuild} S"), inner);
+        else
+            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.TextMute, "EMPTY"u8, inner);
+
+        // A drone being rebuilt shows as a bar along the foot, filling as it nears done.
+        if (rebuild > 0 && bays.NextRebuild() is var done and > 0)
+        {
+            var full = Math.Max(1f, MaxRebuildTicks(snapshot));
+            var progress = Math.Clamp(1f - (done - snapshot.ServerTick) / full, 0f, 1f);
+            var track = new float2(min.X + Kit.Px(3), max.Y - Kit.Px(4));
+            draw.AddRectFilled(track, new float2(max.X - Kit.Px(1), max.Y - Kit.Px(1)), Kit.Color(Theme.PanelRaised, 0.9f));
+            draw.AddRectFilled(track, new float2(track.X + (max.X - Kit.Px(1) - track.X) * progress, max.Y - Kit.Px(1)), Kit.Color(Theme.TextDim));
+        }
+        Kit.Fade = previous;
+    }
+
+    /// <summary>The longest rebuild of the flown hull's bays, in ticks: what the rebuild bar measures against.</summary>
+    private float MaxRebuildTicks(SessionSnapshot snapshot)
+    {
+        var own = _app.World.Own;
+        if (own.Id == 0 || snapshot.Content is not { } content || own.Design >= content.Designs.Length) return 0;
+        var design = content.Designs[own.Design];
+        var longest = 0L;
+        foreach (var block in design.Bays) longest = Math.Max(longest, design.Types[block].Bay!.RebuildTicks);
+        return longest;
     }
 
     /// <summary>One chip: tier stripe, key and name, status and, while it runs, a bar along its foot.</summary>

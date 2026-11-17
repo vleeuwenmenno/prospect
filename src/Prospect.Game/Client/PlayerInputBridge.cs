@@ -213,6 +213,48 @@ public sealed class PlayerInputBridge
 
     internal EditorRequestMessage TakeCargoAdd() => _takenCargoAdd;
 
+    private bool _hasDroneCommand;
+    private DroneCommandMessage _droneCommand;
+
+    /// <summary>
+    /// Asks the server to launch <paramref name="count"/> drones from <paramref name="hull"/>'s bays to hold station:
+    /// at <paramref name="point"/> (the hull's own frame, metres from its pivot) when given, else each in front of
+    /// its own hatch. The answer shows in <see cref="SessionSnapshot.Bays"/>. A newer command replaces one not yet sent.
+    /// </summary>
+    public void LaunchDrones(uint hull, int count, System.Numerics.Vector3? point = null)
+    {
+        if (hull == 0 || count <= 0) return;
+        var at = point ?? System.Numerics.Vector3.Zero;
+        if (!float.IsFinite(at.X) || !float.IsFinite(at.Y) || !float.IsFinite(at.Z)) return;
+        lock (_lock)
+        {
+            _droneCommand = new DroneCommandMessage(hull, DroneCommand.Launch, (byte)Math.Min(count, byte.MaxValue), point.HasValue, at);
+            _hasDroneCommand = true;
+        }
+    }
+
+    /// <summary>Asks the server to call every drone of <paramref name="hull"/> home and stop launches still waiting.</summary>
+    public void RecallDrones(uint hull)
+    {
+        if (hull == 0) return;
+        lock (_lock)
+        {
+            _droneCommand = new DroneCommandMessage(hull, DroneCommand.Recall, 0, false, default);
+            _hasDroneCommand = true;
+        }
+    }
+
+    internal bool ConsumeDroneCommand(out DroneCommandMessage command)
+    {
+        lock (_lock)
+        {
+            command = _droneCommand;
+            var pending = _hasDroneCommand;
+            _hasDroneCommand = false;
+            return pending;
+        }
+    }
+
     private FillBlocks _fillBlocks;
     private int _fillCount;
     private uint _editHull, _editToken;

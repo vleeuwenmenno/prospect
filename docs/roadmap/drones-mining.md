@@ -1,6 +1,7 @@
 # Drones and mining
 
-Product direction from the brainstorm on 2026-11-16. Built so far: R1, the scrape foundation (see "R1 as built").
+Product direction from the brainstorm on 2026-11-16. Built so far: D1 (orders, the bay, launch and recall) and R1, the
+scrape foundation (see "R1 as built").
 
 ## Why
 
@@ -48,6 +49,8 @@ Product direction from the brainstorm on 2026-11-16. Built so far: R1, the scrap
 - A lost drone is gone; the bay rebuilds one slowly. Buying and building comes later.
 - The bay has tiers, like sensors and tractors: capacity, launch rate (how many at once), rebuild speed.
   Figures are content.
+- The bay is a box block with one hatch face, chosen like a rack's deck face. Drones leave and dock through
+  the hatch, which must face open space.
 
 ### Rock interiors: why crack
 
@@ -88,11 +91,15 @@ and the mining rules will be refined by playing.
   the same orders. One executor on the server, whoever gave the order.
 - The server decides every result: what a scan reveals, where a rock breaks, how much ore comes off.
 
-## Proposed (technical, not decided)
+### Drones as hulls and orders (built in D1)
 
 - Drones are small real hulls flown by the server with `HullSim`, so they collide, can be shot and use power.
   A drone that is used up (scan, charge) is removed when its job ends.
-- An order is a small record: kind, target, owner, limits. The executor runs it each tick without allocation.
+- An order is a small record (`TaskOrder`): task, phase, issuer, actor, base hull and bay, point, subject, until.
+  One executor on the server (`ServerHost.TickDrones`) runs a fixed table of them each tick without allocation.
+- The executor turns an order into the drone's `HullOrder` (move to a point), so a client predicts the drone with
+  the same autopilot. A new task is an `OrderTask` value and one case in the executor.
+- A saved world docks every drone: drones out are counted back into their bays, and no order survives a load.
 
 ## Build plan
 
@@ -110,7 +117,18 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
 ### Track D: drones
 
 1. D1, orders and the bay: the order record and its one executor on the server, the drone bay block with tiers,
-   drones as small server-flown hulls, launch and return.
+   drones as small server-flown hulls, launch and return. **Done.** Notes:
+   - Bay: `droneBay` (box only, one cell), `bay` figures and `bayTiers` in `blocks.json`; Common keeps 4,
+     launches 2 at once, rebuilds one in 90 s. At most 16 bays a design (`limits.maxBays`).
+   - Hatch: the block's facing, chosen in the editor as the face opposite the one the bay is set against.
+     A launch and a docking need the hatch clear for 3 m of the ship's own blocks and mounts.
+   - Drones: the `work_drone` design (fleet role `workDrone`), all ion, no shield, no drive. Figures and caps in
+     `blocks/drones.json`: 12 out per player, 16 hulls kept free below the 255-hull ceiling.
+   - Orders in D1: Hold (a point in the base's frame; by default 14 m out from each hatch, spread on a grid) and
+     Recall (line up 6 m out, fly in, dock). A jump recalls; drones still out when the ship leaves are lost.
+   - Interface: `.` launches all, `,` recalls all, a DRONES chip over the console. No drone panel yet (D2).
+   - Gaps: no avoidance on the way home; the hold point is not chosen in the interface yet; drones out of a hull
+     that is not the one flown show nowhere but in the world.
 2. D2, fetching cargo: drones bring containers back; two or more lift a heavy one; claims respected.
 3. D3, scans: group scan and detailed scan (needs rock interiors, track I).
 4. D4, charges: drones place charges along the player's cutting plane (needs R2).
@@ -118,6 +136,7 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
 ### Track I: rock interiors and heat
 
 1. I1, interiors: crust, mantle, veins and pockets from the seed; what scraping and cracking yield.
+   Done: the shared query. The yield rules themselves come with R3 and R4. See "I1: rock interiors (built)".
 2. I2, heat cracking: the special laser and the heat window.
 
 ## R1 as built
@@ -129,7 +148,7 @@ How to work on it is in `AGENTS.md`, "Rock edits (scrapes)". This is what exists
 - The edit list per rock (`RockEditLog`), server-owned, append-only. A scrape is a capsule in whole numbers.
 - One way to make an edit: `ServerHost.ScrapeRock`. The mining laser (R3) will call it.
 - Bricks of 8³ cells at 0.25 m, one signed byte a sample, only where a scrape cut or came within a cell (`RockBricks`).
-- Wire (protocol 64), save (codec 17), contact for hulls and loose containers, drawing with level of detail.
+- Wire (protocol 65), save (codec 18), contact for hulls and loose containers, drawing with level of detail.
 - The temporary debug scrape: `F10` in the pilot view and `--open rock-scrape` for captures.
 
 ### What changed from the spike
@@ -191,11 +210,76 @@ Measured (this machine, Release, one thread, a three-pass groove of 48 scrapes, 
 
 ## Open
 
-- What the drone bay looks like and how drones leave and come back (a hatch face?).
-- The exact generation of crust, veins and pockets, and their figures.
+- The drone bay's final look. A first model is built (frame, plating, a hatch rim, two orange doors, a light);
+  its figures are in `visuals/propulsion.json`.
+- The figures for crust, veins and pockets. First guesses are in `content/galaxy/interiors.json`; tune from
+  `--open rock-interior` captures.
 - The heat game's figures: heat rate, cooling, the window, what overheating does.
 - The Ore Cargo window's layout.
 - Automated mining by NPCs and captains: out of scope now; only the order model above is designed for it.
+
+## I1: rock interiors (built)
+
+### What it is
+
+- `RockInterior` in `Prospect.Game/World`: a query-only description of every rock's inside.
+- From the seed, the sector and the rock's index. The same on every machine, for every player.
+- Its own streams (`rock-interior` key, then vein, pocket and unstable draws). No existing stream is touched.
+- No rock, list or composition changed. No `GenerationVersion` or protocol bump.
+
+### How it is laid out
+
+- Normalised space: a point's distance from the centre divided by the surface's distance that way.
+  The rock is a unit ball there; the crust follows the surface.
+- The surface comes from `RockInteriorSurface`: a 32-cell cube map per shape, built with `DetMath`.
+  It follows `AsteroidShape` within about a percent of the radius.
+- Order of a point: crust, then pockets, then veins, else mantle. Outside the rock reads as crust.
+- Core pocket: the rarer mix-in (`Mix2`, else `Mix1`). Only rocks with a mix-in have one.
+- Unstable pockets: ice or volatile gas, no ore. Flagged (`RockSample.Unstable`) for cracking later.
+- Ice shards (`AsteroidShape.Icicle`) have an ice body.
+
+### How ore adds up
+
+- The core pocket takes `pocket.holds` of its mix-in, at most `maxLocalOre` per point.
+- The rest is spread over crust, mantle and veins by their factors (`crust.ore`, `veins.ore`).
+- Layer volumes are worked out, not counted. Crust is exact for the table; veins and pockets are close.
+- A rich rock is evened out until no point holds more than `maxLocalOre`.
+- Measured: over 93 sample rocks the integrated shares are within 3.4 % of the published ones
+  (`bulkTolerance` is 10 %).
+
+### The API
+
+- `RockInterior.Describe(galaxy, rockRef, asteroid, out interior)`: once per rock.
+- `interior.Sample(local, out sample)`: layer, material, pocket kind, depth, shares, strongest ore and grade.
+- `interior.Average(centre, radius, perAxis, out volume)`: a lattice of up to 16³ points, for a scan.
+- `RockInterior.ToLocal(asteroid, offset)`: world offset into the rock's own frame.
+- No memory taken. Debug build: about 0.7 µs a sample, 19 µs a describe.
+
+### First-guess figures (`content/galaxy/interiors.json`)
+
+| Figure | Value |
+| --- | --- |
+| Crust depth | 0.14 of the surface distance, at most 60 m, wobble ±35 % |
+| Crust ore | 0.45 × mantle |
+| Veins | 3 to 7, radius 0.04–0.09, taper ±40 %, 14 segments of 0.08–0.13, twist 0.55 |
+| Vein ore | 3 × mantle |
+| Core pocket | 45 % of rocks with a mix-in, radius 0.12–0.24, within 0.35 of the centre, holds half the mix-in |
+| Unstable pockets | two tries at 25 %, radius 0.06–0.12, ice or gas equally |
+| Most ore at a point | 92 % |
+
+### Check it
+
+- `make run ARGS="--start local --open rock-interior --rock-interior-size small|medium|giant --rock-interior-resource iron --capture f.png --capture-after 4"`.
+- Captures only. A real rock near home, cut through its centre; a legend lists its layers.
+- Colours: crust light brown, mantle tinted by its ore, veins and core pocket in their ore's colour, ice pale blue,
+  gas orange.
+- Captures from the first build: `artifacts/captures/rock-interior/` (not committed).
+
+### Limits
+
+- Veins are polylines of capsules: they bend at their points.
+- Crack pieces (R2) take indices past the generated list; they will need their parent's interior, not their own.
+- The crust wobble pattern is per shape, not per rock (rocks are turned, so it does not repeat visibly).
 
 ## Spike results: how a rock holds edits
 

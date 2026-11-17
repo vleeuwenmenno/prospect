@@ -104,11 +104,17 @@ public enum MessageId : byte
     /// <summary>Client to server: release cargo from the controlled hull without an editor.</summary>
     JettisonCargo = 38,
 
+    /// <summary>Client to server: launch or recall a hull's drones (<see cref="DroneCommandMessage"/>).</summary>
+    DroneCommand = 39,
+
+    /// <summary>Server to client: the flown hull's drone bays and the newest drone answer (<see cref="BayMessage"/>).</summary>
+    Bays = 40,
+
     /// <summary>Server to client, reliable: a run of one rock's edits. See <see cref="RockEditsMessage"/>.</summary>
-    RockEdits = 39,
+    RockEdits = 41,
 
     /// <summary>Client to server, reliable: the temporary debug scrape. See <see cref="RockScrapeRequest"/>.</summary>
-    RockScrape = 40,
+    RockScrape = 42,
 }
 
 public enum RejectReason : byte
@@ -185,7 +191,7 @@ public static class ProtocolInfo
     /// index in a list both ends generate for themselves, so two builds that generate differently would mean
     /// different rocks by the same number. Client and server must match exactly.
     /// </summary>
-    public const uint Version = 64;
+    public const uint Version = 65;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;

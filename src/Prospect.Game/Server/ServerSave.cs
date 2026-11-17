@@ -247,7 +247,8 @@ public sealed partial class ServerHost
 
         var count = world.DesignCount;
         if (count is < 1 or > SaveLimits.MaxDesigns || world.Designs.Length < count || world.DesignHashes.Length < count
-            || (uint)world.PodDesign >= (uint)count || (uint)world.DroneDesign >= (uint)count || world.StartingFleet.Length > byte.MaxValue)
+            || (uint)world.PodDesign >= (uint)count || (uint)world.DroneDesign >= (uint)count || (uint)world.WorkDroneDesign >= (uint)count
+            || world.StartingFleet.Length > byte.MaxValue)
             throw new InvalidDataException("The saved design catalogue does not hold together.");
         foreach (var design in world.StartingFleet)
             if ((uint)design >= (uint)count) throw new InvalidDataException("The saved starting fleet names a design the catalogue does not have.");
@@ -290,7 +291,10 @@ public sealed partial class ServerHost
             }
         }
 
-        return under.WithCatalogue(designs, world.PodDesign, world.DroneDesign, world.StartingFleet);
+        // The drone a bay launches stays a small craft without a drive, whatever the catalogue was saved with.
+        if (designs[world.WorkDroneDesign].Class != HullClass.Fighter || designs[world.WorkDroneDesign].Flight.Ftl != FtlKind.None)
+            throw new InvalidDataException("The saved work drone is not a small craft without a jump drive.");
+        return under.WithCatalogue(designs, world.PodDesign, world.DroneDesign, world.StartingFleet, world.WorkDroneDesign);
     }
 
     /// <summary>
@@ -345,6 +349,7 @@ public sealed partial class ServerHost
         var losses = 0;
         var tanks = 0;
         var cargoCount = 0;
+        var bayCount = 0;
         for (var i = 0; i < world.HullCount; i++)
         {
             ref var saved = ref world.Hulls[i];
@@ -392,6 +397,14 @@ public sealed partial class ServerHost
                 throw new InvalidDataException($"Saved hull {i} has invalid wreck state.");
             info.WreckBorn = saved.WreckBorn;
             info.WreckAge = saved.WreckAge;
+
+            // A bay keeps what it had inside and the drone it was rebuilding; drones that were out came home with the save.
+            if (!info.Wreck) AttachBays(handle);
+            if (saved.BayStart != bayCount || saved.Bays < 0 || saved.Bays > world.BayCount - bayCount
+                || !RestoreBays(handle, world.BayStocked.AsSpan(bayCount, saved.Bays), world.BayRebuild.AsSpan(bayCount, saved.Bays), world.NextWorldTick, out error))
+                throw new InvalidDataException($"Saved hull {i}: {(error.Length > 0 ? error : "its drone bays do not fit the save")}.");
+            bayCount += saved.Bays;
+            info = ref _hulls.Info(handle.Index);
             info.ConnectivityRevision = _hulls.Revision(handle.Index);
             _field.RestoreFigures(handle.Index);
             error = JudgeHull(saved, _hulls.Flight(handle.Index), design, world.NextWorldTick);
@@ -408,7 +421,7 @@ public sealed partial class ServerHost
             info.Piloted = owner >= 0 && _owners[owner].Controlled == saved.Entity;
         }
 
-        if (blocks != world.BlockCount || losses != world.LossCount || tanks != world.TankCount || cargoCount != world.CargoCount)
+        if (blocks != world.BlockCount || losses != world.LossCount || tanks != world.TankCount || cargoCount != world.CargoCount || bayCount != world.BayCount)
             throw new InvalidDataException("The saved hulls do not add up to the saved blocks.");
 
         for (var i = 0; i < _ownerCount; i++)
@@ -544,6 +557,7 @@ public sealed partial class ServerHost
         buffer.DesignCount = buffer.Designs.Length;
         buffer.PodDesign = _content.PodDesign;
         buffer.DroneDesign = _content.DroneDesign;
+        buffer.WorkDroneDesign = _content.WorkDroneDesign;
         buffer.StartingFleet = _content.StartingFleet;
 
         buffer.HullCount = 0;
@@ -551,6 +565,7 @@ public sealed partial class ServerHost
         buffer.LossCount = 0;
         buffer.TankCount = 0;
         buffer.CargoCount = 0;
+        buffer.BayCount = 0;
         buffer.CargoRules = SavedCargoRules.Of(_content);
         buffer.FreeContainerCount = _containers.Items.Length;
         buffer.NextContainerId = _containers.NextId;
@@ -560,6 +575,10 @@ public sealed partial class ServerHost
             if (!_hulls.IsAliveAt(i))
                 continue;
             ref var info = ref _hulls.Info(i);
+
+            // A drone out of its bay is not saved: the save counts it back into the bay it came from.
+            if (info.WorkDrone)
+                continue;
             var points = _hulls.BlockStates.HitPoints(info.BlockState);
             var lost = _hulls.BlockStates.Losses(info.BlockState);
             ref var saved = ref buffer.Hulls[buffer.HullCount++];
@@ -597,6 +616,19 @@ public sealed partial class ServerHost
             saved.CargoCount = cargo.Length;
             cargo.CopyTo(buffer.Cargo.AsSpan(buffer.CargoCount));
             buffer.CargoCount += cargo.Length;
+
+            // A bay is a block, so the room for every hull's blocks is room for every hull's bays.
+            var page = PageOf(_hulls.HandleAt(i));
+            var bays = page >= 0 ? _content.Designs[info.Design].Bays : [];
+            saved.BayStart = buffer.BayCount;
+            saved.Bays = bays.Length;
+            for (var b = 0; b < bays.Length; b++)
+            {
+                var capacity = _content.Designs[info.Design].Types[bays[b]].Bay!.Capacity;
+                var stocked = SavedStock(page, b, capacity);
+                buffer.BayStocked[buffer.BayCount] = (byte)stocked;
+                buffer.BayRebuild[buffer.BayCount++] = stocked >= capacity ? 0 : SavedRebuild(page, b);
+            }
         }
 
         // An owner whose hull went while they were away is saved as flying nothing: they get a drone when let in.
@@ -868,6 +900,7 @@ public sealed partial class ServerHost
         }
 
         _hulls.Info(handle.Index).Entity = entity != 0 ? entity : _nextEntityId++;
+        AttachBays(handle);
         return handle;
     }
 

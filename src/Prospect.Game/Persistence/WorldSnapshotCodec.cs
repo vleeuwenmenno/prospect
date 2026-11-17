@@ -28,7 +28,7 @@ namespace Prospect.Game.Persistence;
 public static partial class WorldSnapshotCodec
 {
     /// <summary>The layout's version. A save with any other is refused; there are no migrations yet.</summary>
-    public const int Version = 17;
+    public const int Version = 18;
     internal const int ChartBytes = 4 + 12 + 8;
 
     /// <summary>"PWS1": tells a save from any other bytes before its version is believed.</summary>
@@ -38,6 +38,9 @@ public static partial class WorldSnapshotCodec
     internal const int DentBytes = 4 + 1 + 1 + 2 + 2;
     internal const int RockBytes = 12 + 4 + 12 + 12 + 8;
 
+    /// <summary>One drone bay: drones inside, ticks left on its rebuild.</summary>
+    internal const int BayBytes = 1 + 4;
+
     /// <summary>A hull's record without its dents, lost blocks, hit points and tanks.</summary>
     internal const int HullFixedBytes =
         8 + 4 + 1 + 1 + 8 + 16 // entity, owner, design, flags, damage tick
@@ -45,7 +48,8 @@ public static partial class WorldSnapshotCodec
         + 1 + 24 // order
         + 4 + 1 + 4 + 8 + DentBytes // dent version and count, spark
         + 4 + 4 + 8 // blocks, losses, hit total
-        + 4 + 4; // tanks and cargo
+        + 4 + 4 // tanks and cargo
+        + 4; // drone bays
 
     /// <summary>Everything before the catalogue's designs, at its longest.</summary>
     internal const int HeaderBound =
@@ -53,8 +57,8 @@ public static partial class WorldSnapshotCodec
         + 16 + 1 + SaveLimits.MaxNameBytes + 8 + 8 + 12
         + 1 + WorldSettings.Capacity * (1 + WorldSettingCatalog.MaxIdLength + 4)
         + 8 + 8 + 4 + 8
-        + 4 + byte.MaxValue
-        + 8 * 4 + 4 + SavedCargoRules.WireBytes + 8 + 8;
+        + 5 + byte.MaxValue
+        + 8 * 4 + 4 + 4 + SavedCargoRules.WireBytes + 8 + 8;
 
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
@@ -64,13 +68,13 @@ public static partial class WorldSnapshotCodec
         long size = 4 + 4 + 4 + 4 + ContentIdentity.WireSize + 16 + 1 + Utf8.GetByteCount(snapshot.Name) + 8 + 8 + 12 + 1;
         for (var i = 0; i < snapshot.SettingCount; i++)
             size += 1 + snapshot.SettingIds[i].Length + 4;
-        size += 8 + 8 + 4 + 8 + 4 + snapshot.StartingFleet.Length + 8 * 4 + 4 + SavedCargoRules.WireBytes + 8 + 8 + RockEditBytes(snapshot);
+        size += 8 + 8 + 4 + 8 + 5 + snapshot.StartingFleet.Length + 8 * 4 + 4 + 4 + SavedCargoRules.WireBytes + 8 + 8 + RockEditBytes(snapshot);
         for (var i = 0; i < snapshot.DesignCount; i++)
             size += 4 + SHA256.HashSizeInBytes + snapshot.Designs[i].Length;
         size += (long)snapshot.OwnerCount * OwnerBytes;
         for (var i = 0; i < snapshot.HullCount; i++)
             size += HullFixedBytes + snapshot.Hulls[i].Visual.Count * DentBytes;
-        size += (long)snapshot.LossCount * sizeof(int) + (long)snapshot.BlockCount * sizeof(float) + (long)snapshot.TankCount * sizeof(double) + (long)snapshot.CargoCount * CargoRecordBytes;
+        size += (long)snapshot.LossCount * sizeof(int) + (long)snapshot.BlockCount * sizeof(float) + (long)snapshot.TankCount * sizeof(double) + (long)snapshot.CargoCount * CargoRecordBytes + (long)snapshot.BayCount * BayBytes;
         return size + (long)snapshot.FreeContainerCount * FreeContainerBytes + (long)snapshot.RockCount * RockBytes + (long)snapshot.ChartCount * ChartBytes + (long)snapshot.ModuleObservationCount * ModuleObservationBytes;
     }
 
@@ -133,6 +137,7 @@ public static partial class WorldSnapshotCodec
         writer.WriteByte((byte)snapshot.DesignCount);
         writer.WriteByte((byte)snapshot.PodDesign);
         writer.WriteByte((byte)snapshot.DroneDesign);
+        writer.WriteByte((byte)snapshot.WorkDroneDesign);
         writer.WriteByte((byte)snapshot.StartingFleet.Length);
         foreach (var design in snapshot.StartingFleet)
             writer.WriteByte((byte)design);
@@ -146,6 +151,7 @@ public static partial class WorldSnapshotCodec
         writer.WriteInt32(snapshot.ChartCount);
         writer.WriteInt32(snapshot.ModuleObservationCount);
         writer.WriteInt32(snapshot.CargoCount);
+        writer.WriteInt32(snapshot.BayCount);
         snapshot.CargoRules.Write(ref writer);
         writer.WriteInt32(snapshot.FreeContainerCount);
         writer.WriteUInt32(snapshot.NextContainerId);
@@ -208,6 +214,12 @@ public static partial class WorldSnapshotCodec
             writer.WriteInt32(hull.CargoCount);
             foreach (var container in snapshot.Cargo.AsSpan(hull.CargoStart, hull.CargoCount))
                 WriteCargo(ref writer, container);
+            writer.WriteInt32(hull.Bays);
+            for (var b = 0; b < hull.Bays; b++)
+            {
+                writer.WriteByte(snapshot.BayStocked[hull.BayStart + b]);
+                writer.WriteInt32(snapshot.BayRebuild[hull.BayStart + b]);
+            }
         }
 
         for (var i = 0; i < snapshot.RockCount; i++)
@@ -342,6 +354,7 @@ public static partial class WorldSnapshotCodec
         int designCount = reader.ReadByte();
         int pod = reader.ReadByte();
         int drone = reader.ReadByte();
+        int workDrone = reader.ReadByte();
         var fleetBytes = reader.ReadBytes(reader.ReadByte());
 
         var owners = reader.ReadInt32();
@@ -353,6 +366,7 @@ public static partial class WorldSnapshotCodec
         var charts = reader.ReadInt32();
         var observations = reader.ReadInt32();
         var cargoCount = reader.ReadInt32();
+        var bayCount = reader.ReadInt32();
         var cargoRules = SavedCargoRules.Read(ref reader);
         var freeCount = reader.ReadInt32();
         var nextContainer = reader.ReadUInt32();
@@ -371,7 +385,8 @@ public static partial class WorldSnapshotCodec
         }
 
         // Every count against its limit and against the bytes left, before a single array is taken for it.
-        if ((uint)freeCount > FreeContainers.Capacity || designCount < 1 || pod >= designCount || drone >= designCount
+        if ((uint)freeCount > FreeContainers.Capacity || designCount < 1 || pod >= designCount || drone >= designCount || workDrone >= designCount
+            || bayCount < 0 || bayCount > blocks || bayCount > (long)hulls * DroneBayRules.MaxBays
             || (uint)owners > (uint)limits.MaxOwners || (uint)hulls > (uint)limits.MaxHulls || (uint)blocks > (uint)limits.MaxBlocks
             || (uint)losses > (uint)blocks || (uint)tanks > (uint)blocks || (uint)rocks > (uint)limits.MaxRocks || charts < 0 || charts > limits.MaxCharts
             || observations < 0 || observations > limits.MaxModuleObservations
@@ -383,7 +398,7 @@ public static partial class WorldSnapshotCodec
         }
 
         var promised = (long)designCount * (4 + SHA256.HashSizeInBytes) + (long)owners * OwnerBytes + (long)hulls * HullFixedBytes
-            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)tanks * sizeof(double) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes + (long)cargoCount * CargoRecordBytes + (long)freeCount * FreeContainerBytes
+            + (long)losses * sizeof(int) + (long)blocks * sizeof(float) + (long)tanks * sizeof(double) + (long)rocks * RockBytes + (long)charts * ChartBytes + (long)observations * ModuleObservationBytes + (long)cargoCount * CargoRecordBytes + (long)freeCount * FreeContainerBytes + (long)bayCount * BayBytes
             + (long)editedRocks * EditedRockBytes + (long)rockEdits * RockEditCodec.ScrapeOnBytes;
         if (promised > reader.Remaining)
         {
@@ -439,6 +454,7 @@ public static partial class WorldSnapshotCodec
             DesignCount = designCount,
             PodDesign = pod,
             DroneDesign = drone,
+            WorkDroneDesign = workDrone,
             StartingFleet = fleet,
             OwnerCount = owners,
             HullCount = hulls,
@@ -548,6 +564,15 @@ public static partial class WorldSnapshotCodec
                 { error = "a saved cargo record is malformed"; return false; }
                 result.Cargo[result.CargoCount++] = container;
             }
+            hull.BayStart = result.BayCount;
+            hull.Bays = reader.ReadInt32();
+            if ((uint)hull.Bays > DroneBayRules.MaxBays || hull.Bays > hull.Blocks || hull.Bays > bayCount - result.BayCount)
+            { error = "a hull's drone bays exceed the saved bounds"; return false; }
+            for (var b = 0; b < hull.Bays; b++)
+            {
+                result.BayStocked[result.BayCount] = reader.ReadByte();
+                result.BayRebuild[result.BayCount++] = reader.ReadInt32();
+            }
             if (!reader.IsValid)
             {
                 error = "the save ends inside a hull";
@@ -620,7 +645,7 @@ public static partial class WorldSnapshotCodec
             return false;
         }
 
-        if (!reader.IsValid || reader.Remaining != 0 || result.BlockCount != blocks || result.LossCount != losses || result.TankCount != tanks || result.CargoCount != cargoCount)
+        if (!reader.IsValid || reader.Remaining != 0 || result.BlockCount != blocks || result.LossCount != losses || result.TankCount != tanks || result.CargoCount != cargoCount || result.BayCount != bayCount)
         {
             error = "the save's records do not add up to what it promised";
             return false;

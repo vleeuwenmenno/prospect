@@ -29,7 +29,7 @@ Saved multiplayer and moving a world between machines stay undelivered until ver
 | Type | What it is |
 | --- | --- |
 | `WorldSnapshot` | The bounded state of a world between two intervals. A buffer, never live memory. |
-| `WorldSnapshotCodec` | The save's own byte layout, `Version` 17. Reading trusts nothing. |
+| `WorldSnapshotCodec` | The save's own byte layout, `Version` 18. Reading trusts nothing. |
 | `SaveLimits` | Aggregate bounds of a world and of a save: owners, hulls, blocks, asteroids, sectors. |
 | `IWorldStore` | A leased store: `Commit`, `Backup`, `Dispose`. One worker thread uses it. |
 | `SqliteWorldStore` | The store on disk: one SQLite database per world folder. |
@@ -501,7 +501,7 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
   without a connected pilot within the base sensor radius. Birth/id order controls cap eviction.
 - Layouts before 15 are refused without migration. Wreck splitting preserves held cargo; only rack damage ejects.
 
-## Rock edits (codec 17)
+## Rock edits (codec 18)
 
 - A save holds every scraped rock's edit list: rock by rock in the order each was first scraped, a rock's edits in
   the order they were made. Bricks and meshes are not saved; they are worked out again on load.
@@ -514,7 +514,8 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
 - Load rule (`RestoreRockEdits`): every edit must be one `content/rules/rock_edits.json` allows on a rock this
   galaxy really has there, and that rock must be one that can be scraped. Otherwise the save is refused whole.
 - `rock_edits.json` is in the save identity: a retune refuses older worlds, as for other shared content.
-- Layouts before 17 are refused without migration.
+- Layouts before 18 are refused without migration. Codec 18 holds the drone bays of codec 17 and these lists;
+  each has its own load rule.
 
 ## Tractor acquisition (codec 15)
 
@@ -526,3 +527,15 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
 
 - Pickup ownership survives load and reconnect using the same durable owner as hulls. Unknown owners refuse loading.
 - Pickup-ready ticks survive unchanged on the saved simulation clock; time offline does not consume the delay.
+
+## Drone bays (codec 17)
+
+- Each owned hull saves one record per bay of its design, in block order: drones inside and ticks left on the
+  drone being rebuilt. Five bytes a bay; a wreck saves none. Bays are blocks, so block room covers them.
+- Drones out of their bays are not saved. Capture counts each one back into its bay: a loaded world has every
+  drone docked, and no order survives a load. Docked drones never exceed the bay's capacity.
+- The work drone design is a catalogue role, saved with the pod and the escape drone; load refuses one that is not
+  a small craft without a jump drive.
+- Load refuses a bay count other than the design's, drones above capacity, a rebuild longer than the bay's, a
+  rebuild in a full bay, and anything in a bay whose block was lost. Layouts before 18 are refused untouched
+  (18 added rock edits to the bays of 17).

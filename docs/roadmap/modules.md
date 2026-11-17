@@ -164,7 +164,7 @@ WorldSnapshot holds the counted ModuleObservations prefix. Save codec 5 owns its
 Capture copies into a preallocated buffer; the save worker alone writes it.
 Loading checks owner, uniqueness, capacity, finite values, a possible mix, observation tick, resource catalogue (mix-ins too) and generated target existence.
 Active scans and cooldowns are transient and reset on load. Generated mixtures are recomputed; observed values are retained unchanged.
-Evaluator version is 18; protocol 64; generation 8; save codec 17. Older incompatible saves are refused untouched, without migration.
+Evaluator version is 18; protocol 65; generation 8; save codec 18. Older incompatible saves are refused untouched, without migration.
 
 ## Decided: interface
 
@@ -182,7 +182,7 @@ Evaluator version is 18; protocol 64; generation 8; save codec 17. Older incompa
 - Built. The three scanners are face mounts (`mount` in `blocks.json`, see `propulsion.md`, "Decided: scanners mount"), like
   thrusters and the tractor beam. Design file version 6.
 - Old design files with a scanner block load converted: plating plus one scanner on the first face with room, or refused
-  if no face is free. Old saved worlds are refused (save layout 17).
+  if no face is free. Old saved worlds are refused (save layout 18).
 - The sector scanner (`charting`) and the passive `sensor` stay blocks for now.
 
 ## Open

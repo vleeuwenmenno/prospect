@@ -35,6 +35,15 @@ public struct HullInfo
     public bool EscapeDrone;
     /// <summary>True for an unowned inert wreck.</summary>
     public bool Wreck;
+
+    /// <summary>
+    /// True for a drone launched from a drone bay: flown by the server under an order, never piloted, never saved
+    /// (a saved world docks it). Set only where the hull is decided.
+    /// </summary>
+    public bool WorkDrone;
+
+    /// <summary>The server's record of the hull's drone bays, one past its page; zero for none. Server only.</summary>
+    public int BayPage;
     /// <summary>World tick when this wreck was created, and ticks aged away from players.</summary>
     public long WreckBorn, WreckAge;
     /// <summary>Last block loss revision examined for connectivity.</summary>

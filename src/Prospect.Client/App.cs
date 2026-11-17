@@ -131,6 +131,9 @@ internal sealed class AppOptions
     public float? BreakShieldSeconds { get; set; }
     public float? RamSpeed { get; set; }
 
+    /// <summary>Scripted runs only (<c>--coast</c>): the speed the own hull is set coasting at, dampeners off.</summary>
+    public float? CoastSpeed { get; set; }
+
     /// <summary>Scripted runs only (<c>--hurt-fleet</c>): seconds into the run at which the other owned hulls are hurt.</summary>
     public float? HurtFleetSeconds { get; set; }
 
@@ -178,6 +181,12 @@ internal sealed class AppOptions
     public float? ThrustUntil { get; set; }
     public string ExhaustKind { get; set; } = "engine";
 
+    /// <summary>Scripted captures only (<c>--open rock-interior</c>): which size of rock to cut open.</summary>
+    public string RockInteriorSize { get; set; } = "medium";
+
+    /// <summary>Scripted captures only: the resource id the cut rock's main ore must be, or null for any.</summary>
+    public string? RockInteriorResource { get; set; }
+
     /// <summary>Scripted runs only (<c>--open rock-scrape</c>): the radius in metres of the rock to scrape; the spawn sector's nearest in size is taken.</summary>
     public float RockScrapeRadius { get; set; } = 10f;
 
@@ -221,6 +230,12 @@ internal sealed class AppOptions
     public bool HurtFleetTank { get; set; }
     public bool HurtFleetCargo { get; set; }
     public float? JettisonSeconds { get; set; }
+
+    /// <summary>
+    /// Scripted runs only, with <c>--open drones</c> (<c>--drone-recall</c>): seconds after the splash at which the
+    /// three drones launched at 1.5 s are called home.
+    /// </summary>
+    public float DroneRecallSeconds { get; set; } = 14f;
     public bool CargoSample { get; set; }
     /// <summary>Capture only: <c>--cargo-wide</c> loads a rack with one container of each resource and jettisons several.</summary>
     public bool CargoWide { get; set; }
@@ -687,6 +702,7 @@ internal sealed class App : IDisposable
                 VisualBenchmark = _options.VisualBenchmark,
                 ScriptedShieldBreakSeconds = _options.BreakShieldSeconds,
                 ScriptedRamSpeed = _options.RamSpeed,
+                ScriptedCoastSpeed = _options.CoastSpeed,
                 ScriptedRockScrapeRadius = Devices.Muted && _options.OpenView == "rock-scrape" ? _options.RockScrapeRadius : null,
                 ScriptedRockScrapeStandoff = _options.RockScrapeStandoff,
                 ScriptedRockScrapeRest = Devices.Muted && _options.OpenView == "rock-scrape" ? _options.RockScrapeRest : null,
@@ -1167,6 +1183,35 @@ internal sealed class App : IDisposable
         _window.SetFullscreen(monitor, new int2(mode.Width, mode.Height), mode.RefreshRate);
     }
 
+    private bool _dronesLaunched, _dronesRecalled, _benchmarkSawDrones, _dronesHome;
+    private int _dronesOut;
+
+    /// <summary>
+    /// Capture and bench only (<c>--open drones</c>): launches three drones from the flown hull's bays 1.5 s after the
+    /// splash and calls them home at <see cref="AppOptions.DroneRecallSeconds"/>, through the same bridge calls as the
+    /// keys, and keeps count of the drones seen out and whether the bays are full again.
+    /// </summary>
+    private void ScriptDrones(SessionSnapshot snapshot, Prospect.Game.World.GameContent content)
+    {
+        var own = snapshot.Hulls[snapshot.OwnHull].Id;
+        if (!_dronesLaunched && _sinceSplash >= 1.5f && DroneUi.Present(snapshot.Bays, own))
+        {
+            _dronesLaunched = true;
+            Session!.Client.Input.LaunchDrones(own, 3);
+        }
+        if (_dronesLaunched && !_dronesRecalled && _sinceSplash >= _options.DroneRecallSeconds)
+        {
+            _dronesRecalled = true;
+            Session!.Client.Input.RecallDrones(own);
+        }
+        _dronesOut = 0;
+        for (var i = 0; i < snapshot.HullCount; i++)
+            if (snapshot.Hulls[i].Owner == snapshot.PlayerId && snapshot.Hulls[i].Design == content.WorkDroneDesign) _dronesOut++;
+        _benchmarkSawDrones |= _dronesOut > 0;
+        snapshot.Bays.Totals(out var stocked, out var outside, out _, out var capacity);
+        _dronesHome = _dronesRecalled && outside == 0 && stocked == capacity && capacity > 0;
+    }
+
     /// <summary>Drives the scripted runs: a timed screenshot (<c>--capture</c>) and the benchmark (<c>--bench</c>).</summary>
     private void Automate(SessionSnapshot? snapshot, bool worldDrawn)
     {
@@ -1209,6 +1254,8 @@ internal sealed class App : IDisposable
 
         if (World.ConsumeCargoWindowReady())
             _screens.OpenCargoWindow(selectFirst: true);
+        if (_options.OpenView == "drones" && _viewOpened && Session is not null && snapshot is { OwnHull: >= 0, Content: { } content })
+            ScriptDrones(snapshot, content);
         if (_editDroneView && Session is not null && snapshot is { OwnHull: >= 0, OwnIsDrone: true })
         {
             // Capture only: the drone has stepped out of the pod, so edit it.
@@ -1231,6 +1278,22 @@ internal sealed class App : IDisposable
             {
                 ScriptedThrust.TryParse(view == "exhaust-shield-cold" ? "right" : "forward", out var exhaustThrust);
                 _options.Thrust = exhaustThrust;
+            }
+            else if (view == "rock-interior" && Devices.Muted && World.Galaxy is { } interiorGalaxy)
+            {
+                // Render-only: a real rock of this world, cut open in front of the command camera.
+                var cut = RockInteriorCapture.Find(interiorGalaxy, _options.RockInteriorSize, _options.RockInteriorResource);
+                if (cut is null)
+                    Console.WriteLine($"rock-interior: no {_options.RockInteriorSize} rock of {_options.RockInteriorResource ?? "any ore"} near home");
+                else
+                {
+                    cut.Anchor = World.OwnPosition;
+                    World.RockInterior = cut;
+                    World.SetCommandCapturePose(cut.Anchor, cut.Radius * 2.9f, 0.4f, -0.3f);
+                    Console.WriteLine($"rock-interior: rock {cut.Rock.Index} of sector {cut.Rock.Sector}");
+                    foreach (var line in cut.Lines)
+                        Console.WriteLine("rock-interior: " + System.Text.Encoding.UTF8.GetString(line));
+                }
             }
             else if (view == "exhaust-rock" && World.ExhaustRock is { } exhaustRock)
             {
@@ -1322,7 +1385,13 @@ internal sealed class App : IDisposable
                     World.Editor.SetMirror(MirrorAxes.X | MirrorAxes.Z);
                 _screens.SelectEditorTab("Thrust");
             }
-            else if (view is "edit-rack" or "edit-tank" or "edit-tank-long" or "edit-tank-slab" or "edit-scanner" && snapshot is { OwnHull: >= 0 })
+            else if (view == "drones")
+            {
+                // A prepared build's pod has a bay whose hatch faces left: the camera looks at that side from above
+                // and ahead, so the drones are seen leaving, holding and coming home.
+                World.SetCommandCapturePose(World.OwnPosition + new Double3(-8, 0, 0), 20f, -0.6f, -0.3f);
+            }
+            else if (view is "edit-rack" or "edit-tank" or "edit-tank-long" or "edit-tank-slab" or "edit-scanner" or "edit-bay" && snapshot is { OwnHull: >= 0 })
             {
                 // The editor holding the ghost of a bipropellant tank (1, 2 by 1 by 1, or a 2 by 1 by 2
                 // slab) or of an asteroid scanner on the ship, with the wedge chosen first: the part stays a box and the
@@ -1330,7 +1399,7 @@ internal sealed class App : IDisposable
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
                 World.Editor.SetPartShape(BlockShape.WedgeXPlusPlus);
                 if (view == "edit-rack") World.PreviewCargo();
-                World.HoldPartGhostForCapture(view == "edit-rack" ? "cargo" : view == "edit-scanner" ? "asteroidScanner" : "bipropellantTank",
+                World.HoldPartGhostForCapture(view == "edit-rack" ? "cargo" : view == "edit-scanner" ? "asteroidScanner" : view == "edit-bay" ? "droneBay" : "bipropellantTank",
                     view switch { "edit-rack" => new GridSize(2, 2, 2), "edit-tank-long" => new GridSize(2, 1, 1), "edit-tank-slab" => new GridSize(2, 1, 2), _ => new GridSize(1, 1, 1) });
                 _screens.SelectEditorTab(view == "edit-scanner" ? "Sensors" : "Storage");
             }
@@ -1560,6 +1629,7 @@ internal sealed class App : IDisposable
         World.GasOverlayOpening = _options.GasFixture == GasShaderFixture.OverlayCheck
             && Volatile.Read(ref _screenshotJob.Saved) > 0;
         World.ScriptedForward = Devices.Muted && Session is not null ? _options.HoldThrust : null;
+        World.CaptureCoast = Devices.Muted && Session is not null && _options.CoastSpeed is not null;
         if (_options.LookDegrees is { } look && Session is not null)
         {
             if (_options.LookToDegrees is { } lookTo)
@@ -1660,7 +1730,7 @@ internal sealed class App : IDisposable
                 }
                 if ((_options.JettisonSeconds is not null || _options.HurtFleetCargo) && Session is not null)
                 {
-                    if (World.TryGetContainer(1, out var loose)) Console.WriteLine($"capture cargo position: {loose.Position.RelativeTo(World.OwnPosition)}; on screen {World.Project(loose.Position, out var screen)} at {screen}; tractor {loose.TractorHull}/{loose.TractorMount}, stage {loose.TractorStage}, powered {loose.TractorPowered}");
+                    if (World.TryGetContainer(1, out var loose)) Console.WriteLine($"capture cargo position: {loose.Position.RelativeTo(World.OwnPosition)}; own speed {World.Own.Velocity.Length():F1} m/s; on screen {World.Project(loose.Position, out var screen)} at {screen}; tractor {loose.TractorHull}/{loose.TractorMount}, stage {loose.TractorStage}, powered {loose.TractorPowered}");
                     Console.WriteLine($"capture cargo: held {World.Own.Cargo.Length}, free {World.FreeContainerCount}, drawn {World.DrawnFreeContainers}, target {World.TargetContainer}");
                 }
                 if (_options.OpenView == "rock-scrape")
@@ -1714,6 +1784,8 @@ internal sealed class App : IDisposable
                 "edit-menu" => World.Editor.Menu.IsOpen && World.Editor.Menu.Sub == EditorMenuSub.Fuel,
                 "edit-dump" => World.Editor.ConfirmDump,
                 "edit-mirror" => World.Editor.HasGhost && World.Editor.Mirror == (MirrorAxes.X | MirrorAxes.Z),
+                // Launch, hold and recall all happen inside the measurement: drones were seen out and every one is home.
+                "drones" => _benchmarkSawDrones && _dronesOut == 0 && _dronesHome,
                 _ => true,
             };
             if (!editorReady)

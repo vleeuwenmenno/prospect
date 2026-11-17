@@ -116,9 +116,28 @@ internal sealed partial class ScreenHost
         _mapNav.Reset(_app.World.Sector.Coord.Y);
     }
 
+    /// <summary>The rock-interior capture's legend: what the rock is and what each layer holds, top left.</summary>
+    private void DrawRockInteriorLegend(RockInteriorCapture cut)
+    {
+        var draw = ImGui.GetForegroundDrawList();
+        var size = ImGui.GetFontSize();
+        var at = new float2(Kit.Px(Theme.Space3), Kit.Px(Theme.Space3) + size * 3f);
+        foreach (var line in cut.Lines)
+        {
+            draw.AddText(_ui.Sans, size, at, Kit.Color(Theme.Text), line);
+            at.Y += size * 1.35f;
+        }
+    }
+
     /// <summary>Everything drawn over the world while in space: flight readouts, command markers, the map.</summary>
     private void DrawWorldInterface(SessionSnapshot snapshot)
     {
+        if (_app.World.RockInterior is { } cut)
+        {
+            DrawRockInteriorLegend(cut);
+            return;
+        }
+
         if (_app.World.ExhaustRock is not null) return;
         var world = _app.World;
         UpdateExploration(snapshot, world);
@@ -146,7 +165,7 @@ internal sealed partial class ScreenHost
 
         // The module keys work in the flight and command views only, under the same limits.
         if (!editing && !asking && !_sessionMenuOpen && !SocialSurfaceOpen && !_controlsOpen && !_mapOpen && Bridge is { } moduleBridge)
-            HandleModuleKeys(moduleBridge);
+            HandleModuleKeys(moduleBridge, snapshot);
 
         // Everything shown over the world goes on ImGui's background layer, which is drawn beneath every window.
         // Menus, the world settings, the map and the fleet list are windows, so they always cover it, and a menu's
@@ -564,7 +583,8 @@ internal sealed partial class ScreenHost
         var rowsHeight = 0f;
         for (var i = 0; i < snapshot.HullCount; i++)
         {
-            if (snapshot.Hulls[i].Owner != snapshot.PlayerId)
+            // Drones out of their bays are the bay chip's, not fleet ships: the server flies them under their orders.
+            if (snapshot.Hulls[i].Owner != snapshot.PlayerId || snapshot.Hulls[i].Design == snapshot.Content.WorkDroneDesign)
                 continue;
             owned++;
             rowsHeight += HullStatus.FleetRowHeight(snapshot.Hulls[i].Environment, rowHeight, statusExtra);
@@ -606,7 +626,7 @@ internal sealed partial class ScreenHost
         for (var i = 0; i < snapshot.HullCount; i++)
         {
             ref var hull = ref snapshot.Hulls[i];
-            if (hull.Owner != snapshot.PlayerId)
+            if (hull.Owner != snapshot.PlayerId || hull.Design == snapshot.Content.WorkDroneDesign)
                 continue;
 
             var thisRow = HullStatus.FleetRowHeight(hull.Environment, rowHeight, statusExtra);

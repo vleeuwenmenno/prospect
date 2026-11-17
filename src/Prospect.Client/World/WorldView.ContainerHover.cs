@@ -40,11 +40,10 @@ internal sealed partial class WorldView
         var cargo = snapshot.Content.Cargo;
         var best = float.PositiveInfinity;
         var info = default(ContainerInfo);
-        var tick = _snapshot?.ServerTickPrecise ?? 0;
         foreach (var item in _freeVisuals.Items)
         {
             if (!_partModels.TryGetContainer(item.Size, out _)) continue;
-            var pose = _freeVisuals.Pose(item, tick + _frameAlpha);
+            var pose = ContainerPose(item);
             var hit = TargetPicking.Container(ray, CameraPosition, pose, cargo, NearPlane);
             if (hit >= best) continue;
             best = hit;
@@ -86,7 +85,7 @@ internal sealed partial class WorldView
         if (!stowed)
         {
             foreach (var item in _freeVisuals.Items)
-                if (ProjectDisc(_freeVisuals.Pose(item, (_snapshot?.ServerTickPrecise ?? 0) + _frameAlpha).Position, 0, out screen, out _, out _)) return true;
+                if (ProjectDisc(ContainerPose(item).Position, 0, out screen, out _, out _)) return true;
             return false;
         }
         var visuals = _visuals.Hulls;

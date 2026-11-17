@@ -159,7 +159,7 @@ public sealed class ContentIdentityTests
             return;
 
         using var copy = new ContentCopy();
-        string[] shared = ["blocks/cargo.json", "blocks/blocks.json", "rules/settings.json", "rules/exploration.json", "ships/fleet.json", "ships/command_pod.json", "ships/drone.json", "galaxy/galaxy.json", "net/blocks.json", "rules/rock_edits.json"];
+        string[] shared = ["blocks/cargo.json", "blocks/blocks.json", "rules/settings.json", "rules/exploration.json", "ships/fleet.json", "ships/command_pod.json", "ships/drone.json", "ships/work_drone.json", "blocks/drones.json", "galaxy/galaxy.json", "galaxy/interiors.json", "net/blocks.json", "rules/rock_edits.json"];
         var writers = new List<Task>();
         foreach (var file in shared)
         {
@@ -217,10 +217,15 @@ public sealed class ContentIdentityTests
     [InlineData("blocks/blocks.json", "\"maxBoxSide\": 64", "\"maxBoxSide\": 63")]
     [InlineData("blocks/cargo.json", "\"hull\": 50", "\"hull\": 51")]
     [InlineData("blocks/blocks.json", "\"Hull plating\"", "\"Hull plate\"")]
+    // The drone figures: how many a player may have out, and how they come home.
+    [InlineData("blocks/drones.json", "\"maxPerPlayer\": 12", "\"maxPerPlayer\": 11")]
+    [InlineData("blocks/drones.json", "\"dockRadiusMetres\": 0.6", "\"dockRadiusMetres\": 0.7")]
     // The world setting catalogue: what a setting may be set to.
     [InlineData("rules/settings.json", "\"name\": \"Weak\",\n          \"value\": 4", "\"name\": \"Weak\",\n          \"value\": 5")]
     // The galaxy rules.
     [InlineData("galaxy/galaxy.json", "\"winding\": 4.5", "\"winding\": 4.6")]
+    // What is inside every asteroid.
+    [InlineData("galaxy/interiors.json", "\"ore\": 3.0", "\"ore\": 3.1")]
     // Rock edits: what a scrape may be and how much a rock may hold, which the server enforces and the client checks.
     [InlineData("rules/rock_edits.json", "\"maxSegmentMetres\": 4", "\"maxSegmentMetres\": 3")]
     [InlineData("rules/rock_edits.json", "\"maxEditsPerRock\": 2048", "\"maxEditsPerRock\": 2047")]

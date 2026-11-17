@@ -14,7 +14,7 @@
 - **Built:** tank models: round vessels in an open frame ("Decided: tank models" below).
 - **Built:** tanks, sensors and scanners are never slanted ("Decided: parts never slanted" below).
 - **Built:** the module scanners mount on faces too ("Decided: scanners mount" below).
-- Protocol 64, save layout 17, design encoding 4, design file version 6, evaluator 18.
+- Protocol 65, save layout 18, design encoding 4, design file version 6, evaluator 18.
 
 ## Decided: parts
 

@@ -30,6 +30,9 @@ public sealed record DesignLimits(int MaxBoxSide, int MaxDesignSide, int MaxBloc
     /// by tank, and a snapshot tells the pilot of every one.
     /// </summary>
     public int MaxTanks { get; init; } = TankFuel.MaxTanks;
+
+    /// <summary>The most drone bays a design may have, at most <see cref="DroneBayRules.MaxBays"/>: the pilot is told of each.</summary>
+    public int MaxBays { get; init; } = DroneBayRules.MaxBays;
     internal static DesignLimits Read(JsonElement e, string source)
     {
         var limits = new DesignLimits(e.GetProperty("maxBoxSide"u8).GetInt32(), e.GetProperty("maxDesignSide"u8).GetInt32(), e.GetProperty("maxBlocks"u8).GetInt32())
@@ -40,7 +43,10 @@ public sealed record DesignLimits(int MaxBoxSide, int MaxDesignSide, int MaxBloc
             Shield = new ShellShape(e.GetProperty("shieldRoundness"u8).GetSingle(), e.GetProperty("shieldBlend"u8).GetSingle()),
             MaxMounts = e.GetProperty("maxMounts"u8).GetInt32(),
             MaxTanks = e.TryGetProperty("maxTanks"u8, out var tanks) ? tanks.GetInt32() : TankFuel.MaxTanks,
+            MaxBays = e.TryGetProperty("maxBays"u8, out var bays) ? bays.GetInt32() : DroneBayRules.MaxBays,
         };
+        if (limits.MaxBays is < 0 or > DroneBayRules.MaxBays)
+            throw new InvalidDataException($"{source}: maxBays must be from 0 to {DroneBayRules.MaxBays}");
         if (limits.MaxTanks is < 0 or > TankFuel.MaxTanks)
             throw new InvalidDataException($"{source}: maxTanks must be from 0 to {TankFuel.MaxTanks}");
         if (limits.MaxMounts is < 0 or > 65535)
@@ -383,6 +389,7 @@ public sealed class BoxDesign
         double mass = 0, x = 0, y = 0, z = 0;
         var cores = 0;
         var tanks = 0;
+        var bays = 0;
         double crew = 0;
         for (var i = 0; i < blocks.Length; i++)
         {
@@ -391,6 +398,8 @@ public sealed class BoxDesign
             // Held to the wire's bound as well as the content's: limits made in code are not read from a file.
             if (b.Type.Tank != FuelKind.None && ++tanks > Math.Min(limits.MaxTanks, TankFuel.MaxTanks))
                 throw new InvalidDataException($"{source}: block {i}: too many tanks (limit {Math.Min(limits.MaxTanks, TankFuel.MaxTanks)})");
+            if (b.Type.Bay is not null && ++bays > Math.Min(limits.MaxBays, DroneBayRules.MaxBays))
+                throw new InvalidDataException($"{source}: block {i}: too many drone bays (limit {Math.Min(limits.MaxBays, DroneBayRules.MaxBays)})");
             if (!BlockShapes.IsValid(b.Shape)) throw new InvalidDataException($"{source}: block {i}: Unknown block shape.");
             if (!Facings.IsValid(b.Facing)) throw new InvalidDataException($"{source}: block {i}: Unknown block facing.");
             if (b.Type.Mount is not null) throw new InvalidDataException($"{source}: block {i}: a {b.Type.Name} mounts on a face and cannot be a block");

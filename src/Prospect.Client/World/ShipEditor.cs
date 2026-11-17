@@ -373,6 +373,15 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// </summary>
     public BlockFacing PartFacing { get; private set; } = BlockFacing.Back;
 
+    /// <summary>
+    /// The way the ghost faces where it is held: <see cref="PartFacing"/>, except for a drone bay, whose hatch is
+    /// chosen from the faces it touches there (<see cref="Render.RackDeck.Hatch"/>) and placed with it.
+    /// </summary>
+    public BlockFacing GhostFacing =>
+        Content is { } content && (uint)Part < (uint)content.Blocks.Types.Count && content.Blocks.Types[Part].Bay is not null && Draft is { } draft
+            ? Render.RackDeck.Hatch(Render.RackDeck.Touched(draft.Boxes, -1, GhostAt, PartSize))
+            : PartFacing;
+
     /// <summary>The most cells the chosen part may measure along a side: its type's limit, or the content's.</summary>
     public int PartMaxSide =>
         Content is { } content ? BoxDesign.MaxSide((uint)Part < (uint)content.Blocks.Types.Count ? content.Blocks.Types[Part] : null, content.Blocks.Limits) : 1;
@@ -1018,7 +1027,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>Places the ghost block and, with mirror on, its copies, as one step.</summary>
     private void PlaceBlock()
     {
-        var box = new DesignBox(GhostAt, PartSize, Content!.Blocks.Types[Part], PartShape, PartFacing);
+        var box = new DesignBox(GhostAt, PartSize, Content!.Blocks.Types[Part], PartShape, GhostFacing);
         var result = Draft!.AddMirrored(box, Mirror, out var skipped);
         NoteSkipped(result, skipped);
         Record(result);
@@ -2124,7 +2133,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         HasGhost = true;
         if (Mirror != MirrorAxes.None)
         {
-            var box = new DesignBox(GhostAt, PartSize, Content.Blocks.Types[Part], PartShape, PartFacing);
+            var box = new DesignBox(GhostAt, PartSize, Content.Blocks.Types[Part], PartShape, GhostFacing);
             _copyBoxCount = Draft.MirrorBoxes(box, Mirror, _copyBoxes);
             Draft.CheckBoxes(_copyBoxes.AsSpan(0, _copyBoxCount), _copyBoxChecks);
             if (_copyBoxCount == 1)
@@ -2163,7 +2172,8 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     private void Enter(SessionSnapshot snapshot, in HullView own, in EditorView view)
     {
-        CancelPartGestures();
+        // Every edit, however it came to open, starts in the select tool: no part is held and no ghost shows.
+        StopPlacing();
         Menu.Close();
         Token = view.Token;
         Hull = own.Id;

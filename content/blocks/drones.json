@@ -1,0 +1,17 @@
+{
+  "maxPerPlayer": 12,
+  "hullReserve": 16,
+  "launchIntervalSeconds": 1.0,
+  "launchSpeed": 2.0,
+  "hatchClearanceMetres": 3.0,
+  "hatchMarginMetres": 0.15,
+  "holdDistanceMetres": 14.0,
+  "holdSpacingMetres": 3.0,
+  "maxHoldDistanceMetres": 400.0,
+  "holdSlackMetres": 2.0,
+  "stagingMetres": 6.0,
+  "stagingRadiusMetres": 3.5,
+  "dockRadiusMetres": 0.6,
+  "dockPushMetres": 4.0,
+  "commandSeconds": 0.25
+}

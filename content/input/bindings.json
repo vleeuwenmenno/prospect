@@ -35,6 +35,8 @@
     "PulseLocator": ["Key:Y"],
     "ToggleGas": ["Key:F4"],
     "EditorSelectAll": ["Key:A"],
+    "LaunchDrones": ["Key:Period"],
+    "RecallDrones": ["Key:Comma"],
     "DebugScrape": ["Key:F10"]
   },
   "axes": {
