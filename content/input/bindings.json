@@ -35,6 +35,7 @@
     "PulseLocator": ["Key:Y"],
     "ToggleGas": ["Key:F4"],
     "EditorSelectAll": ["Key:A"],
+    "EditorSnapStep": ["Key:H"],
     "LaunchDrones": ["Key:Period"],
     "RecallDrones": ["Key:Comma"],
     "FetchContainer": ["Key:Slash"],

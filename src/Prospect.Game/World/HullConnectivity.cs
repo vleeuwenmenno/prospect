@@ -88,20 +88,24 @@ public sealed class HullConnectivity
             if (Kept < 0 || _mass[piece] > _mass[Kept]) Kept = piece;
     }
 
-    /// <summary>True only for coincident bounding box faces with strictly positive overlap in both other axes.</summary>
+    /// <summary>
+    /// True only for coincident bounding box faces with strictly positive overlap in both other axes. Edges are
+    /// compared in quarter cells, the unit a block's place is whole in: a block set half a cell over still shares a
+    /// face with the block it sits against, and two faces a quarter cell apart share none.
+    /// </summary>
     public static bool SharesFace(in DesignBox a, in DesignBox b)
     {
-        var x = Overlap(a.At.X, a.Size.X, b.At.X, b.Size.X);
-        var y = Overlap(a.At.Y, a.Size.Y, b.At.Y, b.Size.Y);
-        var z = Overlap(a.At.Z, a.Size.Z, b.At.Z, b.Size.Z);
-        return (Touches(a.At.X, a.Size.X, b.At.X, b.Size.X) && y && z)
-            || (Touches(a.At.Y, a.Size.Y, b.At.Y, b.Size.Y) && x && z)
-            || (Touches(a.At.Z, a.Size.Z, b.At.Z, b.Size.Z) && x && y);
+        var x = Overlap(a, b, 0);
+        var y = Overlap(a, b, 1);
+        var z = Overlap(a, b, 2);
+        return (Touches(a, b, 0) && y && z)
+            || (Touches(a, b, 1) && x && z)
+            || (Touches(a, b, 2) && x && y);
     }
 
-    private static bool Overlap(int a, int sizeA, int b, int sizeB) =>
-        Math.Max((long)a, b) < Math.Min((long)a + sizeA, (long)b + sizeB);
+    private static bool Overlap(in DesignBox a, in DesignBox b, int axis) =>
+        Math.Max(a.Low4(axis), b.Low4(axis)) < Math.Min(a.High4(axis), b.High4(axis));
 
-    private static bool Touches(int a, int sizeA, int b, int sizeB) =>
-        (long)a + sizeA == b || (long)b + sizeB == a;
+    private static bool Touches(in DesignBox a, in DesignBox b, int axis) =>
+        a.High4(axis) == b.Low4(axis) || b.High4(axis) == a.Low4(axis);
 }

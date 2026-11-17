@@ -4,11 +4,12 @@ using Prospect.Game.World;
 namespace Prospect.Client.World;
 
 /// <summary>
-/// What a pointer ray found on a draft: a block, the face it entered through, and the cell of that face. With
+/// What a pointer ray found on a draft: a block, the face it entered through, and the cell-sized place of that face
+/// nearest the point, at the snap step the pick was given (<see cref="BuildDraft.FaceCell"/>). With
 /// <paramref name="Point"/>, where on the face in grid space, which places a part mounted on it. When the ray met a
 /// part mounted on a block first, <see cref="Mount"/> names it and the block and face are the ones it sits on.
 /// </summary>
-internal readonly record struct DraftHit(int Block, int Side, GridSize Cell, float Distance, Vector3 Point = default, int MountNumber = 0)
+internal readonly record struct DraftHit(int Block, int Side, GridPoint Cell, float Distance, Vector3 Point = default, int MountNumber = 0)
 {
     /// <summary>The mount the ray met, as an index into the draft's mounts, or -1 when it met a block.</summary>
     public int Mount => MountNumber - 1;
@@ -17,7 +18,8 @@ internal readonly record struct DraftHit(int Block, int Side, GridSize Cell, flo
 /// <summary>
 /// The ship editor's geometry, free of the renderer and the interface so it can be tested alone. Grid space is
 /// the design's own: cell <c>i</c> spans <c>[i - 0.5, i + 0.5)</c> about its centre, so a box covers
-/// <c>[At - 0.5, At + Size - 0.5]</c> on each axis (<see cref="BoxDesign"/>). Sides are numbered as
+/// <c>[At - 0.5, At + Size - 0.5]</c> on each axis (<see cref="BoxDesign"/>), with <c>At</c> in cells, which may
+/// be a number of quarters (<see cref="GridPoint"/>). Sides are numbered as
 /// <see cref="BuildDraft"/> numbers them: <c>2 * axis + (negative ? 1 : 0)</c>.
 /// </summary>
 internal static class EditorGeometry
@@ -28,13 +30,15 @@ internal static class EditorGeometry
     /// is passed through, so a camera inside the hull still picks the far walls. False when nothing is hit.
     /// </summary>
     public static bool Pick(ReadOnlySpan<DesignBox> boxes, Vector3 origin, Vector3 direction, out DraftHit hit) =>
-        Pick(boxes, origin, direction, default, out hit);
+        Pick(boxes, origin, direction, default(ReadOnlySpan<ulong>), out hit);
 
     /// <summary>
     /// As <see cref="Pick(ReadOnlySpan{DesignBox}, Vector3, Vector3, out DraftHit)"/>, passing over the blocks in
     /// <paramref name="skip"/> (a <see cref="BlockSet"/>), so a dragged group is placed against what is behind it.
+    /// <paramref name="step"/> is the snap step in quarter cells (<see cref="BuildDraft.SnapSteps"/>) the face's
+    /// place is found at.
     /// </summary>
-    public static bool Pick(ReadOnlySpan<DesignBox> boxes, Vector3 origin, Vector3 direction, ReadOnlySpan<ulong> skip, out DraftHit hit)
+    public static bool Pick(ReadOnlySpan<DesignBox> boxes, Vector3 origin, Vector3 direction, ReadOnlySpan<ulong> skip, out DraftHit hit, int step = GridPoint.PerCell)
     {
         hit = default;
         var best = float.PositiveInfinity;
@@ -50,7 +54,7 @@ internal static class EditorGeometry
 
         if (float.IsPositiveInfinity(best))
             return false;
-        hit = hit with { Cell = FaceCell(boxes[hit.Block], hit.Side, origin + direction * best) };
+        hit = hit with { Cell = BuildDraft.FaceCell(boxes[hit.Block], hit.Side, origin + direction * best, step) };
         return true;
     }
 
@@ -59,9 +63,9 @@ internal static class EditorGeometry
     /// parts mounted on the blocks: one the ray meets before any block is the hit, on the block and face it sits on.
     /// The mounts of a block in <paramref name="skip"/> are passed over with it.
     /// </summary>
-    public static bool Pick(ReadOnlySpan<DesignBox> boxes, ReadOnlySpan<DesignMount> mounts, Vector3 origin, Vector3 direction, ReadOnlySpan<ulong> skip, out DraftHit hit)
+    public static bool Pick(ReadOnlySpan<DesignBox> boxes, ReadOnlySpan<DesignMount> mounts, Vector3 origin, Vector3 direction, ReadOnlySpan<ulong> skip, out DraftHit hit, int step = GridPoint.PerCell)
     {
-        var found = Pick(boxes, origin, direction, skip, out hit);
+        var found = Pick(boxes, origin, direction, skip, out hit, step);
         var best = found ? hit.Distance : float.PositiveInfinity;
         if (found)
             hit = hit with { Point = origin + direction * best };
@@ -78,7 +82,7 @@ internal static class EditorGeometry
             best = t;
             found = true;
             var point = origin + direction * t;
-            hit = new DraftHit(mount.Parent, (int)mount.Face, FaceCell(boxes[mount.Parent], (int)mount.Face, point), t, point, i + 1);
+            hit = new DraftHit(mount.Parent, (int)mount.Face, BuildDraft.FaceCell(boxes[mount.Parent], (int)mount.Face, point, step), t, point, i + 1);
         }
 
         return found;
@@ -90,9 +94,9 @@ internal static class EditorGeometry
         Span<int> from = stackalloc int[3];
         Span<int> to = stackalloc int[3];
         FaceMounts.Box(parent, mount, from, to);
-        const float Tenth = 1f / FaceMounts.PerCell;
-        low = new Vector3(from[0] * Tenth - 0.5f, from[1] * Tenth - 0.5f, from[2] * Tenth - 0.5f);
-        high = new Vector3(to[0] * Tenth - 0.5f, to[1] * Tenth - 0.5f, to[2] * Tenth - 0.5f);
+        const float Step = 1f / FaceMounts.Fine;
+        low = new Vector3(from[0] * Step - 0.5f, from[1] * Step - 0.5f, from[2] * Step - 0.5f);
+        high = new Vector3(to[0] * Step - 0.5f, to[1] * Step - 0.5f, to[2] * Step - 0.5f);
     }
 
     /// <summary>Where a ray enters an axis-aligned box from outside: the distance along it. False when it misses or starts inside.</summary>
@@ -142,7 +146,7 @@ internal static class EditorGeometry
         var far = float.PositiveInfinity;
         for (var axis = 0; axis < 3; axis++)
         {
-            var low = Of(box.At, axis) - 0.5f;
+            var low = box.At.Of(axis) * (1f / GridPoint.PerCell) - 0.5f;
             var high = low + Of(box.Size, axis);
             var o = origin[axis];
             var d = direction[axis];
@@ -214,26 +218,6 @@ internal static class EditorGeometry
     {
         BlockShapes.Decode(box.Shape, out _, out var u, out var v, out var su, out var sv);
         return Of(box.Size, v) >= Of(box.Size, u) ? 2 * u + (su < 0 ? 1 : 0) : 2 * v + (sv < 0 ? 1 : 0);
-    }
-
-    /// <summary>
-    /// The cell of <paramref name="box"/> under a point on its face <paramref name="side"/>: on the face's own
-    /// axis the outermost layer of cells, across it the cell the point is in, rounded so that odd, even and
-    /// negative positions all land in the cell whose span holds them.
-    /// </summary>
-    public static GridSize FaceCell(in DesignBox box, int side, Vector3 point)
-    {
-        Span<int> cell = stackalloc int[3];
-        var normal = side >> 1;
-        for (var axis = 0; axis < 3; axis++)
-        {
-            int low = Of(box.At, axis), high = low + Of(box.Size, axis) - 1;
-            cell[axis] = axis == normal
-                ? (side & 1) == 0 ? high : low
-                : Math.Clamp((int)MathF.Floor(point[axis] + 0.5f), low, high);
-        }
-
-        return new GridSize(cell[0], cell[1], cell[2]);
     }
 
     /// <summary>

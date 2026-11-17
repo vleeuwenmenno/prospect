@@ -170,12 +170,12 @@ internal sealed partial class ScreenHost
             {
                 foreach (var block in editor.Selection)
                     if ((uint)block < (uint)boxes.Length)
-                        DrawBlockEdges(draw, world, boxes[block] with { At = Shift(boxes[block].At, by) }, tone, Kit.Px(2));
+                        DrawBlockEdges(draw, world, boxes[block] with { At = boxes[block].At + by }, tone, Kit.Px(2));
             }
             else
             {
                 foreach (ref readonly var box in editor.Clipboard)
-                    DrawBlockEdges(draw, world, box with { At = Shift(box.At, by) }, tone, Kit.Px(2));
+                    DrawBlockEdges(draw, world, box with { At = box.At + by }, tone, Kit.Px(2));
             }
 
             if (!ok)
@@ -277,7 +277,9 @@ internal sealed partial class ScreenHost
             // Symmetric about the core on the two axes the plane spans, so the core is its middle.
             var reachA = MirrorReach(centre2, low, high, a);
             var reachB = MirrorReach(centre2, low, high, b);
-            var middle = new Vector3(centre2.X * 0.5f - 0.5f, centre2.Y * 0.5f - 0.5f, centre2.Z * 0.5f - 0.5f);
+            // Twice the centre in quarter cells on the grid's edges: an eighth of it is the centre in cells, and
+            // grid space has a cell's middle, not its edge, on the whole number.
+            var middle = new Vector3(centre2.X4, centre2.Y4, centre2.Z4) * (0.5f / GridPoint.PerCell) - new Vector3(0.5f);
             for (var i = 0; i < 4; i++)
             {
                 var corner = middle;
@@ -302,10 +304,11 @@ internal sealed partial class ScreenHost
     }
 
     // Half the plane's length along one axis: from the core's middle to the draft's far side, a cell more.
-    private static float MirrorReach(GridSize centre2, GridSize low, GridSize high, int axis)
+    private static float MirrorReach(GridPoint centre2, GridPoint low, GridPoint high, int axis)
     {
-        var middle = EditorGeometry.Of(centre2, axis) * 0.5f;
-        return Math.Max(middle - EditorGeometry.Of(low, axis), EditorGeometry.Of(high, axis) - middle) + 1f;
+        const float Quarter = 1f / GridPoint.PerCell;
+        var middle = centre2.Of(axis) * (0.5f * Quarter);
+        return Math.Max(middle - low.Of(axis) * Quarter, high.Of(axis) * Quarter - middle) + 1f;
     }
 
     /// <summary>
@@ -338,8 +341,6 @@ internal sealed partial class ScreenHost
         draw.AddLine(p, q, orange, Kit.Px(3f));
         draw.AddCircle(q, Kit.Px(5), orange, 0, Kit.Px(2f));
     }
-
-    private static GridSize Shift(GridSize at, GridSize by) => new(at.X + by.X, at.Y + by.Y, at.Z + by.Z);
 
     /// <summary>The colours of the rotation rings: about x red, about y green, about z blue, as the axes are drawn.</summary>
     private const uint RingX = 0xE0605A;
@@ -633,7 +634,7 @@ internal sealed partial class ScreenHost
         // The cards scroll between the tabs and the size controls, while there is room for a couple; in a short
         // window the whole panel scrolls instead.
         // The caption, the size and shape lines and the shape buttons below the cards.
-        var footer = 3 * Kit.Px(16) + Kit.Px(28) + 2 * Kit.Px(Theme.Space2) + 2 * Kit.Px(Theme.Space1) + MirrorRowHeight;
+        var footer = 3 * Kit.Px(16) + Kit.Px(28) + 2 * Kit.Px(Theme.Space2) + 2 * Kit.Px(Theme.Space1) + MirrorRowHeight + SnapRowHeight;
         var listHeight = ImGui.GetContentRegionAvail().Y - footer;
         var cardHeight = Kit.Px(70);
         var split = listHeight >= cardHeight;
@@ -692,6 +693,7 @@ internal sealed partial class ScreenHost
         if (EditorPalette.HandBack(EditorButton("##shapewedge"u8, "Wedge"u8, new float2(pair, Kit.Px(26)), editor.CanEdit && !editor.PartBoxOnly, false, editor.PartShape != BlockShape.Box)))
             editor.SetPartShape(editor.PartShape == BlockShape.Box ? BlockShape.WedgeXPlusPlus : editor.PartShape);
         DrawMirrorRow(editor, width, gap);
+        DrawSnapRow(editor, width, gap);
         ImGui.EndChild();
         EndEditorPanel();
     }
@@ -809,6 +811,41 @@ internal sealed partial class ScreenHost
             return;
         editor.SetMirror(next);
         _app.Settings.EditorMirror = (int)next;
+        if (!_app.Devices.Muted)
+            _app.Settings.Save();
+    }
+
+    /// <summary>The height <see cref="DrawSnapRow"/> takes: its caption and the buttons, with the space above them.</summary>
+    private static float SnapRowHeight => Kit.Px(16) + Kit.Px(24) + Kit.Px(Theme.Space2) + Kit.Px(Theme.Space1);
+
+    /// <summary>
+    /// Three buttons for the step a placed, pasted or moved block snaps to across the face it is laid against: a
+    /// whole cell, a half or a quarter (<see cref="ShipEditor.SnapStep"/>). The key steps the same value, so the
+    /// row shows whichever was used last. A change is a client preference: it is saved with the settings and sent to
+    /// no one. Takes no memory per frame.
+    /// </summary>
+    private void DrawSnapRow(ShipEditor editor, float width, float gap)
+    {
+        Kit.Space(Theme.Space2);
+        Kit.Caption("SNAP (CELLS)"u8);
+        Kit.Space(Theme.Space1);
+        var steps = BuildDraft.SnapSteps;
+        var cell = MathF.Floor((width - (steps.Length - 1) * gap) / steps.Length);
+        for (var i = 0; i < steps.Length; i++)
+        {
+            if (i > 0)
+                ImGui.SameLine(0, gap);
+            ImGui.PushID(i);
+            var label = steps[i] == GridPoint.PerCell ? "1"u8 : steps[i] == GridPoint.PerCell / 2 ? "1/2"u8 : "1/4"u8;
+            if (EditorPalette.HandBack(EditorButton("##snap"u8, label, new float2(cell, Kit.Px(24)), editor.CanEdit, false, editor.SnapStep == steps[i])))
+                editor.SetSnapStep(steps[i]);
+            ImGui.PopID();
+        }
+
+        // The key changes it too, so what is saved follows the editor rather than the press.
+        if (_app.Settings.EditorSnap == editor.SnapStep)
+            return;
+        _app.Settings.EditorSnap = editor.SnapStep;
         if (!_app.Devices.Muted)
             _app.Settings.Save();
     }
@@ -1281,7 +1318,7 @@ internal sealed partial class ScreenHost
 
         ref readonly var box = ref boxes[editor.Selected];
         ClippedLine(_ui.SansMedium, Theme.FontSmall, Theme.Text, Kit.F($"{box.Type.Name}"), width);
-        ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"{box.Size.X} x {box.Size.Y} x {box.Size.Z} CELLS AT {box.At.X} {box.At.Y} {box.At.Z}"), width);
+        ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"{box.Size.X} x {box.Size.Y} x {box.Size.Z} CELLS AT {box.At.X:0.##} {box.At.Y:0.##} {box.At.Z:0.##}"), width);
         ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, ShapeText(box.Shape), width);
         if (editor.IsMissing(editor.Selected))
             Paragraph(Theme.Bad, "The ship has lost this block. Repair rebuilds it."u8, width);

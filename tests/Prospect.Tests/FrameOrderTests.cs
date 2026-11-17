@@ -6955,6 +6955,76 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
+    public void TheSnapKeyStepsTheStepAndAHalfOrQuarterStepPlacesThePartBetweenCellsUnderThePointer()
+    {
+        OpenEditor();
+        var editor = _world.Editor;
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var draft = editor.Draft!;
+        var blocks = DraftBlocks;
+
+        // The step of a cell: over the whole ship, which is built on whole cells, no ghost sits between two.
+        Assert.Equal(GridPoint.PerCell, editor.SnapStep);
+        Assert.False(PointWhere(e => e.HasGhost && !e.GhostAt.IsWhole, out _));
+
+        // The key steps it on, a cell, a half, a quarter and round again; with Ctrl held it is not the snap key.
+        Chord(GlfwKey.H);
+        Assert.Equal(2, editor.SnapStep);
+        Chord(GlfwKey.H);
+        Assert.Equal(1, editor.SnapStep);
+        Chord(GlfwKey.H);
+        Assert.Equal(GridPoint.PerCell, editor.SnapStep);
+        Chord(GlfwKey.LeftControl, GlfwKey.H);
+        Assert.Equal(GridPoint.PerCell, editor.SnapStep);
+        Chord(GlfwKey.H);
+        Assert.Equal(2, editor.SnapStep);
+
+        // At a half the ghost follows the pointer in half cells: somewhere over the ship it sits between cells and
+        // fits. A click places it exactly there, a cell in size, and one undo takes it back.
+        Assert.True(PointWhere(e => e.HasGhost && e.GhostCheck == DraftEdit.Done && !e.GhostAt.IsWhole, out _), "a ghost half a cell over should show");
+        var half = editor.GhostAt;
+        Assert.Equal(0, (half.X4 | half.Y4 | half.Z4) & 1);
+        Assert.Equal(DraftEdit.Done, draft.CanAdd(half, editor.PartSize, _snapshot.Content.Blocks.Types[editor.Part], editor.PartShape));
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.Equal(blocks + 1, DraftBlocks);
+        Assert.Equal(half, draft.Boxes[blocks].At);
+        Assert.Equal(editor.PartSize, draft.Boxes[blocks].Size);
+
+        // The draft with a block between cells passes the check a server makes of a received design.
+        AwaitCheck();
+        Assert.Equal(DraftCheck.Ready, editor.Check);
+        Assert.True(editor.Latest.Ok, editor.Latest.Problem);
+        Assert.Equal(half, editor.Latest.Design!.Boxes[blocks].At);
+        Chord(GlfwKey.LeftControl, GlfwKey.Z);
+        Assert.Equal(blocks, DraftBlocks);
+
+        // At a quarter a ghost can sit on an odd quarter of a cell.
+        editor.SetSnapStep(1);
+        Assert.True(PointWhere(e => e.HasGhost && e.GhostCheck == DraftEdit.Done && ((e.GhostAt.X4 | e.GhostAt.Y4 | e.GhostAt.Z4) & 1) != 0, out _), "a ghost a quarter cell over should show");
+        var quarter = editor.GhostAt;
+        EditorFrame(() => Click());
+        EditorFrame();
+        Assert.Equal(blocks + 1, DraftBlocks);
+        Assert.Equal(quarter, draft.Boxes[blocks].At);
+
+        // Back at a cell, a part laid on the block that sits between cells lines up with that block, not the grid.
+        editor.SetSnapStep(GridPoint.PerCell);
+        Assert.True(PointWhere(e => e.HasGhost && e.GhostCheck == DraftEdit.Done && e.Hover.Block == blocks, out _), "the new block should take a part on a face");
+        var on = draft.Boxes[blocks];
+        var side = editor.Hover.Side;
+        for (var axis = 0; axis < 3; axis++)
+            if (axis != side >> 1)
+                Assert.Equal(0, (editor.GhostAt.Of(axis) - on.Low4(axis)) % GridPoint.PerCell);
+        Assert.Equal((side & 1) == 0 ? on.High4(side >> 1) : on.Low4(side >> 1) - GridPoint.PerCell * EditorGeometry.Of(editor.PartSize, side >> 1), editor.GhostAt.Of(side >> 1));
+
+        // Anything but a step there is leaves the step as it was.
+        editor.SetSnapStep(3);
+        Assert.Equal(GridPoint.PerCell, editor.SnapStep);
+    }
+
+    [Fact]
     public void MirrorShowsEveryCopyOfTheGhostPlacesAllOfThemAsOneUndoStepAndDeletesTheirMirrorsToo()
     {
         OpenEditor();
@@ -7077,7 +7147,7 @@ public sealed class FrameOrderTests : IDisposable
         EditorFrame(() => Button(GlfwMouseButton.Left, false));
         var moved = editor.Draft!.Boxes.ToArray();
         Assert.Equal(before.Length, moved.Length);
-        Assert.Equal(before[held] with { At = new GridSize(before[held].At.X + by.X, before[held].At.Y + by.Y, before[held].At.Z + by.Z) }, moved[held]);
+        Assert.Equal(before[held] with { At = before[held].At + by }, moved[held]);
         Assert.Equal([held], editor.Selection.ToArray());
         Chord(GlfwKey.LeftControl, GlfwKey.Z);
         Assert.Equal(before, editor.Draft!.Boxes.ToArray());
@@ -7638,13 +7708,13 @@ public sealed class FrameOrderTests : IDisposable
             var side = SizableFace(false, out var at, out var cell);
             var axis = side >> 1;
             var (ghostAt, size) = (editor.GhostAt, editor.PartSize);
-            var high = EditorGeometry.Of(ghostAt, axis) + EditorGeometry.Of(size, axis);
+            var high = ghostAt.Of(axis) + EditorGeometry.Of(size, axis) * GridPoint.PerCell;
             DragFace(at, cell, grow + 0.2f * Math.Sign(grow));
             Assert.Equal(EditorGeometry.Of(size, axis) + grow, EditorGeometry.Of(editor.PartSize, axis));
-            Assert.Equal(high, EditorGeometry.Of(editor.GhostAt, axis) + EditorGeometry.Of(editor.PartSize, axis));
+            Assert.Equal(high, editor.GhostAt.Of(axis) + EditorGeometry.Of(editor.PartSize, axis) * GridPoint.PerCell);
             for (var other = 0; other < 3; other++)
                 if (other != axis)
-                    Assert.Equal(EditorGeometry.Of(ghostAt, other), EditorGeometry.Of(editor.GhostAt, other));
+                    Assert.Equal(ghostAt.Of(other), editor.GhostAt.Of(other));
         }
 
         Plus(2);

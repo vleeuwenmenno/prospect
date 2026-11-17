@@ -33,11 +33,11 @@ public sealed class BuildDraftTests
             // Flush along the face's axis, and sharing face area on both others.
             var normal = side / 2;
             var placed = draft.Boxes[1];
-            Assert.Equal(side % 2 == 0 ? Of(target.At, normal) + Of(target.Size, normal) : Of(target.At, normal),
-                side % 2 == 0 ? Of(placed.At, normal) : Of(placed.At, normal) + Of(placed.Size, normal));
+            Assert.Equal(side % 2 == 0 ? target.High4(normal) : target.Low4(normal),
+                side % 2 == 0 ? placed.Low4(normal) : placed.High4(normal));
             for (var axis = 0; axis < 3; axis++)
                 if (axis != normal)
-                    Assert.True(Of(placed.At, axis) < Of(target.At, axis) + Of(target.Size, axis) && Of(placed.At, axis) + Of(placed.Size, axis) > Of(target.At, axis));
+                    Assert.True(placed.Low4(axis) < target.High4(axis) && placed.High4(axis) > target.Low4(axis));
             Assert.True(draft.Undo());
         }
 

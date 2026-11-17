@@ -1124,12 +1124,12 @@ public sealed class PropulsionTests
             design.Write(stream);
             var again = Parse(System.Text.Encoding.UTF8.GetString(stream.ToArray()));
             Assert.Equal(design.Blocks.ToArray(), again.Blocks.ToArray());
-            Assert.Contains("\"version\":8", System.Text.Encoding.UTF8.GetString(stream.ToArray()));
+            Assert.Contains("\"version\":9", System.Text.Encoding.UTF8.GetString(stream.ToArray()));
         }
 
         Assert.Contains("Unknown block facing", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 4, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\", \"facing\": \"forward\" }] }")).Message);
-        Assert.Contains("unsupported design version 9", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 9, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\" }] }")).Message);
-        Assert.Equal(8, BoxDesign.FormatVersion);
+        Assert.Contains("unsupported design version 10", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 10, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\" }] }")).Message);
+        Assert.Equal(9, BoxDesign.FormatVersion);
     }
 
     [Fact]
@@ -1141,7 +1141,7 @@ public sealed class PropulsionTests
             Box("engine", 4, 0, 0, BlockFacing.Up, new GridSize(1, 4, 4)),
             Box("hull", 5, 0, 0, BlockFacing.Down));
         var bytes = DesignBytes.Encode(design);
-        Assert.Equal(6, DesignBytes.Version);
+        Assert.Equal(7, DesignBytes.Version);
         var decoded = DesignBytes.Decode(bytes, SHA256.HashData(bytes), Content);
         Assert.Equal(design.Boxes.ToArray(), decoded.Boxes.ToArray());
         Assert.Equal(design.Flight, decoded.Flight);

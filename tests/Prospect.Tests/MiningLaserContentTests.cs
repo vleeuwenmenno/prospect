@@ -276,7 +276,7 @@ public sealed class MiningLaserContentTests
         var content = MiningFixtures.Content;
         var design = content.Pod;
         Assert.Equal(3, design.Lasers.Length);
-        Assert.Equal(6, DesignBytes.Version);
+        Assert.Equal(7, DesignBytes.Version);
         var bytes = DesignBytes.Encode(design);
         var decoded = DesignBytes.Decode(bytes, SHA256.HashData(bytes), content);
         Assert.Equal(design.Mounts.ToArray(), decoded.Mounts.ToArray());

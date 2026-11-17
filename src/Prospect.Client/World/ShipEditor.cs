@@ -307,9 +307,9 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// <summary>What the pointer carries.</summary>
     public EditorCarry Carry { get; private set; }
 
-    /// <summary>With <see cref="EditorCarry.Move"/> or <see cref="EditorCarry.Paste"/>: the cells the blocks would move by, and whether that fits.</summary>
+    /// <summary>With <see cref="EditorCarry.Move"/> or <see cref="EditorCarry.Paste"/>: how far the blocks would move, in quarter cells, and whether that fits.</summary>
     public bool HasCarryGhost { get; private set; }
-    public GridSize CarryBy { get; private set; }
+    public GridPoint CarryBy { get; private set; }
     public DraftEdit CarryCheck { get; private set; }
 
     /// <summary>The copied blocks, as they were in the draft when copied.</summary>
@@ -408,7 +408,7 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     /// <summary>While placing with a face under the pointer: where the part would go and whether it fits there.</summary>
     public bool HasGhost { get; private set; }
-    public GridSize GhostAt { get; private set; }
+    public GridPoint GhostAt { get; private set; }
     public DraftEdit GhostCheck { get; private set; }
 
     /// <summary>
@@ -588,6 +588,33 @@ internal sealed class ShipEditor(JobSystem jobs)
     private readonly DesignMount[] _copyMounts = new DesignMount[Mirroring.MaxCopies];
     private readonly DraftEdit[] _copyMountChecks = new DraftEdit[Mirroring.MaxCopies];
     private int _copyMountCount;
+
+    /// <summary>
+    /// The step a placed, pasted or moved block's place snaps to across the face it is laid against, in quarter
+    /// cells: a whole cell (4), a half (2) or a quarter (1), one of <see cref="BuildDraft.SnapSteps"/>. A client
+    /// preference like <see cref="Mirror"/>: nothing of it is sent, and a block's size stays whole cells. Set it with
+    /// <see cref="SetSnapStep"/>.
+    /// </summary>
+    public int SnapStep { get; private set; } = GridPoint.PerCell;
+
+    /// <summary>Chooses the snap step; anything but a step there is leaves it as it was. The ghost follows on the next pick.</summary>
+    public void SetSnapStep(int step)
+    {
+        if (!BuildDraft.IsSnapStep(step) || step == SnapStep)
+            return;
+        SnapStep = step;
+        // A held ghost keeps its place; one that follows the pointer is laid again when the pointer is next picked,
+        // which gives the hover its place at the new step.
+        UpdateGhost();
+    }
+
+    /// <summary>Steps the snap step on: a cell, a half, a quarter, and round to a cell again.</summary>
+    public void CycleSnapStep()
+    {
+        var steps = BuildDraft.SnapSteps;
+        var at = steps.IndexOf(SnapStep);
+        SetSnapStep(steps[(at + 1) % steps.Length]);
+    }
 
     /// <summary>Turns the mirror planes on or off, any mix, and shows the ghost's copies at once.</summary>
     public void SetMirror(MirrorAxes axes)
@@ -1551,8 +1578,8 @@ internal sealed class ShipEditor(JobSystem jobs)
     public bool GhostPinned { get; private set; }
 
     private GridSize _sizeFromSize;
-    private GridSize _sizeFromAt;
-    private GridSize _pinAt;
+    private GridPoint _sizeFromAt;
+    private GridPoint _pinAt;
     private GridSize _pinSize;
 
     /// <summary>
@@ -1587,7 +1614,7 @@ internal sealed class ShipEditor(JobSystem jobs)
             return;
         var at = GhostAt;
         if ((side & 1) != 0)
-            at = EditorGeometry.With(at, axis, EditorGeometry.Of(at, axis) + old - length);
+            at = at.With(axis, at.Of(axis) + (old - length) * GridPoint.PerCell);
         PartSize = EditorGeometry.With(PartSize, axis, length);
         Pin(at, PartSize);
         UpdateGhost();
@@ -1608,7 +1635,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         UpdateGhost();
     }
 
-    private void Pin(GridSize at, GridSize size)
+    private void Pin(GridPoint at, GridSize size)
     {
         GhostPinned = true;
         _pinAt = at;
@@ -1666,7 +1693,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     private GridSize _rotateSize;
     private BlockShape _rotateShape;
     private BlockFacing _rotateFacing;
-    private GridSize _rotateAt;
+    private GridPoint _rotateAt;
 
     /// <summary>
     /// Starts turning the part to place, while its ghost is on a face and the ship may be edited. The ghost keeps
@@ -2307,8 +2334,8 @@ internal sealed class ShipEditor(JobSystem jobs)
                     // The held block is laid against the face under the pointer; the rest of the group keeps its place
                     // around it.
                     var held = boxes[_grab];
-                    var at = Draft.Snap(Hover.Block, Hover.Side, held.Size, Hover.Cell);
-                    CarryBy = new GridSize(at.X - held.At.X, at.Y - held.At.Y, at.Z - held.At.Z);
+                    var at = Draft.Snap(Hover.Block, Hover.Side, held.Size, Hover.Cell, SnapStep);
+                    CarryBy = at - held.At;
                     CarryCheck = Draft.CanMove(Selection, CarryBy);
                     HasCarryGhost = true;
                     return;
@@ -2316,8 +2343,8 @@ internal sealed class ShipEditor(JobSystem jobs)
             case EditorCarry.Paste when _clipCount > 0:
                 {
                     var held = _clip[_clipAnchor];
-                    var at = Draft.Snap(Hover.Block, Hover.Side, held.Size, Hover.Cell);
-                    CarryBy = new GridSize(at.X - held.At.X, at.Y - held.At.Y, at.Z - held.At.Z);
+                    var at = Draft.Snap(Hover.Block, Hover.Side, held.Size, Hover.Cell, SnapStep);
+                    CarryBy = at - held.At;
                     CarryCheck = Draft.CanPaste(Clipboard, CarryBy);
                     HasCarryGhost = true;
                     return;
@@ -2355,14 +2382,14 @@ internal sealed class ShipEditor(JobSystem jobs)
             // where its middle was, so it stays on the face without jumping to the pointer.
             if (PartSize != _pinSize)
             {
-                var middle = new GridSize(_pinAt.X + ((_pinSize.X - 1) >> 1), _pinAt.Y + ((_pinSize.Y - 1) >> 1), _pinAt.Z + ((_pinSize.Z - 1) >> 1));
-                Pin(Draft.Snap(Hover.Block, Hover.Side, PartSize, middle), PartSize);
+                var middle = _pinAt + new GridSize((_pinSize.X - 1) >> 1, (_pinSize.Y - 1) >> 1, (_pinSize.Z - 1) >> 1);
+                Pin(Draft.Snap(Hover.Block, Hover.Side, PartSize, middle, SnapStep), PartSize);
             }
 
             GhostAt = _pinAt;
         }
         else
-            GhostAt = Draft.Snap(Hover.Block, Hover.Side, PartSize, Hover.Cell);
+            GhostAt = Draft.Snap(Hover.Block, Hover.Side, PartSize, Hover.Cell, SnapStep);
         GhostCheck = Draft.CanAdd(GhostAt, PartSize, Content!.Blocks.Types[Part], PartShape);
         HasGhost = true;
         if (Mirror != MirrorAxes.None)

@@ -1181,3 +1181,13 @@ Active module spending is shared with client prediction through `ModuleScanRules
 - Content identity: evaluator 23. The figure is `laserResumeBattery` in the rules of `blocks/blocks.json`, which
   is hashed already.
 - Not saved: no saved-state layout changed. A loaded world's lasers wait for nothing.
+
+### Blocks between cells (protocol 76)
+
+- A design's bytes (encoding 7) give each block's place in quarter cells: three integers, as before, four times what
+  they were for a block on a whole cell. Its size stays whole cells. Nothing else on the wire changed.
+- A received design is held to the same rules as ever, counted in quarters: place and edges within the content's
+  cells, no overlap (a quarter cell counts), mounts on a whole open face, the shield shell within its room.
+- Bytes of encoding 6 are refused ("Unknown design encoding"), and so is a saved world that holds them.
+- Content identity: evaluator 24, bumped for margin only. A design on whole cells gives the same figures and shell, to the bit.
+- The editor's snap step is a client preference and is never sent: a server cannot tell how a block was placed.

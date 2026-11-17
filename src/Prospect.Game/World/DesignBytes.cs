@@ -12,8 +12,10 @@ internal static class DesignBytes
     /// faces after the blocks: a count, then for each its type, parent block, face and place on the face, in the
     /// order of <see cref="FaceMounts.Compare"/>. Version 5 adds each mount's action group, one byte after its place.
     /// Version 6 adds each mount's size (<see cref="DesignMount.Size"/>), one byte after its group.
+    /// Version 7 gives each block's place in quarter cells (<see cref="GridPoint"/>): three integers as before, four
+    /// times what they were for a block on a whole cell. A block's size stays whole cells.
     /// </summary>
-    internal const int Version = 6;
+    internal const int Version = 7;
 
     /// <summary>The fewest bytes a mount takes: a one-byte name with its length, the parent, the face, two positions, the group and the size.</summary>
     private const int MinMountBytes = 2 + 4 + 1 + 2 + 2 + 1 + 1;
@@ -35,7 +37,7 @@ internal static class DesignBytes
         foreach (ref readonly var box in design.Boxes)
         {
             Text(writer, box.Type.Id);
-            writer.Write(box.At.X); writer.Write(box.At.Y); writer.Write(box.At.Z);
+            writer.Write(box.At.X4); writer.Write(box.At.Y4); writer.Write(box.At.Z4);
             writer.Write(box.Size.X); writer.Write(box.Size.Y); writer.Write(box.Size.Z); writer.Write((byte)box.Shape); writer.Write((byte)box.Facing);
         }
         writer.Write(design.Mounts.Length);
@@ -70,7 +72,7 @@ internal static class DesignBytes
         for (var i = 0; i < count; i++)
         {
             var type = content.Blocks.Get(reader.Text());
-            var at = new GridSize(reader.Int(), reader.Int(), reader.Int());
+            var at = GridPoint.Quarters(reader.Int(), reader.Int(), reader.Int());
             var extent = new GridSize(reader.Int(), reader.Int(), reader.Int());
             var shape = (BlockShape)reader.Byte();
             var facing = (BlockFacing)reader.Byte();

@@ -421,6 +421,7 @@ internal sealed partial class WorldView
         Editor = new ShipEditor(jobs);
         TractorPreview = new TractorPreview(maxMounts);
         Editor.SetMirror((MirrorAxes)settings.EditorMirror);
+        Editor.SetSnapStep(settings.EditorSnap);
         // Damaged shells are built on a worker, one at a time; nothing builds one in the frame.
         _shields = new ShieldVisuals(ShieldLook.Load(), jobs);
         // Every cloud the seed generates is known. Fog of war would hand a narrower source in here.
@@ -3796,18 +3797,27 @@ internal sealed partial class WorldView
     /// <c>R</c> would leave it. With <paramref name="mount"/> (<c>--open edit-mount</c>) it holds the ghost of a
     /// cold gas thruster mounted on that face instead; with <paramref name="ion"/> (<c>--open edit-ion</c>) the engine
     /// is an ion drive. <paramref name="mountSize"/> (<c>--mount-size</c>) is the size the mounted ghost is held in;
-    /// 0 keeps the part's default.
+    /// 0 keeps the part's default. <paramref name="snap"/> (<c>--snap</c>) is the snap step in quarter cells, 0 for
+    /// the saved one: under a cell the engine's ghost is held one step over on its face, placed there once by the
+    /// editor's own click and selected, so the details panel shows its place.
     /// </summary>
-    internal void HoldGhostForCapture(bool mount = false, bool ion = false, bool rings = false, int mountSize = 0)
+    internal void HoldGhostForCapture(bool mount = false, bool ion = false, bool rings = false, int mountSize = 0, int snap = 0)
     {
         _captureGhost = true;
         _captureRings = rings;
         _captureMount = mount;
         _captureIon = ion;
         _captureMountSize = mountSize;
+        _captureSnap = snap;
+        if (snap > 0)
+            Editor.SetSnapStep(snap);
     }
 
     private int _captureMountSize;
+
+    // --snap: the step of the capture's ghost in quarter cells (0 for none), and whether its engine has been placed.
+    private int _captureSnap;
+    private bool _captureSnapPlaced;
 
     /// <summary>
     /// For a capture (<c>--open edit-tank</c> and the like): from now on the editor holds the ghost of a part of type
@@ -4192,18 +4202,39 @@ internal sealed partial class WorldView
             break;
         }
 
-        // On the first top face it fits on.
+        // On the first top face it fits on; with a snap step under a cell, one step over along x on that face.
+        var over = _captureSnap is > 0 and < GridPoint.PerCell ? GridPoint.Quarters(_captureSnap, 0, 0) : default;
         for (var i = 0; i < boxes.Length; i++)
         {
-            Editor.SetHover(new DraftHit(i, 2, boxes[i].At, 0f));
+            Editor.SetHover(new DraftHit(i, 2, boxes[i].At + over, 0f));
             if (Editor.HasGhost && Editor.GhostCheck == DraftEdit.Done)
                 break;
         }
 
-        if (_captureGhostTurned || !Editor.HasGhost)
+        if (!Editor.HasGhost)
             return;
-        Editor.RotatePart(1);
-        _captureGhostTurned = true;
+        if (!_captureGhostTurned)
+        {
+            Editor.RotatePart(1);
+            _captureGhostTurned = true;
+            return;
+        }
+
+        // Placed once where it is held, between cells, through the editor's own click, then selected: the details
+        // panel shows its place, and the camera closes on it.
+        if (over != default && !_captureSnapPlaced && Editor.GhostCheck == DraftEdit.Done && !Editor.GhostAt.IsWhole && Editor.Source is { } edited)
+        {
+            var placed = new DesignBox(Editor.GhostAt, Editor.PartSize, null!);
+            Editor.Click();
+            _captureSnapPlaced = true;
+            _captureGhost = false;
+            Editor.StopPlacing();
+            if (Editor.Draft is { } changed)
+                Editor.Select(changed.Boxes.Length - 1, false);
+            _editPanGoal = EditorGeometry.ToHull(EditorGeometry.Middle(placed), edited.Pivot, edited.BlockSize);
+            _editDistanceGoal = 7f * edited.BlockSize;
+            _editFocusing = true;
+        }
     }
 
     private bool EditorTuningCompact(BlockType type) => _editTuning?.Compact(type) ?? false;
@@ -4295,6 +4326,8 @@ internal sealed partial class WorldView
             else
                 Editor.SelectAll();
         }
+        else if (!control && _actions.Pressed(_devices, InputAction.EditorSnapStep, true))
+            Editor.CycleSnapStep();
         if (_devices.KeyPressed(GlfwKey.Delete))
             Editor.DeleteSelected();
         if (Editor.TakeFocusRequest() || (!control && _actions.Pressed(_devices, InputAction.Follow, true)))
@@ -4375,7 +4408,7 @@ internal sealed partial class WorldView
             PointerInGrid(out var origin, out var direction);
             // A moved group is laid against what is behind it, never against itself.
             var skip = Editor.Carry == EditorCarry.Move ? Editor.SelectionMarks : default;
-            var found = EditorGeometry.Pick(draft.Boxes, draft.Mounts, origin, direction, skip, out var hit);
+            var found = EditorGeometry.Pick(draft.Boxes, draft.Mounts, origin, direction, skip, out var hit, Editor.SnapStep);
             // A ghost held where sizing or a turn left it stays while the pointer is still or on the ghost, so a click
             // there places it as it is; once the pointer leaves it for the ship, placing follows the pointer again.
             if (Editor.GhostPinned && !carrying && Editor.HasGhost
@@ -4714,7 +4747,7 @@ internal sealed partial class WorldView
     }
 
     /// <summary>Where and how large the thing being sized is: the block, or the ghost of the part to place.</summary>
-    private void SizedBox(out GridSize at, out GridSize size)
+    private void SizedBox(out GridPoint at, out GridSize size)
     {
         if (Editor.ResizingBlock)
         {

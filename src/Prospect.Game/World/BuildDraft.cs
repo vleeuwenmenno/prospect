@@ -25,7 +25,7 @@ public enum DraftEdit : byte
     BadSelection,
     /// <summary>The blocks to merge are not all of one type.</summary>
     MixedTypes,
-    /// <summary>The blocks to merge do not fill one box exactly: there is a gap, or they are not in a block.</summary>
+    /// <summary>The blocks to merge do not fill one box exactly: there is a gap, they are not in a block, or the box around them is not whole cells.</summary>
     NotABox,
     /// <summary>The blocks would give the ship FTL drives of two kinds; a ship takes drives of one kind only.</summary>
     MixedDrives,
@@ -180,33 +180,85 @@ public sealed class BuildDraft
     /// <summary>Whether there is an undone edit to redo.</summary>
     public bool CanRedo => _redo.Count > 0;
 
+    /// <summary>The snap steps a placement may use, in quarter cells: a whole cell, a half and a quarter.</summary>
+    public static ReadOnlySpan<int> SnapSteps => [GridPoint.PerCell, GridPoint.PerCell / 2, 1];
+
+    /// <summary>Whether <paramref name="step"/> is one of <see cref="SnapSteps"/>.</summary>
+    public static bool IsSnapStep(int step) => step is GridPoint.PerCell or GridPoint.PerCell / 2 or 1;
+
     /// <summary>
     /// Where a box of <paramref name="size"/> sits flush against side <paramref name="side"/> of block
-    /// <paramref name="target"/>. Across the face it is centred on the target, rounding towards negative, or on the
-    /// cell <paramref name="near"/> names when given, and always kept touching the face by at least one cell.
-    /// The result is only a position: <see cref="Add"/> still checks it.
+    /// <paramref name="target"/>. Across the face it is centred on the target, rounding towards negative, or laid so
+    /// that its middle cell (the lower of two) is the cell-sized place <paramref name="near"/> names when given, and
+    /// always kept touching the face by at least one step. <paramref name="step"/> is the snap step in quarter cells
+    /// (<see cref="SnapSteps"/>): across the face the box sits a whole number of steps from the target's low corner,
+    /// so with the step of a cell it lines up with the target's cells wherever the target itself sits, and with a
+    /// half it can be centred on a side one cell longer than its own. The result is only a position:
+    /// <see cref="Add"/> still checks it.
     /// </summary>
-    public GridSize Snap(int target, int side, GridSize size, GridSize? near = null)
+    public GridPoint Snap(int target, int side, GridSize size, GridPoint? near = null, int step = GridPoint.PerCell)
     {
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)target, (uint)_boxes.Count, nameof(target));
         ArgumentOutOfRangeException.ThrowIfGreaterThan((uint)side, 5u, nameof(side));
         if (size.X < 1 || size.Y < 1 || size.Z < 1) throw new ArgumentOutOfRangeException(nameof(size));
+        if (!IsSnapStep(step)) throw new ArgumentOutOfRangeException(nameof(step));
         var t = _boxes[target];
         var normal = side >> 1;
         Span<int> at = stackalloc int[3];
         for (var axis = 0; axis < 3; axis++)
         {
-            int low = Of(t.At, axis), length = Of(t.Size, axis), own = Of(size, axis);
+            // In quarter cells: the target's low edge, its length and the new box's.
+            int low = t.Low4(axis), length = t.High4(axis) - low, own = Of(size, axis) * GridPoint.PerCell;
             if (axis == normal) { at[axis] = (side & 1) == 0 ? low + length : low - own; continue; }
-            // An arithmetic shift halves towards negative infinity, so odd differences round the same way at any sign.
-            var wanted = near is { } n ? Of(n, axis) - ((own - 1) >> 1) : low + ((length - own) >> 1);
-            at[axis] = Math.Clamp(wanted, low - own + 1, low + length - 1);
+            // Floor division rounds towards negative infinity, so odd differences round the same way at any sign.
+            var wanted = near is { } n
+                ? n.Of(axis) - ((Of(size, axis) - 1) >> 1) * GridPoint.PerCell
+                : low + FloorTo(length - own >> 1, step);
+            // Whole steps from the target's corner, whatever place was named.
+            wanted = low + FloorTo(wanted - low, step);
+            at[axis] = Math.Clamp(wanted, low - own + step, low + length - step);
         }
-        return new GridSize(at[0], at[1], at[2]);
+        return GridPoint.Quarters(at[0], at[1], at[2]);
     }
 
-    /// <summary>Adds a box at the end of the draft, facing <paramref name="facing"/>.</summary>
-    public DraftEdit Add(GridSize at, GridSize size, BlockType type, BlockShape shape = BlockShape.Box, BlockFacing facing = BlockFacing.Back)
+    /// <summary>
+    /// The cell-sized place on side <paramref name="side"/> of block <paramref name="target"/> nearest a point of
+    /// that face, for <see cref="Snap"/>'s <c>near</c>: on the face's own axis the block's outermost layer of cells,
+    /// across it the place, a whole number of <paramref name="step"/>s from the block's low corner, whose cell has
+    /// its middle nearest <paramref name="point"/> (grid space, as the editor's rays are: cell <c>i</c> spans
+    /// <c>[i - 0.5, i + 0.5)</c>). With the step of a cell that is the cell of the face the point is in. With a
+    /// finer step the cell's middle stays on the face but the cell may reach half a cell past its edge, so a part
+    /// can be centred across two blocks that stand side by side.
+    /// </summary>
+    public static GridPoint FaceCell(in DesignBox target, int side, Vector3 point, int step = GridPoint.PerCell)
+    {
+        ArgumentOutOfRangeException.ThrowIfGreaterThan((uint)side, 5u, nameof(side));
+        if (!IsSnapStep(step)) throw new ArgumentOutOfRangeException(nameof(step));
+        Span<int> cell = stackalloc int[3];
+        var normal = side >> 1;
+        for (var axis = 0; axis < 3; axis++)
+        {
+            int low = target.Low4(axis), last = target.High4(axis) - GridPoint.PerCell;
+            if (axis == normal) { cell[axis] = (side & 1) == 0 ? last : low; continue; }
+            var over = step == GridPoint.PerCell ? 0 : GridPoint.PerCell / 2;
+            // Quarter cells from the block's low edge to the point, less the half cell from a cell's edge to its
+            // middle, to the nearest step: half a step up, then down to a whole one.
+            var from = (point[axis] + 0.5f) * GridPoint.PerCell - low - GridPoint.PerCell / 2;
+            var steps = (int)MathF.Floor(from / step + 0.5f);
+            cell[axis] = Math.Clamp(low + steps * step, low - over, last + over);
+        }
+
+        return GridPoint.Quarters(cell[0], cell[1], cell[2]);
+    }
+
+    // The largest whole number of steps at or below a length, at any sign.
+    private static int FloorTo(int length, int step) => (int)Math.Floor(length / (double)step) * step;
+
+    /// <summary>
+    /// Adds a box at the end of the draft, facing <paramref name="facing"/>. Its place is in quarter cells
+    /// (<see cref="GridPoint"/>); whole cells convert by themselves.
+    /// </summary>
+    public DraftEdit Add(GridPoint at, GridSize size, BlockType type, BlockShape shape = BlockShape.Box, BlockFacing facing = BlockFacing.Back)
     {
         ArgumentNullException.ThrowIfNull(type);
         var box = new DesignBox(at, size, type, shape, facing);
@@ -378,7 +430,7 @@ public sealed class BuildDraft
         {
             // The face's low edge is half a cell below its first cell's centre; the square's low corner then sits
             // half its side below the point.
-            var from = (point[axis] + 0.5f - Of(box.At, axis)) * FaceMounts.PerCell - side * 0.5f;
+            var from = (point[axis] + 0.5f - box.At.Of(axis) * (1f / GridPoint.PerCell)) * FaceMounts.PerCell - side * 0.5f;
             return Math.Clamp((int)MathF.Floor(from + 0.5f), 0, Math.Max(Of(box.Size, axis) * FaceMounts.PerCell - side, 0));
         }
     }
@@ -388,7 +440,7 @@ public sealed class BuildDraft
     /// for showing whether a placement fits before it is made. With a <paramref name="type"/>, also whether its
     /// drive is of the draft's kind and the size is one the type allows. One pass over the boxes; allocates nothing.
     /// </summary>
-    public DraftEdit CanAdd(GridSize at, GridSize size, BlockType? type = null, BlockShape shape = BlockShape.Box)
+    public DraftEdit CanAdd(GridPoint at, GridSize size, BlockType? type = null, BlockShape shape = BlockShape.Box)
     {
         // The same count bound GeometryAdmission.Count applies, checked here so the editor stops at it; Export runs the real one.
         if (!CountFits(_boxes.Count + 1L))
@@ -409,19 +461,19 @@ public sealed class BuildDraft
     }
 
     /// <summary>
-    /// Adds copies of <paramref name="boxes"/>, each moved by <paramref name="by"/> cells, at the end of the
+    /// Adds copies of <paramref name="boxes"/>, each moved by <paramref name="by"/> (quarter cells), at the end of the
     /// draft in their order: the pasted blocks are the last <c>boxes.Length</c>. All of them or none. With
     /// <paramref name="mounts"/>, whose <see cref="DesignMount.Parent"/> is an index into <paramref name="boxes"/>,
     /// the copies carry those parts; one with no room where it lands, or past the content's count, is left behind.
     /// </summary>
-    public DraftEdit Paste(ReadOnlySpan<DesignBox> boxes, GridSize by, ReadOnlySpan<DesignMount> mounts = default)
+    public DraftEdit Paste(ReadOnlySpan<DesignBox> boxes, GridPoint by, ReadOnlySpan<DesignMount> mounts = default)
     {
         foreach (ref readonly var box in boxes) ArgumentNullException.ThrowIfNull(box.Type, nameof(boxes));
         var check = CanPaste(boxes, by);
         if (check != DraftEdit.Done) return check;
         var first = _boxes.Count;
         for (var i = 0; i < boxes.Length; i++)
-            Do(Step.Block(first + i, default, boxes[i] with { At = Shifted(boxes[i].At, by) }));
+            Do(Step.Block(first + i, default, boxes[i] with { At = boxes[i].At + by }));
         foreach (ref readonly var mount in mounts)
         {
             if ((uint)mount.Parent >= (uint)boxes.Length) throw new ArgumentOutOfRangeException(nameof(mounts));
@@ -439,7 +491,7 @@ public sealed class BuildDraft
     /// are checked against the draft and against each other; of their types only the kind of drive is looked at.
     /// Allocates nothing.
     /// </summary>
-    public DraftEdit CanPaste(ReadOnlySpan<DesignBox> boxes, GridSize by)
+    public DraftEdit CanPaste(ReadOnlySpan<DesignBox> boxes, GridPoint by)
     {
         if (boxes.IsEmpty) return DraftEdit.Unchanged;
         if (!CountFits((long)_boxes.Count + boxes.Length)) return DraftEdit.TooManyBlocks;
@@ -539,17 +591,17 @@ public sealed class BuildDraft
     }
 
     /// <summary>
-    /// Moves the blocks of a selection by <paramref name="by"/> cells, together. They keep their indices, so the
+    /// Moves the blocks of a selection by <paramref name="by"/> (quarter cells), together. They keep their indices, so the
     /// selection still names them afterwards. They may land where they or each other stood, on no other block.
     /// </summary>
-    public DraftEdit Move(ReadOnlySpan<int> blocks, GridSize by)
+    public DraftEdit Move(ReadOnlySpan<int> blocks, GridPoint by)
     {
         var check = CanMove(blocks, by);
         if (check != DraftEdit.Done) return check;
         foreach (var block in blocks)
         {
             var box = _boxes[block];
-            Do(Step.Block(block, box, box with { At = Shifted(box.At, by) }));
+            Do(Step.Block(block, box, box with { At = box.At + by }));
         }
 
         Finish();
@@ -561,7 +613,7 @@ public sealed class BuildDraft
     /// whether a dragged group fits where it is held. Allocates nothing once the draft has checked a selection
     /// of its size.
     /// </summary>
-    public DraftEdit CanMove(ReadOnlySpan<int> blocks, GridSize by)
+    public DraftEdit CanMove(ReadOnlySpan<int> blocks, GridPoint by)
     {
         var check = Mark(blocks, out var marks);
         if (check != DraftEdit.Done) return check;
@@ -595,7 +647,8 @@ public sealed class BuildDraft
             FaceMounts.Box(_boxes[mount.Parent], mount, low, high);
             var n = Facings.Axis(mount.Face);
             int a = (n + 1) % 3, b = (n + 2) % 3;
-            Do(Step.Part(i, mount, mount with { Parent = lowest, U = low[a] - Of(merged.At, a) * FaceMounts.PerCell, V = low[b] - Of(merged.At, b) * FaceMounts.PerCell }));
+            // Blocks that fill a box of whole cells sit whole cells from its corner, so the place stays whole tenths.
+            Do(Step.Part(i, mount, mount with { Parent = lowest, U = FaceMounts.Place(merged, a, low[a]), V = FaceMounts.Place(merged, b, low[b]) }));
         }
 
         for (var i = _boxes.Count - 1; i > lowest; i--)
@@ -608,7 +661,8 @@ public sealed class BuildDraft
     /// <summary>
     /// What <see cref="Merge"/> would answer and the box it would make, without changing the draft, its version
     /// or its history. Looks at the selected blocks only, and at no cell: boxes of a draft share no volume, so
-    /// they fill the box around them exactly when their volumes add up to its volume.
+    /// they fill the box around them exactly when their volumes add up to its volume. Edges and volumes are in
+    /// quarter cells; a box around blocks set apart by part of a cell is not whole cells and is no block.
     /// </summary>
     public DraftEdit CanMerge(ReadOnlySpan<int> blocks, out DesignBox merged)
     {
@@ -618,8 +672,8 @@ public sealed class BuildDraft
         if (blocks.Length < 2) return DraftEdit.Unchanged;
 
         var first = _boxes[blocks[0]];
-        Span<int> low = [first.At.X, first.At.Y, first.At.Z];
-        Span<int> high = [first.At.X + first.Size.X, first.At.Y + first.Size.Y, first.At.Z + first.Size.Z];
+        Span<int> low = [first.Low4(0), first.Low4(1), first.Low4(2)];
+        Span<int> high = [first.High4(0), first.High4(1), first.High4(2)];
         long volume = 0;
         foreach (var block in blocks)
         {
@@ -629,16 +683,18 @@ public sealed class BuildDraft
             volume += (long)box.Size.X * box.Size.Y * box.Size.Z;
             for (var axis = 0; axis < 3; axis++)
             {
-                low[axis] = Math.Min(low[axis], Of(box.At, axis));
-                high[axis] = Math.Max(high[axis], Of(box.At, axis) + Of(box.Size, axis));
+                low[axis] = Math.Min(low[axis], box.Low4(axis));
+                high[axis] = Math.Max(high[axis], box.High4(axis));
             }
         }
 
-        var size = new GridSize(high[0] - low[0], high[1] - low[1], high[2] - low[2]);
+        const int Q = GridPoint.PerCell;
+        if ((high[0] - low[0]) % Q != 0 || (high[1] - low[1]) % Q != 0 || (high[2] - low[2]) % Q != 0) return DraftEdit.NotABox;
+        var size = new GridSize((high[0] - low[0]) / Q, (high[1] - low[1]) / Q, (high[2] - low[2]) / Q);
         if (volume != (long)size.X * size.Y * size.Z) return DraftEdit.NotABox;
         var limit = BoxDesign.MaxSide(first.Type, _content.Blocks.Limits);
         if (size.X > limit || size.Y > limit || size.Z > limit) return DraftEdit.BadSize;
-        merged = first with { At = new GridSize(low[0], low[1], low[2]), Size = size };
+        merged = first with { At = GridPoint.Quarters(low[0], low[1], low[2]), Size = size };
         return DraftEdit.Done;
     }
 
@@ -655,7 +711,8 @@ public sealed class BuildDraft
         // axis is counted from that corner, so it is counted again to stay where it is. A mount the face no
         // longer reaches goes with the rest that has no room.
         var axis = side >> 1;
-        var shift = (Of(_boxes[block].At, axis) - Of(changed.At, axis)) * FaceMounts.PerCell;
+        // A side moves by whole cells, so the low corner does, and the shift is whole tenths.
+        var shift = (_boxes[block].At.Of(axis) - changed.At.Of(axis)) / GridPoint.PerCell * FaceMounts.PerCell;
         for (var i = 0; shift != 0 && i < _mounts.Count; i++)
         {
             var mount = _mounts[i];
@@ -679,7 +736,7 @@ public sealed class BuildDraft
         ArgumentOutOfRangeException.ThrowIfGreaterThan((uint)side, 5u, nameof(side));
         var box = _boxes[block];
         var axis = side >> 1;
-        var at = (side & 1) == 0 ? box.At : With(box.At, axis, Of(box.At, axis) + Of(box.Size, axis) - length);
+        var at = (side & 1) == 0 ? box.At : box.At.With(axis, box.At.Of(axis) + (Of(box.Size, axis) - length) * GridPoint.PerCell);
         changed = box with { At = at, Size = With(box.Size, axis, length) };
         if (changed == box) return DraftEdit.Unchanged;
         return Check(changed, block);
@@ -789,7 +846,7 @@ public sealed class BuildDraft
             for (var k = 1; k < length; k++)
             {
                 pieces.Add(_boxes.Count);
-                Do(Step.Block(_boxes.Count, default, thin with { At = With(box.At, axis, Of(box.At, axis) + k) }));
+                Do(Step.Block(_boxes.Count, default, thin with { At = box.At.With(axis, box.At.Of(axis) + k * GridPoint.PerCell) }));
             }
 
             // From the last mount down, so removing one does not move one still to be placed.
@@ -911,17 +968,17 @@ public sealed class BuildDraft
     // The mirror planes' place and the draft's extent, worked out again only when the draft has changed.
     private int _frameVersion = -1;
     private bool _hasFrame;
-    private GridSize _centre2;
-    private GridSize _frameLow;
-    private GridSize _frameHigh;
+    private GridPoint _centre2;
+    private GridPoint _frameLow;
+    private GridPoint _frameHigh;
 
     /// <summary>
     /// Where the mirror planes are: through the centre of the draft's first core block. <paramref name="centre2"/> is
-    /// twice that centre in cells and <paramref name="low"/> and <paramref name="high"/> the draft's extent on the
-    /// grid's integer edges. False when the draft has no core, which leaves nothing to mirror about. One pass over
+    /// twice that centre and <paramref name="low"/> and <paramref name="high"/> the draft's extent, all on the grid's
+    /// edges in quarter cells. False when the draft has no core, which leaves nothing to mirror about. One pass over
     /// the boxes after a change, nothing between; allocates nothing.
     /// </summary>
-    public bool TryMirrorFrame(out GridSize centre2, out GridSize low, out GridSize high)
+    public bool TryMirrorFrame(out GridPoint centre2, out GridPoint low, out GridPoint high)
     {
         if (_frameVersion != Version)
         {
@@ -936,12 +993,12 @@ public sealed class BuildDraft
                     _centre2 = Mirroring.Centre2(box);
                 }
 
-                lx = Math.Min(lx, box.At.X); ly = Math.Min(ly, box.At.Y); lz = Math.Min(lz, box.At.Z);
-                hx = Math.Max(hx, box.At.X + box.Size.X); hy = Math.Max(hy, box.At.Y + box.Size.Y); hz = Math.Max(hz, box.At.Z + box.Size.Z);
+                lx = Math.Min(lx, box.Low4(0)); ly = Math.Min(ly, box.Low4(1)); lz = Math.Min(lz, box.Low4(2));
+                hx = Math.Max(hx, box.High4(0)); hy = Math.Max(hy, box.High4(1)); hz = Math.Max(hz, box.High4(2));
             }
 
-            _frameLow = new GridSize(lx, ly, lz);
-            _frameHigh = new GridSize(hx, hy, hz);
+            _frameLow = GridPoint.Quarters(lx, ly, lz);
+            _frameHigh = GridPoint.Quarters(hx, hy, hz);
         }
 
         centre2 = _centre2; low = _frameLow; high = _frameHigh;
@@ -1040,7 +1097,7 @@ public sealed class BuildDraft
             if ((mask & ~(int)axes) != 0)
                 continue;
             var mirrored = Mirroring.Box(parent, mask, centre2);
-            var copy = Mirroring.Mount(parent, mirrored, mount, mask, centre2) with { Parent = IndexOfBlock(mirrored) };
+            var copy = Mirroring.Mount(parent, mount, mask) with { Parent = IndexOfBlock(mirrored) };
             var seen = false;
             for (var i = 0; !seen && i < count; i++)
                 seen = into[i] == copy;
@@ -1140,7 +1197,7 @@ public sealed class BuildDraft
                 if (mask != 0)
                 {
                     var mirrored = Mirroring.Box(parent, mask, centre2);
-                    var copy = Mirroring.Mount(parent, mirrored, mount, mask, centre2) with { Parent = IndexOfBlock(mirrored) };
+                    var copy = Mirroring.Mount(parent, mount, mask) with { Parent = IndexOfBlock(mirrored) };
                     at = copy.Parent < 0 ? -1 : IndexOfMount(copy);
                 }
 
@@ -1284,9 +1341,11 @@ public sealed class BuildDraft
     /// and, for boxes that come from outside, against each other; a group that is moved keeps its shape and
     /// cannot run into itself. Boxes far from the group are passed over by the group's own bounds.
     /// </summary>
-    private DraftEdit CheckGroup(ReadOnlySpan<DesignBox> source, ReadOnlySpan<int> pick, GridSize by, ReadOnlySpan<ulong> moving)
+    private DraftEdit CheckGroup(ReadOnlySpan<DesignBox> source, ReadOnlySpan<int> pick, GridPoint by, ReadOnlySpan<ulong> moving)
     {
         var limits = _content.Blocks.Limits;
+        // Everything below is in quarter cells, as the places are.
+        var reach = (long)limits.MaxDesignSide * GridPoint.PerCell;
         var count = pick.IsEmpty ? source.Length : pick.Length;
         Span<int> low = [int.MaxValue, int.MaxValue, int.MaxValue];
         Span<int> high = [int.MinValue, int.MinValue, int.MinValue];
@@ -1298,9 +1357,10 @@ public sealed class BuildDraft
             for (var axis = 0; axis < 3; axis++)
             {
                 // In 64 bits: a move far enough to wrap around would otherwise look like one that fits.
-                long at = (long)Of(box.At, axis) + Of(by, axis), size = Of(box.Size, axis);
+                long at = (long)box.At.Of(axis) + by.Of(axis), size = Of(box.Size, axis);
                 if (size < 1 || size > BoxDesign.MaxSide(box.Type, limits)) return DraftEdit.BadSize;
-                if (at < -limits.MaxDesignSide || at + size > limits.MaxDesignSide) return DraftEdit.OutsideLimits;
+                size *= GridPoint.PerCell;
+                if (at < -reach || at + size > reach) return DraftEdit.OutsideLimits;
                 low[axis] = Math.Min(low[axis], (int)at); high[axis] = Math.Max(high[axis], (int)(at + size));
             }
         }
@@ -1315,7 +1375,7 @@ public sealed class BuildDraft
             var near = true;
             for (var axis = 0; axis < 3; axis++)
             {
-                int a = Of(other.At, axis), b = a + Of(other.Size, axis);
+                int a = other.Low4(axis), b = other.High4(axis);
                 near &= a < high[axis] && b > low[axis];
                 unionLow[axis] = Math.Min(unionLow[axis], a); unionHigh[axis] = Math.Max(unionHigh[axis], b);
             }
@@ -1324,7 +1384,7 @@ public sealed class BuildDraft
                 overlaps = Shares(source[pick.IsEmpty ? i : pick[i]], by, other, default);
         }
 
-        if (unionHigh[0] - unionLow[0] > limits.MaxDesignSide || unionHigh[1] - unionLow[1] > limits.MaxDesignSide || unionHigh[2] - unionLow[2] > limits.MaxDesignSide)
+        if (unionHigh[0] - unionLow[0] > reach || unionHigh[1] - unionLow[1] > reach || unionHigh[2] - unionLow[2] > reach)
             return DraftEdit.OutsideLimits;
         for (var i = 0; pick.IsEmpty && !overlaps && i < count; i++)
             for (var k = i + 1; !overlaps && k < count; k++)
@@ -1333,24 +1393,23 @@ public sealed class BuildDraft
     }
 
     // Whether two boxes, each moved by its own shift, share volume. Touching faces do not.
-    private static bool Shares(in DesignBox a, GridSize shiftA, in DesignBox b, GridSize shiftB)
+    private static bool Shares(in DesignBox a, GridPoint shiftA, in DesignBox b, GridPoint shiftB)
     {
         for (var axis = 0; axis < 3; axis++)
         {
-            int la = Of(a.At, axis) + Of(shiftA, axis), lb = Of(b.At, axis) + Of(shiftB, axis);
-            if (la >= lb + Of(b.Size, axis) || lb >= la + Of(a.Size, axis)) return false;
+            int la = a.Low4(axis) + shiftA.Of(axis), lb = b.Low4(axis) + shiftB.Of(axis);
+            if (la >= lb + Of(b.Size, axis) * GridPoint.PerCell || lb >= la + Of(a.Size, axis) * GridPoint.PerCell) return false;
         }
 
         return true;
     }
 
-    private static GridSize Shifted(GridSize at, GridSize by) => new(at.X + by.X, at.Y + by.Y, at.Z + by.Z);
-
     private DraftEdit Check(DesignBox box, int ignore)
     {
         var limits = _content.Blocks.Limits;
         // Cell i spans [i - 0.5, i + 0.5) about its centre (BoxDesign.Low/High/Mid); every box carries the same half
-        // cell, so overlap, touching and extent compare exactly on the integer edges [At, At + Size).
+        // cell, so overlap, touching and extent compare exactly on the edges [Low4, High4), in quarter cells.
+        var reach = (long)limits.MaxDesignSide * GridPoint.PerCell;
         Span<int> low = stackalloc int[3];
         Span<int> high = stackalloc int[3];
         Span<int> unionLow = stackalloc int[3];
@@ -1358,10 +1417,10 @@ public sealed class BuildDraft
         if (!BoxDesign.ShapeAllowed(box.Type, box.Shape)) return DraftEdit.BoxOnly;
         for (var axis = 0; axis < 3; axis++)
         {
-            int at = Of(box.At, axis), size = Of(box.Size, axis);
+            int at = box.At.Of(axis), size = Of(box.Size, axis);
             if (size < 1 || size > BoxDesign.MaxSide(box.Type, limits)) return DraftEdit.BadSize;
-            if (at < -limits.MaxDesignSide || (long)at + size > limits.MaxDesignSide) return DraftEdit.OutsideLimits;
-            low[axis] = unionLow[axis] = at; high[axis] = unionHigh[axis] = at + size;
+            if (at < -reach || at + (long)size * GridPoint.PerCell > reach) return DraftEdit.OutsideLimits;
+            low[axis] = unionLow[axis] = at; high[axis] = unionHigh[axis] = at + size * GridPoint.PerCell;
         }
         var overlaps = false;
         for (var i = 0; i < _boxes.Count; i++)
@@ -1371,14 +1430,14 @@ public sealed class BuildDraft
             var shared = 0;
             for (var axis = 0; axis < 3; axis++)
             {
-                int a = Of(other.At, axis), b = a + Of(other.Size, axis);
+                int a = other.Low4(axis), b = other.High4(axis);
                 if (a < high[axis] && b > low[axis]) shared++;
                 unionLow[axis] = Math.Min(unionLow[axis], a); unionHigh[axis] = Math.Max(unionHigh[axis], b);
             }
             overlaps |= shared == 3;
         }
         low = unionLow; high = unionHigh;
-        if (high[0] - low[0] > limits.MaxDesignSide || high[1] - low[1] > limits.MaxDesignSide || high[2] - low[2] > limits.MaxDesignSide)
+        if (high[0] - low[0] > reach || high[1] - low[1] > reach || high[2] - low[2] > reach)
             return DraftEdit.OutsideLimits;
         return overlaps ? DraftEdit.Overlaps : DraftEdit.Done;
     }

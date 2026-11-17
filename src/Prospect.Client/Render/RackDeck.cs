@@ -34,10 +34,12 @@ internal sealed class RackDeck
 
     /// <summary>
     /// The faces of the box <paramref name="at"/> + <paramref name="size"/> that another box of <paramref name="boxes"/>
-    /// touches over some area, skipping index <paramref name="self"/>; the same test as the design's own.
+    /// touches over some area, skipping index <paramref name="self"/>; the same test as the design's own, on the
+    /// grid's edges in quarter cells, so a box set between cells touches what it sits against.
     /// </summary>
-    public static int Touched(ReadOnlySpan<DesignBox> boxes, int self, GridSize at, GridSize size)
+    public static int Touched(ReadOnlySpan<DesignBox> boxes, int self, GridPoint at, GridSize size)
     {
+        var own = new DesignBox(at, size, null!);
         var touched = 0;
         for (var j = 0; j < boxes.Length; j++)
         {
@@ -49,17 +51,15 @@ internal sealed class RackDeck
                 for (var k = 1; k <= 2; k++)
                 {
                     var w = (axis + k) % 3;
-                    overlap *= Math.Max(0, Math.Min(Get(at, w) + Get(size, w), Get(o.At, w) + Get(o.Size, w)) - Math.Max(Get(at, w), Get(o.At, w)));
+                    overlap *= Math.Max(0, Math.Min(own.High4(w), o.High4(w)) - Math.Max(own.Low4(w), o.Low4(w)));
                 }
                 if (overlap == 0) continue;
-                if (Get(at, axis) + Get(size, axis) == Get(o.At, axis)) touched |= 1 << (2 * axis);
-                if (Get(at, axis) == Get(o.At, axis) + Get(o.Size, axis)) touched |= 1 << (2 * axis + 1);
+                if (own.High4(axis) == o.Low4(axis)) touched |= 1 << (2 * axis);
+                if (own.Low4(axis) == o.High4(axis)) touched |= 1 << (2 * axis + 1);
             }
         }
         return touched;
     }
-
-    private static int Get(GridSize g, int axis) => axis == 0 ? g.X : axis == 1 ? g.Y : g.Z;
 
     private byte[] _faces = new byte[64];
     private BuildDraft? _draft;

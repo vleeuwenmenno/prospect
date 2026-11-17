@@ -138,7 +138,7 @@ public sealed class MountSizeTests
         using var stream = new MemoryStream();
         sized.Write(stream);
         var text = Encoding.UTF8.GetString(stream.ToArray());
-        Assert.Contains("\"version\":8", text);
+        Assert.Contains("\"version\":9", text);
         Assert.Equal(2, text.Split("\"size\":").Length - 1 - text.Split("\"size\":[").Length + 1);
         var again = BoxDesign.Read(stream.ToArray(), Content.Blocks, "again.json");
         Assert.Equal(sized.Mounts.ToArray(), again.Mounts.ToArray());

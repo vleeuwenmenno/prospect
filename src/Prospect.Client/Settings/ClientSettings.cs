@@ -4,6 +4,7 @@ using Prospect.Client.Render;
 using Prospect.Engine.Diagnostics;
 using Prospect.Engine.IO;
 using Prospect.Game.Protocol;
+using Prospect.Game.World;
 
 namespace Prospect.Client.Settings;
 
@@ -39,6 +40,12 @@ internal sealed class ClientSettings
     /// never sent; anything outside those bits is dropped on load.
     /// </summary>
     public int EditorMirror { get; set; }
+
+    /// <summary>
+    /// The ship editor's snap step for placing and moving blocks, in quarter cells: 4 for a whole cell, 2 for a half,
+    /// 1 for a quarter (<c>BuildDraft.SnapSteps</c>). Kept per client, never sent; anything else is a whole cell on load.
+    /// </summary>
+    public int EditorSnap { get; set; } = GridPoint.PerCell;
     public string PlayerName { get; set; } = "Prospector";
     public string LastHost { get; set; } = "127.0.0.1";
     public int LastPort { get; set; } = ProtocolInfo.DefaultPort;
@@ -167,6 +174,7 @@ internal sealed class ClientSettings
         LastPort = LastPort is > 0 and <= ushort.MaxValue ? LastPort : ProtocolInfo.DefaultPort;
         AutosaveSeconds = Math.Clamp(AutosaveSeconds, 10, 600);
         EditorMirror &= 7;
+        if (!BuildDraft.IsSnapStep(EditorSnap)) EditorSnap = GridPoint.PerCell;
 
         // A file can say anything: keep sane, distinct ids, in the order they were hidden.
         HiddenTips ??= [];
