@@ -13,6 +13,9 @@ internal enum EditorMenuSub : byte
 
     /// <summary>The axes a selected tank can be cut along.</summary>
     Split,
+
+    /// <summary>The action groups a selected mounted part (a mining laser) can be put in.</summary>
+    Group,
 }
 
 /// <summary>

@@ -118,7 +118,7 @@ public sealed class ScannerMountTests
         var again = BoxDesign.Read(stream.ToArray(), Content.Blocks, "again.json");
         Assert.Equal(old.Blocks.ToArray(), again.Blocks.ToArray());
         Assert.Equal(old.Mounts.ToArray(), again.Mounts.ToArray());
-        Assert.Contains("\"version\":6", System.Text.Encoding.UTF8.GetString(stream.ToArray()));
+        Assert.Contains("\"version\":7", System.Text.Encoding.UTF8.GetString(stream.ToArray()));
     }
 
     [Fact]
@@ -317,11 +317,11 @@ public sealed class ScannerMountTests
     public void ASavedWorldOfTheOldLayoutIsRefusedWithItsLayoutNamedAndNothingIsConverted()
     {
         var world = WorldSnapshot.NewWorld(Content, Guid.NewGuid(), "Old", DateTimeOffset.UnixEpoch, 1, Content.SettingCatalog.Defaults, default);
-        Assert.Equal(18, WorldSnapshotCodec.Version);
+        Assert.Equal(20, WorldSnapshotCodec.Version);
         Assert.True(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(world), SaveLimits.Default, out _, out _));
-        world.Compatibility = world.Compatibility with { SaveVersion = 17 };
+        world.Compatibility = world.Compatibility with { SaveVersion = 19 };
         Assert.False(WorldSnapshotCodec.TryDecode(WorldSnapshotCodec.Encode(world), SaveLimits.Default, out var snapshot, out var error));
         Assert.Null(snapshot);
-        Assert.Equal("save layout 17, this build reads 18", error);
+        Assert.Equal("save layout 19, this build reads 20", error);
     }
 }

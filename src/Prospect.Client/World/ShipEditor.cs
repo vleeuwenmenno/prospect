@@ -1660,6 +1660,60 @@ internal sealed class ShipEditor(JobSystem jobs)
         return true;
     }
 
+    /// <summary>
+    /// True when at least one mounted part is selected and every selected one may be in an action group
+    /// (<see cref="ActionGroups.Groupable"/>): what the group selector and the menu's Group row are offered on.
+    /// </summary>
+    public bool SelectionIsGroupable
+    {
+        get
+        {
+            if (Draft is not { } draft || _mountSelectionCount == 0)
+                return false;
+            var mounts = draft.Mounts;
+            foreach (var mount in MountSelection)
+                if ((uint)mount >= (uint)mounts.Length || !ActionGroups.Groupable(mounts[mount].Type))
+                    return false;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// The action group every selected mounted part is in (0 for none), or -1 when they differ or the selection is
+    /// not groupable.
+    /// </summary>
+    public int SelectionGroup
+    {
+        get
+        {
+            if (!SelectionIsGroupable)
+                return -1;
+            var mounts = Draft!.Mounts;
+            var group = mounts[MountSelection[0]].Group;
+            foreach (var mount in MountSelection)
+                if (mounts[mount].Group != group)
+                    return -1;
+            return group;
+        }
+    }
+
+    /// <summary>What putting the selected mounted parts in <paramref name="group"/> would answer, without doing it.</summary>
+    public DraftEdit CanSetGroup(byte group) =>
+        !CanEdit || !SelectionIsGroupable ? DraftEdit.NoGroup : SelectionGroup == group ? DraftEdit.Unchanged : DraftEdit.Done;
+
+    /// <summary>
+    /// Puts every selected mounted part in action group <paramref name="group"/> (1 to 10, 0 for none), as one step to
+    /// undo. The group is a part of the design, so it travels with Apply like any edit. The selection stays, since no
+    /// index moves; the change is never mirrored, as a fuel or a split is not.
+    /// </summary>
+    public void SetSelectedGroup(byte group)
+    {
+        if (!CanEdit || !SelectionIsGroupable)
+            return;
+        CancelCarry();
+        Record(Draft!.SetMountGroups(MountSelection, group), keepMountSelection: true);
+    }
+
     /// <summary>Selects every mounted part of the type of mounted part <paramref name="mount"/>, replacing the selection.</summary>
     public bool SelectSameMountType(int mount)
     {
@@ -2009,17 +2063,19 @@ internal sealed class ShipEditor(JobSystem jobs)
         Changed();
     }
 
-    private void Record(DraftEdit result)
+    private void Record(DraftEdit result, bool keepMountSelection = false)
     {
         LastEdit = result;
         LastEditAt = _time;
         if (result != DraftEdit.Done)
             return;
         _depth++;
-        Changed();
+        Changed(keepMountSelection: keepMountSelection);
     }
 
-    private void Changed(bool gesture = false)
+    // `keepMountSelection` is for an edit that moves no mount's index (a group change), so the selection still names
+    // the same parts and the details panel keeps showing them.
+    private void Changed(bool gesture = false, bool keepMountSelection = false)
     {
         ConfirmDump = false;
         // The ghost's face may have moved or gone: a part being sized or turned is put back, and a held ghost lets go.
@@ -2034,7 +2090,7 @@ internal sealed class ShipEditor(JobSystem jobs)
         _editedAt = _time;
         Check = DraftCheck.Pending;
         // An edit may take mounts away with it, which moves the others down: mounted parts are picked again after one.
-        if (_mountSelectionCount > 0)
+        if (_mountSelectionCount > 0 && !keepMountSelection)
         {
             _mountSelectionCount = 0;
             _selectionStamp++;

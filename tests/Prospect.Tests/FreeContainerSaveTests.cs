@@ -36,7 +36,7 @@ public sealed class FreeContainerSaveTests
         Assert.Equal(expected, copy!.FreeContainers[0]);
         var store = new FreeContainers(); store.Restore(world.FreeContainers.AsSpan(0, 1), 2);
         Assert.Equal(expected, store.Items[0]);
-        Assert.Equal(18, WorldSnapshotCodec.Version);
+        Assert.Equal(20, WorldSnapshotCodec.Version);
     }
 
     [Fact]

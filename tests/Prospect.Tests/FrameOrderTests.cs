@@ -8843,6 +8843,51 @@ public sealed class FrameOrderTests : IDisposable
     }
 
     [Fact]
+    public void AClickOnGroupThreeInTheMenusFlyoutPutsTheLaserInThatGroupAndKeepsItSelected()
+    {
+        UseTips();
+        _editorMenu = new EditorMenuPanel(_tipKit!);
+        OpenEditor();
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        var editor = _world.Editor;
+        editor.StopPlacing();
+        var draft = editor.Draft!;
+        var laser = editor.Content!.Blocks.Get("miningLaser");
+        var placed = false;
+        for (var block = 0; !placed && block < draft.Boxes.Length; block++)
+            placed = draft.AddMount(block, BlockFacing.Up, 2, 2, laser) == DraftEdit.Done;
+        Assert.True(placed, "a block has room for a laser");
+        var mount = draft.Mounts.Length - 1;
+        Assert.Equal(1, draft.Mounts[mount].Group);
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+        editor.SelectMount(mount, false);
+        Assert.True(editor.OpenMenu(new float2(300f, 300f), -1, mount));
+        for (var i = 0; i < 30; i++)
+            EditorFrame();
+
+        // The pointer goes to Group, rests, then down its flyout to "Group 3", the third row.
+        Glide(MenuRow(EditorMenuPanel.EditorMenuRow.Group));
+        for (var i = 0; i < 6; i++)
+            EditorFrame();
+        Assert.Equal(EditorMenuSub.Group, editor.Menu.Sub);
+        Assert.True(_editorMenu!.TrySubRowCentre(2, out var row));
+        Assert.True(_editorMenu.TrySubRowCentre(0, out var first));
+        Glide(first);
+        Glide(row);
+        HoldClick();
+        Assert.True(editor.Draft!.Mounts[mount].Group == 3, _holdLog);
+        Assert.False(editor.Menu.IsOpen);
+        Assert.Equal(mount, editor.SelectedMount);
+        Assert.Equal(3, editor.SelectionGroup);
+
+        // One undo takes the choice back.
+        editor.Undo();
+        Assert.Equal(1, editor.Draft.Mounts[mount].Group);
+    }
+
+    [Fact]
     public void AClickOnSplitInTheMenusFlyoutCutsTheTankAndClosesTheMenu()
     {
         var block = OpenMenuOnATank(longer: true);

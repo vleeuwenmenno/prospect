@@ -1405,7 +1405,7 @@ internal sealed class App : IDisposable
                 // and ahead, so the drones are seen leaving, holding and coming home.
                 World.SetCommandCapturePose(World.OwnPosition + new Double3(-8, 0, 0), 20f, -0.6f, -0.3f);
             }
-            else if (view is "edit-rack" or "edit-tank" or "edit-tank-long" or "edit-tank-slab" or "edit-scanner" or "edit-bay" && snapshot is { OwnHull: >= 0 })
+            else if (view is "edit-rack" or "edit-tank" or "edit-tank-long" or "edit-tank-slab" or "edit-scanner" or "edit-bay" or "edit-laser" or "edit-laser-group" && snapshot is { OwnHull: >= 0 })
             {
                 // The editor holding the ghost of a bipropellant tank (1, 2 by 1 by 1, or a 2 by 1 by 2
                 // slab) or of an asteroid scanner on the ship, with the wedge chosen first: the part stays a box and the
@@ -1413,8 +1413,13 @@ internal sealed class App : IDisposable
                 World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
                 World.Editor.SetPartShape(BlockShape.WedgeXPlusPlus);
                 if (view == "edit-rack") World.PreviewCargo();
-                World.HoldPartGhostForCapture(view == "edit-rack" ? "cargo" : view == "edit-scanner" ? "asteroidScanner" : view == "edit-bay" ? "droneBay" : "bipropellantTank",
+                World.HoldPartGhostForCapture(view == "edit-rack" ? "cargo" : view == "edit-scanner" ? "asteroidScanner" : view == "edit-bay" ? "droneBay" : view is "edit-laser" or "edit-laser-group" ? "miningLaser" : "bipropellantTank",
                     view switch { "edit-rack" => new GridSize(2, 2, 2), "edit-tank-long" => new GridSize(2, 1, 1), "edit-tank-slab" => new GridSize(2, 1, 2), _ => new GridSize(1, 1, 1) });
+                // edit-laser-group places the laser through the editor's click and selects it: the group selector shows.
+                if (view == "edit-laser-group")
+                    World.PlaceHeldPartForCapture();
+                if (view is "edit-laser" or "edit-laser-group")
+                    _screens.SearchEditorParts("laser");
                 _screens.SelectEditorTab(view == "edit-scanner" ? "Sensors" : "Storage");
             }
             else if (view is "edit-palette-tip" or "edit-tank-fuel" && snapshot is { OwnHull: >= 0 })
@@ -1720,7 +1725,7 @@ internal sealed class App : IDisposable
                 World.SetCommandCapturePose(scrapeFocus, scrapeDistance, 0.5f, -0.85f);
             if (_capturesTaken < count && rtsReady && (_options.CaptureHitAge is not { } hitAge || World.Own.ShieldHit.Strength > 0 && World.Own.ShieldHitAge >= hitAge) && captureClock >= due && !_screenshotJob.Busy && !_renderer.ScreenshotPending)
             {
-                ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory" or "edit-tank-fuel");
+                ShowPerformance |= Session is not null && _options.OpenView is not ("controls" or "players" or "social" or "friends" or "chat" or "hud" or "interface" or "charts" or "pinned-charts" or "inventory" or "edit-tank-fuel" or "edit-laser-group");
                 var file = Path.GetFullPath(path);
                 if (count > 1)
                 {

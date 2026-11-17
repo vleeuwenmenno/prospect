@@ -3750,6 +3750,13 @@ internal sealed partial class WorldView
     private string? _capturePart;
     private GridSize _capturePartSize;
 
+    // --open edit-laser-group: once the held mining laser's ghost has room, the harness clicks it into place through the
+    // editor's own Click, lets go of the part and selects what it placed, so the details panel shows the group selector.
+    private bool _capturePlaceThenSelect;
+
+    /// <summary>For a capture (<c>--open edit-laser-group</c>): place the held part by the editor's click, then select it.</summary>
+    internal void PlaceHeldPartForCapture() => _capturePlaceThenSelect = true;
+
     private bool _captureMount;
     private bool _captureIon;
 
@@ -4105,6 +4112,16 @@ internal sealed partial class WorldView
         if (_captureGhost)
         {
             HoldCaptureGhost();
+            if (_capturePlaceThenSelect && Editor.HasMountGhost && Editor.GhostCheck == DraftEdit.Done)
+            {
+                Editor.Click();
+                _capturePlaceThenSelect = false;
+                _captureGhost = false;
+                Editor.StopPlacing();
+                if (Editor.Draft is { } placed)
+                    Editor.SelectMount(placed.Mounts.Length - 1, false);
+            }
+
             GlideEditorCamera(dt);
             return;
         }
