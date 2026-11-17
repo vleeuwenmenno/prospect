@@ -295,6 +295,7 @@ internal sealed partial class ClientWorld : IDisposable
 
     public void Dispose()
     {
+        _rockReplay?.Dispose();
         _replica.Dispose();
         _near.Dispose();
         _blocks.Dispose();

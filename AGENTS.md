@@ -148,8 +148,9 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   (`RockInView`, from the rock's place kept when it was first scraped: never generate a sector for it in the
   tick), in order and each once (`Connection.RockEditsSent`), at most 256 edits a tick; the client takes a
   run only if it continues what it holds (`ClientWorld.OnRockEdits`) and checks every edit against the rules.
-  A client takes at most 8 edits a tick into its bricks; a longer list is replayed on a pool thread
-  (`RockEditReplay`) and copied in. Save: codec 18, `WorldSnapshot.EditedRocks`/`RockEdits`, limits
+  A client takes at most 8 edits a tick into its bricks; a longer list is replayed on a thread of its own
+  (`RockEditReplay`, made with the session, never a pool thread: the pool makes a worker when it first needs one
+  more, a kilobyte in the middle of play on four cores) and copied in. Save: codec 18, `WorldSnapshot.EditedRocks`/`RockEdits`, limits
   `SaveLimits.MaxEditedRocks`/`MaxRockEdits`; `RestoreRockEdits` is the load rule (every edit valid on a rock this
   galaxy has, else the save is refused) and rebuilds the bricks. Bricks are never sent or saved.
   Drawing: `RockPatches` (render side) reads the log through `SessionSnapshot.RockEdits`, keeps mirror bricks only its
@@ -965,6 +966,12 @@ The client opens a real window on the developer's desktop, and they are usually 
   console app shows it). A measurement of "no allocation on any thread" that spans that moment failed at random
   (`make bench-scans`). `Directory.Build.props` sets `System.Threading.ThreadPool.ThreadsToKeepAlive` to -1 so
   workers never exit; keep it, and `ThreadPoolConfigurationTests` reads it back.
+- A lock is a plain `object` and `lock (it)`, never `System.Threading.Lock`: the first time a thread has to wait
+  for a `Lock`, the runtime allocates the lock's wait event on that thread (56 bytes, and 224 more the first time
+  in the process). It needs the holder to be descheduled while holding it, so it showed only on a busy machine, as
+  "280 bytes in 1 frame" on the render thread or 312 bytes on the simulation thread in `make bench`. A plain
+  object's monitor waits on native state. `LockContentionTests` holds a lock on another thread and measures the
+  wait, and fails on any `Lock` field in the game's assemblies.
 - `JobScheduler` only accepts work while idle. `JobSystem` in `Prospect.Engine` adds dependencies and
   per-runner dispatch on top; schedule through that.
 - The framework source is the documentation. Clone `https://github.com/ahwootech/BRUTAL` and grep it rather than

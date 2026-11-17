@@ -70,7 +70,10 @@ public sealed class JobSystem : IDisposable
     }
 
     private readonly JobScheduler _scheduler;
-    private readonly Lock _lock = new();
+    // A plain object, not System.Threading.Lock: the first time a thread has to wait for a Lock the runtime
+    // allocates the lock's wait event on that thread. Scheduling is allowed from any thread, and none of
+    // them may take memory for having to wait.
+    private readonly object _lock = new();
 
     private Node[] _nodes;
     private NodeJob[] _nodeJobs;
