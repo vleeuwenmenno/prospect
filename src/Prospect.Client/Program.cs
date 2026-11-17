@@ -228,7 +228,7 @@ internal static class Program
                 case "--rock-interior-resource" when hasValue:
                     options.RockInteriorResource = args[++i];
                     break;
-                case "--open" when hasValue && args[i + 1] is "rock-interior" or "exhaust-rock" or "rock-scrape" or "laser" or "laser-command" or "action-groups" or "action-groups-popup" or "exhaust-shield" or "exhaust-shield-cold" or "command" or "drone" or "map" or "map-ftl" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "edit-drone" or "edit-fill" or "edit-fill-done" or "edit-turn" or "edit-rings" or "edit-ion" or "edit-tank" or "edit-cargo" or "cargo" or "edit-rack" or "edit-tank-long" or "edit-tank-slab" or "edit-tank-fuel" or "edit-palette-tip" or "edit-scanner" or "edit-bay" or "drones" or "drone-scan" or "edit-mount" or "edit-laser" or "edit-laser-group" or "edit-mirror" or "edit-box-select" or "edit-select-all" or "edit-menu" or "edit-resize" or "edit-dump" or "edit-save" or "edit-load" or "edit-load-confirm" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "cargo-window" or "modules" or "module-command" or "gas" or "pinned-gas" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
+                case "--open" when hasValue && args[i + 1] is "rock-interior" or "exhaust-rock" or "rock-scrape" or "laser" or "laser-command" or "ore" or "action-groups" or "action-groups-popup" or "exhaust-shield" or "exhaust-shield-cold" or "command" or "drone" or "map" or "map-ftl" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "edit-drone" or "edit-fill" or "edit-fill-done" or "edit-turn" or "edit-rings" or "edit-ion" or "edit-tank" or "edit-cargo" or "cargo" or "edit-rack" or "edit-tank-long" or "edit-tank-slab" or "edit-tank-fuel" or "edit-palette-tip" or "edit-scanner" or "edit-bay" or "drones" or "drone-scan" or "edit-mount" or "edit-laser" or "edit-laser-group" or "edit-mirror" or "edit-box-select" or "edit-select-all" or "edit-menu" or "edit-resize" or "edit-dump" or "edit-save" or "edit-load" or "edit-load-confirm" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "cargo-window" or "modules" or "module-command" or "gas" or "pinned-gas" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:
@@ -470,6 +470,9 @@ internal static class Program
                     options.DroneAutoPickupSeconds = autoAt;
                     i++;
                     break;
+                case "--ore-window":
+                    options.OreWindow = true;
+                    break;
                 case "--drone-popup":
                     options.DronePopup = true;
                     break;
@@ -635,8 +638,8 @@ internal static class Program
         if (options.FireGroup is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--fire-group works only with --capture or --bench: it holds the fire button.");
 
-        if (options.OpenView is "laser" or "laser-command" && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
-            return Fail("--open laser works only with --capture or --bench, in an unsaved private local game.");
+        if (options.OpenView is "laser" or "laser-command" or "ore" && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
+            return Fail("--open laser and --open ore work only with --capture or --bench, in an unsaved private local game.");
 
         if (options.OpenView is "rock-scrape" or "drone-scan" && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
             return Fail("--open rock-scrape and --open drone-scan work only with --capture or --bench, in an unsaved private local game.");
@@ -666,6 +669,9 @@ internal static class Program
         if (options.DroneAutoPickupSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
             || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
             return Fail("--drone-autopickup requires --capture or --bench in an unsaved private local game.");
+
+        if (options.OreWindow && (options.CapturePath is null || options.OpenView != "ore"))
+            return Fail("--ore-window works only with --capture and --open ore.");
 
         if (options.DronePopup && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--drone-popup works only with --capture or --bench.");

@@ -60,9 +60,9 @@ public sealed class MiningSaveTests
     }
 
     [Fact]
-    public void TheSaveLayoutIsVersion21WithTheMiningSectionOfVersion20()
+    public void TheSaveLayoutIsVersion22WithTheMiningSectionOfVersion20()
     {
-        Assert.Equal(21, WorldSnapshotCodec.Version);
+        Assert.Equal(22, WorldSnapshotCodec.Version);
         Assert.Equal(WorldSnapshotCodec.OreChunkBytes, OreChunkMessage.RecordBytes + 8 + 8);
         Assert.Equal(6, WorldSnapshotCodec.ActionGroupBytes);
     }

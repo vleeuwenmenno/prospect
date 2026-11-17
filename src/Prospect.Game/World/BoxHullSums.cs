@@ -125,6 +125,9 @@ public sealed class BoxHullSums
     private readonly HullSum[] _intact;
     private readonly int _leaves;
 
+    // The ore bins' blocks, in block order: the order a hull keeps what they hold in.
+    private readonly int[] _bins;
+
     /// <summary>Works out what each block of a design adds, and the sums of the intact hull.</summary>
     public BoxHullSums(BoxDesign design)
     {
@@ -173,6 +176,10 @@ public sealed class BoxHullSums
         }
 
         _kinds = [.. kinds];
+        var bins = new List<int>();
+        for (var i = 0; i < _boxes.Length; i++)
+            if (_boxes[i].Type.OreCapacity > 0) bins.Add(i);
+        _bins = [.. bins];
         Radius = radius;
         _leaves = (_boxes.Length + GroupSize - 1) / GroupSize;
         _intact = new HullSum[NodeCount];
@@ -402,6 +409,19 @@ public sealed class BoxHullSums
         return Math.Min(a, b);
     }
 
+    private void AddLoad(ref HullSum sum, in DesignBox box, double tonnes)
+    {
+        var centre = _design.Offset(box);
+        var dimensions = new Vector3(box.Size.X, box.Size.Y, box.Size.Z) * _design.BlockSize;
+        double x = centre.X, y = centre.Y, z = centre.Z;
+        double sx = dimensions.X, sy = dimensions.Y, sz = dimensions.Z;
+        sum.Values[Mass] += tonnes;
+        sum.Values[MomentX] += tonnes * x; sum.Values[MomentY] += tonnes * y; sum.Values[MomentZ] += tonnes * z;
+        sum.Values[InertiaX] += tonnes * (y * y + z * z + (sy * sy + sz * sz) / 12);
+        sum.Values[InertiaY] += tonnes * (x * x + z * z + (sx * sx + sz * sz) / 12);
+        sum.Values[InertiaZ] += tonnes * (x * x + y * y + (sx * sx + sy * sy) / 12);
+    }
+
     private ModuleEquipment Equipment(int mount) => mount == 0 ? default : ModuleEquipment.Of(mount, _mounts[mount - 1].Type.Module);
 
     /// <summary>Where the burn of a push direction and a fuel sits after <see cref="Burn"/>.</summary>
@@ -486,27 +506,18 @@ public sealed class BoxHullSums
     /// Constant time. The first drive left in file order decides the kind of drive; only drives of that kind
     /// supply jump power.
     /// </summary>
-    public void Evaluate(ReadOnlySpan<HullSum> sums, FlightRules rules, out FlightParams flight, out HullStats stats, ReadOnlySpan<HoldContainer> cargo = default)
+    public void Evaluate(ReadOnlySpan<HullSum> sums, FlightRules rules, out FlightParams flight, out HullStats stats, ReadOnlySpan<HoldContainer> cargo = default, ReadOnlySpan<OreBin> ore = default)
     {
         if (sums.Length != NodeCount)
             throw new ArgumentException("The sums were not sized for this design.", nameof(sums));
 
         var sum = sums[0];
+        // Payload is distributed uniformly through its rack, and raw ore through its bin, for mass, centre and
+        // diagonal inertia.
         foreach (var container in cargo)
-        {
-            // Payload is distributed uniformly through its rack for mass, centre and diagonal inertia.
-            var box = _boxes[container.Rack];
-            var centerOfRack = _design.Offset(box);
-            var dimensions = new Vector3(box.Size.X, box.Size.Y, box.Size.Z) * _design.BlockSize;
-            var tonnes = container.Amount / 1000.0;
-            double x = centerOfRack.X, y = centerOfRack.Y, z = centerOfRack.Z;
-            double sx = dimensions.X, sy = dimensions.Y, sz = dimensions.Z;
-            sum.Values[Mass] += tonnes;
-            sum.Values[MomentX] += tonnes * x; sum.Values[MomentY] += tonnes * y; sum.Values[MomentZ] += tonnes * z;
-            sum.Values[InertiaX] += tonnes * (y * y + z * z + (sy * sy + sz * sz) / 12);
-            sum.Values[InertiaY] += tonnes * (x * x + z * z + (sx * sx + sz * sz) / 12);
-            sum.Values[InertiaZ] += tonnes * (x * x + y * y + (sx * sx + sy * sy) / 12);
-        }
+            AddLoad(ref sum, _boxes[container.Rack], container.Amount / 1000.0);
+        for (var i = 0; i < ore.Length && i < _bins.Length; i++)
+            if (!ore[i].IsEmpty) AddLoad(ref sum, _boxes[_bins[i]], ore[i].Kg / 1000.0);
         var size = _design.BlockSize;
         var mass = Math.Max((float)sum.Values[Mass], 0.01f);
         var actualMass = sum.Values[Mass];

@@ -76,6 +76,9 @@ public sealed partial class ServerHost
         public uint FetchSubject;
         public long FetchUntil;
 
+        /// <summary>True while <see cref="FetchSubject"/> names a loose ore chunk, not a container: the two have ids of their own.</summary>
+        public bool FetchOre;
+
         /// <summary>
         /// Auto pickup (saved with the hull): while on, <see cref="TickAutoPickup"/> starts fetches for loose
         /// containers by itself. <see cref="AutoPausedUntil"/> is the tick a manual recall holds it off until,
@@ -86,6 +89,15 @@ public sealed partial class ServerHost
         public long AutoPausedUntil;
         public int AutoCursor, AutoSkipNext;
         public AutoSkips AutoSkip;
+
+        /// <summary>
+        /// "Pick up ores" (saved with the hull): while on, <see cref="TickAutoOre"/> sends the drones after loose ore
+        /// chunks by itself. The cursor and the skips are its own, since chunks are a pool of their own; a manual
+        /// recall holds it off with <see cref="AutoPausedUntil"/>, as it does auto pickup.
+        /// </summary>
+        public bool PickUpOres;
+        public int OreCursor, OreSkipNext;
+        public AutoSkips OreSkip;
 
         /// <summary>The hull's drone scan, if one is under way (<see cref="ServerHost.ScanGroup"/>).</summary>
         public ScanGroup Scan;
@@ -183,7 +195,7 @@ public sealed partial class ServerHost
             order.Base = next;
             order.Bay = bay;
         }
-        if (to >= 0) { _bayPages[to].AutoPickup = _bayPages[from].AutoPickup; _bayPages[to].Scan = _bayPages[from].Scan; _bayPages[to].Revision++; }
+        if (to >= 0) { _bayPages[to].AutoPickup = _bayPages[from].AutoPickup; _bayPages[to].PickUpOres = _bayPages[from].PickUpOres; _bayPages[to].Scan = _bayPages[from].Scan; _bayPages[to].Revision++; }
     }
 
     private void RemoveOrder(int index) => _orders[index] = _orders[--_orderCount];
@@ -284,8 +296,9 @@ public sealed partial class ServerHost
         var page = PageOf(hull);
         if (page < 0) { ReplyDrones(connection, DroneReply.NoBay, 0); return; }
         ref var p = ref _bayPages[page];
-        if (p.AutoPickup == message.AutoPickup) return;
+        if (p.AutoPickup == message.AutoPickup && p.PickUpOres == message.PickUpOres) return;
         p.AutoPickup = message.AutoPickup;
+        p.PickUpOres = message.PickUpOres;
         p.AutoPausedUntil = 0;
         p.Revision++;
     }
@@ -344,7 +357,7 @@ public sealed partial class ServerHost
         p.Scan.Pending = 0;
         if (p.Scan.Phase is not (DroneScanPhase.None or DroneScanPhase.Returning)) EndDroneScan(page);
         // A recall by hand means "come home": auto pickup holds off for a while instead of sending them straight out again.
-        if (p.AutoPickup) p.AutoPausedUntil = _tick + _content.Drones.AutoPickupPauseTicks;
+        if (p.AutoPickup || p.PickUpOres) p.AutoPausedUntil = _tick + _content.Drones.AutoPickupPauseTicks;
         for (var i = 0; i < _orderCount; i++)
         {
             ref var order = ref _orders[i];
@@ -357,6 +370,8 @@ public sealed partial class ServerHost
         // Containers the drones were fetching are let go where they are; the answer is the recall's.
         for (var c = 0; c < _containers.Items.Length; c++)
             if (_containers.Items[c].FetchHull == hull.Packed) FreeContainers.ClearFetch(ref _containers.At(c));
+        for (var c = 0; c < _chunks.Items.Length; c++)
+            if (_chunks.Items[c].FetchHull == hull.Packed) OreChunks.ClearFetch(ref _chunks.At(c));
         p.Revision++;
         ReplyDrones(connection, count > 0 ? DroneReply.Recalling : DroneReply.NoneOut, count);
     }
@@ -387,6 +402,7 @@ public sealed partial class ServerHost
             if (!_hulls.IsAlive(page.Hull) || _hulls.Info(page.Hull.Index).BayPage != p + 1) { page = default; continue; }
             TickBays(p);
             TickAutoPickup(p);
+            TickAutoOre(p);
             TickDroneScan(p);
         }
         ForgetDroneScans();
@@ -486,14 +502,23 @@ public sealed partial class ServerHost
         page.Revision++;
         if (page.FetchPending > 0)
         {
-            // A drone launched for a fetch goes straight to its place beside the container.
-            var container = _containers.Find(page.FetchSubject);
-            var half = container >= 0 ? FreeContainers.Half(_content.Cargo, _containers.Items[container].Size) : Vector3.Zero;
+            // A drone launched for a fetch goes straight to its place beside the container or the ore chunk.
+            Vector3 half;
+            if (page.FetchOre)
+            {
+                var chunk = _chunks.Find(page.FetchSubject);
+                half = chunk >= 0 ? new Vector3(OreChunks.Half(_content.Mining, _chunks.Items[chunk].Mass)) : Vector3.Zero;
+            }
+            else
+            {
+                var container = _containers.Find(page.FetchSubject);
+                half = container >= 0 ? FreeContainers.Half(_content.Cargo, _containers.Items[container].Size) : Vector3.Zero;
+            }
             page.FetchPending--;
             page.FetchPendingKg = page.FetchPending == 0 ? 0 : Math.Max(0, page.FetchPendingKg - design.Types[block].Bay!.CarryKg);
             _orders[_orderCount++] = new TaskOrder
             {
-                Task = OrderTask.Fetch,
+                Task = page.FetchOre ? OrderTask.FetchOre : OrderTask.Fetch,
                 Issuer = owner,
                 Actor = handle,
                 Base = hull,
@@ -571,6 +596,8 @@ public sealed partial class ServerHost
                 return Recall(ref order, page);
             case OrderTask.Fetch:
                 return Fetch(ref order, page);
+            case OrderTask.FetchOre:
+                return FetchOre(ref order, page);
             case OrderTask.Survey:
             case OrderTask.DetailedScan:
                 return ScanOrder(ref order, page);
@@ -672,6 +699,7 @@ public sealed partial class ServerHost
                 ReplyCount = c.DroneReplyCount,
                 Fetching = (byte)Math.Min(byte.MaxValue, FetchingDrones(c.Hull, page)),
                 AutoPickup = page >= 0 && _bayPages[page].AutoPickup,
+                PickUpOres = page >= 0 && _bayPages[page].PickUpOres,
             };
             if (page >= 0 && _bayPages[page].Scan.Phase != DroneScanPhase.None)
             {

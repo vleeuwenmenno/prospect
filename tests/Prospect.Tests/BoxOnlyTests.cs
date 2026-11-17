@@ -33,7 +33,7 @@ public sealed class BoxOnlyTests
     {
         foreach (var type in Content.Blocks.Types)
         {
-            var expected = type.Cargo > 0 || type.Tank != FuelKind.None || type.Sensor || type.Charting || type.Bay is not null;
+            var expected = type.Cargo > 0 || type.Tank != FuelKind.None || type.Sensor || type.Charting || type.Bay is not null || type.OreCapacity > 0 || type.Hopper;
             Assert.True(expected == type.BoxOnly, type.Id);
             Assert.True(BoxDesign.ShapeAllowed(type, BlockShape.Box), type.Id);
             Assert.Equal(!expected, BoxDesign.ShapeAllowed(type, BlockShape.WedgeZPlusPlus));

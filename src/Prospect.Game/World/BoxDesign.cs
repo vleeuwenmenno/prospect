@@ -33,6 +33,12 @@ public sealed record DesignLimits(int MaxBoxSide, int MaxDesignSide, int MaxBloc
 
     /// <summary>The most drone bays a design may have, at most <see cref="DroneBayRules.MaxBays"/>: the pilot is told of each.</summary>
     public int MaxBays { get; init; } = DroneBayRules.MaxBays;
+
+    /// <summary>The most ore bins a design may have, at most <see cref="OreBins.MaxBins"/>: the pilot is told of each.</summary>
+    public int MaxBins { get; init; } = OreBins.MaxBins;
+
+    /// <summary>The most ore hoppers a design may have, at most <see cref="OreBins.MaxHoppers"/>.</summary>
+    public int MaxHoppers { get; init; } = OreBins.MaxHoppers;
     internal static DesignLimits Read(JsonElement e, string source)
     {
         var limits = new DesignLimits(e.GetProperty("maxBoxSide"u8).GetInt32(), e.GetProperty("maxDesignSide"u8).GetInt32(), e.GetProperty("maxBlocks"u8).GetInt32())
@@ -44,7 +50,11 @@ public sealed record DesignLimits(int MaxBoxSide, int MaxDesignSide, int MaxBloc
             MaxMounts = e.GetProperty("maxMounts"u8).GetInt32(),
             MaxTanks = e.TryGetProperty("maxTanks"u8, out var tanks) ? tanks.GetInt32() : TankFuel.MaxTanks,
             MaxBays = e.TryGetProperty("maxBays"u8, out var bays) ? bays.GetInt32() : DroneBayRules.MaxBays,
+            MaxBins = e.TryGetProperty("maxBins"u8, out var bins) ? bins.GetInt32() : OreBins.MaxBins,
+            MaxHoppers = e.TryGetProperty("maxHoppers"u8, out var hoppers) ? hoppers.GetInt32() : OreBins.MaxHoppers,
         };
+        if (limits.MaxBins is < 0 or > OreBins.MaxBins || limits.MaxHoppers is < 0 or > OreBins.MaxHoppers)
+            throw new InvalidDataException($"{source}: maxBins must be from 0 to {OreBins.MaxBins} and maxHoppers from 0 to {OreBins.MaxHoppers}");
         if (limits.MaxBays is < 0 or > DroneBayRules.MaxBays)
             throw new InvalidDataException($"{source}: maxBays must be from 0 to {DroneBayRules.MaxBays}");
         if (limits.MaxTanks is < 0 or > TankFuel.MaxTanks)
@@ -400,6 +410,8 @@ public sealed class BoxDesign
         var cores = 0;
         var tanks = 0;
         var bays = 0;
+        var bins = 0;
+        var hoppers = 0;
         double crew = 0;
         for (var i = 0; i < blocks.Length; i++)
         {
@@ -410,6 +422,10 @@ public sealed class BoxDesign
                 throw new InvalidDataException($"{source}: block {i}: too many tanks (limit {Math.Min(limits.MaxTanks, TankFuel.MaxTanks)})");
             if (b.Type.Bay is not null && ++bays > Math.Min(limits.MaxBays, DroneBayRules.MaxBays))
                 throw new InvalidDataException($"{source}: block {i}: too many drone bays (limit {Math.Min(limits.MaxBays, DroneBayRules.MaxBays)})");
+            if (b.Type.OreCapacity > 0 && ++bins > Math.Min(limits.MaxBins, OreBins.MaxBins))
+                throw new InvalidDataException($"{source}: block {i}: too many ore bins (limit {Math.Min(limits.MaxBins, OreBins.MaxBins)})");
+            if (b.Type.Hopper && ++hoppers > Math.Min(limits.MaxHoppers, OreBins.MaxHoppers))
+                throw new InvalidDataException($"{source}: block {i}: too many ore hoppers (limit {Math.Min(limits.MaxHoppers, OreBins.MaxHoppers)})");
             if (!BlockShapes.IsValid(b.Shape)) throw new InvalidDataException($"{source}: block {i}: Unknown block shape.");
             if (!Facings.IsValid(b.Facing)) throw new InvalidDataException($"{source}: block {i}: Unknown block facing.");
             if (b.Type.Mount is not null) throw new InvalidDataException($"{source}: block {i}: a {b.Type.Name} mounts on a face and cannot be a block");

@@ -414,7 +414,17 @@ public sealed partial class ServerHost
             if (connection.State != ConnectionState.Active || !connection.CatalogueReady) continue;
             var count = 0;
             foreach (ref readonly var chunk in _chunks.Items)
-                if (Covered(connection.PlayerId, chunk.Position)) _chunkSend[count++] = chunk;
+            {
+                if (!Covered(connection.PlayerId, chunk.Position)) continue;
+                ref var shown = ref _chunkSend[count++];
+                shown = chunk;
+
+                // A pull is told only with a hull the client may see and whose design it knows, as a container's is.
+                var handle = new HullHandle((int)(shown.TractorHull & 65535), (int)(shown.TractorHull >> 16));
+                if (shown.TractorHull != 0 && (!_hulls.IsAlive(handle) || !MaySeeHull(connection, handle.Index, _tick)
+                    || !BlockSet.Has(connection.ReadyDesigns, _hulls.Info(handle.Index).Design)))
+                    OreChunks.ClearTractor(ref shown);
+            }
             if (count == 0 && !connection.OreChunksSent) continue;
             var writer = new NetWriter(_sendBuffer);
             OreChunkMessage.Write(ref writer, _tick, _chunkSend.AsSpan(0, count));

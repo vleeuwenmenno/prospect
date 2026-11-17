@@ -56,8 +56,10 @@ rebuild timer and the server's last answer. A click on the chip again, a click e
 "Pick up cargo" on, the ship's drones fetch loose containers on their own, one at a time, whenever one is in range and
 in sensor sight, is yours to take (no one else's claim, pickup delay over) and is out of reach of your own tractor beam
 (which takes it by itself). A container a fetch is refused for is left alone for 20 s. Recalling by hand holds it off
-for 30 s, or until you launch again. The setting is per ship and is saved with the world. There is no "Pick up ores"
-box yet: ore chunks do not exist until the mining laser (R4).
+for 30 s, or until you launch again. The setting is per ship and is saved with the world. A second checkbox, "Pick up
+ores", does the same for loose ore chunks: the drones carry a chunk to the tractor beam, which leads it into the ore
+hopper. It needs a hopper, a bin with room for the whole chunk and a tractor beam; a chunk the beam reaches by itself
+is left to the beam. There is no key to send drones for one chunk by hand.
 A saved world keeps a carried container loose where it was. Not built: a ship without a tractor beam cannot be fetched
 to, choosing the hold point in the interface, a drone panel, drone battery limits, charges (a later drone step),
 and any avoidance: a drone flies straight to its place and may bump the ship it came from.
@@ -81,10 +83,20 @@ fires every group that is on at the view's centre, and with all off it turns the
 laser reaches 60 m, turns at most 40° off its face, draws 3 MW while it fires, and cuts a groove 1 m wide into the
 first rock its beam meets, seen by everyone who has the rock in view and saved with the world. What it cuts away
 yields ore from the rock's interior; every 300 kg of one ore breaks off as a loose ore chunk that drifts and bounces
-off rocks and ships. Chunks cannot be picked up yet: the ore hopper comes next. No shipped ship carries a laser yet;
-build one on in the editor. The temporary debug scrape (`F10`, held in the pilot view, private local games only)
-still exists. Not there: picking up ore, cracks, scraping ice shards, beams blocked by other ships, and the pointer
-and exhaust marks following a groove. A rock holds at most 2,048 scrapes and a world 65,536
+off rocks and ships. The temporary debug scrape (`F10`, held in the pilot view, private local games only)
+still exists. Not there: cracks, scraping ice shards, beams blocked by other ships, and the pointer
+and exhaust marks following a groove.
+
+Ore is collected into ore bins through an ore hopper. A bin is a box block of any size (2,400 kg of raw ore a cubic
+metre) that holds one ore at a time, with the grade of everything put in it, weighted by mass; an empty bin takes
+any ore, and a lost bin loses what it held. A hopper is a box block with one intake face, chosen when it is placed
+like a drone bay's hatch. A tractor beam that sees the intake takes loose chunks by itself, after any loose
+container: it leads a chunk to a point outside the intake and then in, and the chunk's kilograms go into a bin of
+that ore, else an empty one. A chunk is taken only when the bins have room for all of it, so a full ship stops
+pulling. Ore in the bins weighs the ship down. The Ship window (`I`) lists each bin's ore, grade and kilograms
+under ORE. Bins and the "Pick up ores" setting are saved with the world, and an edit or repair keeps the ore where
+its bins remain. Not there: selling, moving or dumping ore, the Ore Cargo window, a preview in the editor of ore an
+edit would dump, and chunk markers in flight. A rock holds at most 2,048 scrapes and a world 65,536
 (`content/rules/rock_edits.json`); laser and chunk figures are in `content/rules/mining.json` and `blocks.json`. See
 [drones and mining](docs/roadmap/drones-mining.md).
 
@@ -475,14 +487,15 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
   up to two others mixed in (nickel or titanium in iron, silver or gold in copper), only ones its sector has, and
   at least 30 % of every asteroid is rock. Nothing can be mined yet.
 - **The starting ship.** Each player starts in one ship, the Prospector (`content/ships/prospector.json`), and no
-  other hull. It carries every part a ship can take: 41 blocks (boxes and wedges) and 80 mounted parts, 185.1 t,
-  7 x 3 x 10 m. Rated 209 m/s (417 boosting), turning 69 to 121 degrees a second. Two generators make 12 MW against
+  other hull. It carries every part a ship can take: 45 blocks (boxes and wedges) and 80 mounted parts, 192.6 t,
+  7 x 4 x 10 m. Rated 205 m/s (409 boosting), turning 68 to 119 degrees a second. Two generators make 12 MW against
   6.8 MW idle (twelve cells of gyros, six scanners), four batteries hold 240 MJ, one shield emitter gives 1,500 points.
   Fuel: 2,000 kg bipropellant (two engines), 450 kg nitrogen (52 cold gas thrusters), 300 kg hydrazine (four hot
   thrusters); the ion drive and ion thrusters need none. Two 2 x 2 x 2 cargo racks (128 units, up to XXL containers),
   a tractor beam over each, a drone bay (four drones) opening upward, the passive sensor and sector scanner, two of
-  each scan module, a hyperspace drive and two mining lasers in the nose, either side of the ion drive, facing ahead
-  in action group 1 (key `1`). Firing both draws 6 MW: at rest with the shield full that is 0.8 MW more than the
+  each scan module, a hyperspace drive, an ore hopper on the stern deck (intake up, in view of both tractor beams)
+  with four ore bins under the keel (19.2 t of raw ore), and two mining lasers in the nose, either side of the ion
+  drive, facing ahead in action group 1 (key `1`). Firing both draws 6 MW: at rest with the shield full that is 0.8 MW more than the
   generators spare, about five minutes on a full battery. A ship takes FTL drives of one kind only, so it has no wormhole generator
   or rift cutter; those can still be built.
 - **Fleet.** More hulls come from the ship editor (New ship). Hulls nobody is flying are flown by the server under
@@ -565,7 +578,7 @@ Milestone 1 (skeleton) is complete. On top of it, the first slice of the world i
 - **Releases.** Pushing a tag (`server-v…`, `list-v…` or `v…`) publishes the game server and listing server container
   images to GitHub Container Registry. See [docs/releasing.md](docs/releasing.md).
 
-Not there yet: NAT traversal or automatic port forwarding (a host needs a UDP port others can reach), encryption of game traffic, IPv6, mining, taking control of ships owned by other players (permissions), jump range and cost, gates,
+Not there yet: NAT traversal or automatic port forwarding (a host needs a UDP port others can reach), encryption of game traffic, IPv6, selling ore, taking control of ships owned by other players (permissions), jump range and cost, gates,
 saving hosted games (an unlisted or public game is not saved: a saved world cannot yet tell who a returning player
 is), playable saved multiplayer, deleting or renaming a world from the game, restoring a recovery copy
 from the game. Stations are not generated yet; gas reduces passive sensor reach; asteroids do not crack into pieces, and ore shows only as
@@ -1068,7 +1081,7 @@ Gas-kind simulation is present: cold/normal mixtures, shared icicle shapes and l
 The renderer draws the kinds: lightning clouds flash and throw branching bolts on the server's burst clock, cold clouds are bluish
 white with an ice halo and glints, overlapping cold and normal clouds are integrated together along each ray, and icicles are drawn
 as the exact ice shard. Fleet/RTS status indicators for the environment flags and the sensor outline's tracking of bursts await
-integration; mining and physical container pickup remain absent.
+integration.
 
 | New world setting | Range | Default |
 | --- | --- | --- |
@@ -1083,4 +1096,4 @@ integration; mining and physical container pickup remain absent.
 - Local editor: select an applied rack, choose size/resource, then **ADD CONTAINER (DEBUG)**. Empty is available.
 - Flight and editor draw the contents; ship data shows used/capacity u and cargo kg.
 - Apply refuses cargo loss; repair and wreck splits retain surviving racks' contents. Rack destruction ejects intact free containers.
-- Protocol 60 shows active tractor beams; save codec 14 keeps bodies and holds, restarting interrupted pulls on load. Mining output remains unbuilt.
+- Protocol 60 shows active tractor beams; save codec 14 keeps bodies and holds, restarting interrupted pulls on load.

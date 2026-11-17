@@ -378,7 +378,7 @@ internal sealed class ShipEditor(JobSystem jobs)
     /// chosen from the faces it touches there (<see cref="Render.RackDeck.Hatch"/>) and placed with it.
     /// </summary>
     public BlockFacing GhostFacing =>
-        Content is { } content && (uint)Part < (uint)content.Blocks.Types.Count && content.Blocks.Types[Part].Bay is not null && Draft is { } draft
+        Content is { } content && (uint)Part < (uint)content.Blocks.Types.Count && content.Blocks.Types[Part].FacesOut && Draft is { } draft
             ? Render.RackDeck.Hatch(Render.RackDeck.Touched(draft.Boxes, -1, GhostAt, PartSize))
             : PartFacing;
 

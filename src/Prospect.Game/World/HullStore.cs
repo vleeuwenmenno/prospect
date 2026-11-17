@@ -69,6 +69,9 @@ public struct HullInfo
 
     /// <summary>The hold revision included in the cached flight figures.</summary>
     public uint FittedCargoRevision;
+
+    /// <summary>The ore bins' revision included in the cached flight figures.</summary>
+    public uint FittedOreRevision;
     public HullOrder Order;
 
     /// <summary>Where the hull's power went in its last step, for the pilot's readout; never sent or saved.</summary>

@@ -54,6 +54,46 @@ public static class TractorReach
         return best < float.PositiveInfinity;
     }
 
+    /// <summary>
+    /// An ore hopper's intake is in view by the rule of a rack's face (<see cref="Rack"/>), asked of its one intake
+    /// face, the block's facing: the emitter is on its outer side, the face carries no mount, its part in the mount's
+    /// outward half-space is within range and has a clear line, and the aim point does not lie against a neighbour.
+    /// </summary>
+    public static bool Intake(ReadOnlySpan<DesignBox> boxes, ReadOnlySpan<DesignMount> mounts, ReadOnlySpan<ulong> alive,
+        float cell, int tractor, int hopper, out Vector3 point)
+    {
+        point = default;
+        if ((uint)tractor >= (uint)mounts.Length || (uint)hopper >= (uint)boxes.Length
+            || mounts[tractor].Type.Tractor is not { } spec || !boxes[hopper].Type.Hopper
+            || !Live(alive, hopper) || !Live(alive, mounts[tractor].Parent)) return false;
+        var facing = boxes[hopper].Facing;
+        var start = Emitter(boxes, mounts[tractor], cell);
+        if (!Visible(boxes, mounts[tractor], cell, start, hopper, facing, out var low, out var high)
+            || Mounted(mounts, hopper, facing)) return false;
+        for (var k = 0; k < 2; k++)
+        {
+            var aim = k == 0 ? (low + high) * .5f : Vector3.Clamp(start, low, high);
+            if (Vector3.DistanceSquared(start, aim) > spec.Range * spec.Range || Covered(boxes, alive, cell, hopper, facing, aim)
+                || !Clear(boxes, alive, cell, start, aim, hopper)) continue;
+            point = aim;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The first live hopper of <paramref name="hoppers"/> (block indices, in design order) whose intake the mount
+    /// sees, or -1.
+    /// </summary>
+    public static int ChooseHopper(ReadOnlySpan<DesignBox> boxes, ReadOnlySpan<DesignMount> mounts, ReadOnlySpan<ulong> alive,
+        float cell, int tractor, ReadOnlySpan<int> hoppers)
+    {
+        foreach (var hopper in hoppers)
+            if (Intake(boxes, mounts, alive, cell, tractor, hopper, out _)) return hopper;
+        return -1;
+    }
+
     /// <summary>The same as the full overload, without the aim kind.</summary>
     public static bool Rack(ReadOnlySpan<DesignBox> boxes, ReadOnlySpan<DesignMount> mounts, ReadOnlySpan<ulong> alive,
         float cell, int tractor, int rack, out Vector3 point, out BlockFacing side) =>

@@ -329,6 +329,9 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public long WreckSettingsVersion;
         public uint CargoHull, CargoRevision;
         public long CargoTick;
+
+        /// <summary>The hull whose ore bins the client was last told of, and their revision then.</summary>
+        public uint OreHull, OreRevision;
         public int OwnerSlot = -1;
         public readonly InputTimeline Inputs = new();
         public uint ControlEpoch = 1;
@@ -433,6 +436,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             WreckSettingsVersion = 0;
             CargoHull = CargoRevision = 0;
             CargoTick = 0;
+            OreHull = OreRevision = 0;
             Inputs.Clear();
             ControlEpoch = 1;
             LastSimulatedSequence = 0;
@@ -969,7 +973,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         for (var i = 0; i < participantCount; i++)
             _participants[i] = _hulls.IsAliveAt(i) ? _hulls.HandleAt(i) : default;
         _field.BeginRound();
-        _tractors.Plan(_containers, _content, _field, CargoScratch, _tick);
+        _tractors.Plan(_containers, _chunks, _content, _field, CargoScratch, _tick);
         PlanLasers();
         for (var i = 0; i < participantCount; i++)
         {
@@ -982,13 +986,15 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                 _hulls.Destroy(handle);
         }
 
-        _tractors.Pull(_containers, _content, _field, CargoScratch, _tick);
+        _tractors.Pull(_containers, _chunks, _content, _field, CargoScratch, _tick);
         FireLasers();
         TickCarries();
+        TickOreCarries();
         _containerSimulation.Step(_containers, _content, _field, _rocks, _tick);
         _chunkSimulation.Step(_chunks, _content, _field, _rocks, _tick);
         TickWreckage();
         SendCargo();
+        SendOreBins();
         SendBays();
         GatherSensors();
         CleanupFreeContainers();

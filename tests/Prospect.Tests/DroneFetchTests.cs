@@ -494,8 +494,8 @@ public sealed class DroneFetchTests
         Assert.True(DroneSettingsMessage.TryRead(ref reader, out var message));
         Assert.Equal(new DroneSettingsMessage(7 | 1 << 16, true), message);
 
-        // A hull of zero, a flag past one and a message with anything after it are refused.
-        foreach (var bytes in new[] { new byte[] { 0, 0, 0, 0, 1 }, new byte[] { 7, 0, 0, 0, 2 }, new byte[] { 7, 0, 0, 0, 1, 0 } })
+        // A hull of zero, a flag past one, a message cut short and one with anything after it are refused.
+        foreach (var bytes in new[] { new byte[] { 0, 0, 0, 0, 1, 0 }, new byte[] { 7, 0, 0, 0, 2, 0 }, new byte[] { 7, 0, 0, 0, 1, 2 }, new byte[] { 7, 0, 0, 0, 1 }, new byte[] { 7, 0, 0, 0, 1, 0, 0 } })
         {
             reader = new NetReader(bytes);
             Assert.False(DroneSettingsMessage.TryRead(ref reader, out _));
@@ -512,7 +512,7 @@ public sealed class DroneFetchTests
         broken[1 + 4 + 8 + 4 + 3] = 2;
         reader = new NetReader(broken.AsSpan(1));
         Assert.False(BayMessage.TryRead(ref reader, out _));
-        Assert.Equal(69u, ProtocolInfo.Version);
+        Assert.Equal(70u, ProtocolInfo.Version);
         Assert.Equal(43, (int)MessageId.DroneSettings);
     }
 
@@ -532,7 +532,7 @@ public sealed class DroneFetchTests
         }
 
         var saved = folder.Decode();
-        Assert.Equal(21, WorldSnapshotCodec.Version);
+        Assert.Equal(22, WorldSnapshotCodec.Version);
         var flagged = 0;
         for (var i = 0; i < saved.HullCount; i++)
             if (saved.Hulls[i].AutoPickup) { flagged++; Assert.True(saved.Hulls[i].Bays > 0); }

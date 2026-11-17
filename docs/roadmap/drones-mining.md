@@ -44,7 +44,8 @@ Product direction from the brainstorm on 2026-11-16. Built so far: D1 (orders, t
 
 ### Ore collection (R4)
 
-Decided 2026-11-17:
+Decided 2026-11-17. The server side is built (R4a), see "R4 as built"; the markers, tooltip and chunk count are
+built apart.
 
 - Ore bins are box blocks, sized like tanks. A bin holds one ore at a time: kilograms and the mass-weighted grade.
   An empty bin takes any ore. Its mass counts for flight like cargo. A lost bin loses its ore. Selling or moving ore
@@ -99,13 +100,13 @@ and the mining rules will be refined by playing.
 
 ### Drone settings
 
-Built (popup and "Pick up cargo"); "Pick up ores" waits for R4.
+Built: the popup, "Pick up cargo" and "Pick up ores" (R4a).
 
 - Clicking the DRONES chip opens a small popup over it: one Launch/Recall button, the checkbox "Pick up cargo", and
   status lines (drones in, out, fetching; rebuild timer; the server's last answer). It closes on a click outside, on
   Escape (`BackStep.DronePopup`) or on the chip again.
-- Decided: "Pick up ores" is not there yet. Ore chunks do not exist until R4 (no stubs); R4 adds that checkbox and
-  its setting, as a second flag beside auto pickup.
+- "Pick up ores" is the second checkbox, a second flag beside auto pickup: with it on, the drones bring loose ore
+  chunks to the tractor beam, which leads them into the hopper. See "R4 as built".
 - Decided: the setting is per hull, not per bay. The chip, the popup and a fetch all speak for the whole hull, and
   a fetch already picks bays itself. It is saved (codec 19) and carried over an edit or repair.
 - Auto pickup is the manual fetch, not a second path: `TickAutoPickup` picks a container and calls `StartFetch`, the
@@ -119,6 +120,7 @@ Built (popup and "Pick up cargo"); "Pick up ores" waits for R4.
 - Turning it off stops new fetches; a fetch under way finishes (recall cancels it).
 - Wire: protocol 67, reliable message 43 `DroneSettingsMessage` (hull, flag; own rate limit, `commandSeconds`),
   `BayView.AutoPickup` in message 40, which the checkbox reads back, so a lost click shows as an unchanged box.
+  Since protocol 70 the message carries both flags and the view answers with both.
 - The keys (`.` launch, `,` recall, `/` fetch) keep working.
 
 ### Mining lasers and action groups
@@ -171,7 +173,9 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
 2. R2, cracks: radial pieces as new rocks, rough natural break faces, wire and save of the pieces.
 3. R3, mining laser: a face mount the pilot aims and fires in action groups; it scrapes through `ScrapeRock` and
    frees floating ore chunks. **Done** (2026-11-17), see "R3 as built".
-4. R4, ore: chunks pulled by tractor into an ore hopper, raw ore containers, the Ore Cargo window.
+4. R4, ore: chunks pulled by tractor into an ore hopper and kept in ore bins. R4a, the server side with the bins in
+   the Ship window, is **done** (2026-11-17), see "R4 as built". Still to do: the Ore Cargo window, selling or
+   moving ore.
 
 ### Track D: drones
 
@@ -372,8 +376,8 @@ How to work on it is in `AGENTS.md`, "Mining lasers, action groups and ore chunk
 ### Why a pool of its own for chunks
 
 - Containers carry a payload, claims, tractor and fetch state; every tractor and drone path reads that pool.
-- Chunks carry resource, grade and mass only, and nothing picks them up until the hopper (R4).
-- Apart, no tractor or drone code had to learn to skip them. R4 decides how they are taken in.
+- Chunks carry resource, grade and mass only; since R4 also the transient claim of the beam or drones that have one.
+- Apart, no container path had to learn to skip them: a beam looks at chunks only after it found no container.
 
 ### Figures
 
@@ -403,6 +407,61 @@ How to work on it is in `AGENTS.md`, "Mining lasers, action groups and ore chunk
 - Chunk contacts generate one sector at a time, as loose containers do: chunks spread over two sectors take turns.
 - Group changes are not mirrored in the editor (placing is).
 - The F10 debug scrape stays: `make bench` and the `--open rock-scrape` captures still use it.
+
+## R4 as built
+
+How to work on it is in `AGENTS.md`, "Ore collection (R4)". This is what exists and what does not.
+
+### What exists
+
+- `oreBin`: a box block of any size up to 8 a side. It holds 2,400 kg of raw ore a cubic metre, one ore at a time,
+  with the mass-weighted grade. Its ore weighs the ship down, on the server and in the pilot's prediction.
+- `oreHopper`: a box block (up to 2 a side) with one intake face, chosen at placement by the bay's hatch rule.
+- A delivery goes into the bins that hold that ore, in design order, then into empty ones; what one bin cannot take
+  spills into the next.
+- Tractor beams take chunks by themselves. A free beam looks at loose containers first and at chunks only when it
+  took none. It takes a chunk when it sees the chunk, sees a hopper's intake and the bins have room for all of it.
+- The path: to a point outside the intake (clear of it by the chunk's half edge and 0.15 m), then straight in at
+  0.6 m/s. The chunk is gone when its centre is a half edge inside the face. Power, stall and retry are the
+  containers' figures (`tractor` in `blocks/cargo.json`).
+- Drones: "Pick up ores" in the popup, per ship, saved. The drones carry a chunk to the hand-over point in front of
+  a beam; the beam leads it in. One fetch a ship at a time, containers and chunks together.
+- The pilot is told the bins of the hull flown (message 51) and sees them in the Ship window under ORE.
+- A lost bin loses its ore. A wreck piece keeps the ore in the bins it has.
+- An edit or repair keeps ore by overlap of old and new bins first, then puts the rest into any bin that takes it.
+- Wire: protocol 70. Save: codec 22.
+- The Prospector has a hopper on the stern deck and four 1 x 1 x 2 bins under the keel: 19.2 t of raw ore.
+
+### Figures
+
+| Figure | Value |
+| --- | --- |
+| Bin capacity | 2,400 kg a cubic metre (`oreKgPerCubicMetre`) |
+| Bins, hoppers a design | 64, 16 |
+| Chunks a beam looks at | 256 a tick, after 256 containers |
+| Bins message | 847 bytes at most |
+| Chunk record | 85 bytes (was 77): hull, mount, stage, powered added |
+
+`make bench` runs `--open ore` for 20 s: lasers, chunks, a beam's pull into the hopper, ore in a bin, no managed
+allocation.
+
+### Not built, known limits
+
+- The editor does not preview ore an edit would dump. The server dumps it and logs the kilograms.
+- No way to dump, move or sell ore. A bin that holds a little of one ore is closed to every other ore.
+- No key or button sends drones for one chunk by hand; only "Pick up ores" does.
+- Drone answers for a chunk use the container's words ("fetching", "delivered", "no rack room").
+- A chunk is taken whole or not at all. A chunk heavier than the bins' room, or than a beam's limit (100 t), is
+  never taken. A lean chunk is large: 300 kg of ore at a 5 % grade is 6 t.
+- The bins fill fast on the Prospector: two lasers fill 19.2 t in about 40 s on a lean rock.
+- The room check counts every chunk the ship's beams hold against the ore asked for, whatever ore they are. It can
+  refuse a chunk that would have fitted. A beam can also take a chunk and let it go again, when a chunk of another
+  ore reached the last empty bin first.
+- A hopper has no capacity or rate of its own: any number of beams feed one intake at once.
+- Chunks do not collide with each other, and a held chunk passes its own ship's blocks, as a held container does.
+- A beam to a chunk held by another player's ship is drawn at the own ship's instant, not that ship's.
+- Bins have a plain banded model; what a bin holds does not show on it.
+- A drone on a hull that is not the one flown picks up ores, but its bins are told only to the pilot of that hull.
 
 ## Open
 

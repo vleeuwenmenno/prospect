@@ -196,6 +196,12 @@ internal sealed class OwnerLink(GameContent content, bool inProcess = true) : IT
     public BayView Bays;
     public int BayMessages;
 
+    /// <summary>What the server last said the flown hull's ore bins hold, for which hull, and how many times it said.</summary>
+    public readonly OreBin[] Ore = new OreBin[OreBins.MaxBins];
+    public int OreCount;
+    public uint OreHull;
+    public int OreMessages;
+
     /// <summary>The drone scan results the server sent, in order.</summary>
     public readonly List<DroneScanRecord> DroneScanResults = new();
 
@@ -335,6 +341,11 @@ internal sealed class OwnerLink(GameContent content, bool inProcess = true) : IT
             case MessageId.Bays when BayMessage.TryRead(ref reader, out var bays):
                 Bays = bays;
                 BayMessages++;
+                break;
+            case MessageId.OreBins when OreBinsMessage.TryRead(ref reader, Ore, out var oreHull, out _, out _, out var oreCount):
+                OreHull = oreHull;
+                OreCount = oreCount;
+                OreMessages++;
                 break;
             case MessageId.DroneScanResult when DroneScanResultMessage.TryRead(ref reader, out var scanResult):
                 DroneScanResults.Add(scanResult);

@@ -607,7 +607,8 @@ public sealed partial class ServerHost
     /// owner, the pilot, the heading and the motion, and the grid stays where it was in space, so a block that
     /// was not touched does not move. Its blocks are new and whole, as building is free. Each of its tanks keeps
     /// fuel through overlap first, then pumps spill into same-fuel room (<see cref="CarryFuel"/>). A repaired
-    /// lost tank stays empty, as nothing refuels a ship. Its shield and battery keep the charge
+    /// lost tank stays empty, as nothing refuels a ship. Its ore bins keep their ore the same way, overlap first
+    /// (<see cref="CarryOre"/>). Its shield and battery keep the charge
     /// they had, up to what the new design holds. The old hull is removed only after the new one exists.
     /// </summary>
     private void ReplaceHull(Connection connection, byte design)
@@ -656,6 +657,7 @@ public sealed partial class ServerHost
             ReplyEdit(connection, EditorReason.CargoFull);
             return;
         }
+        CarryOre(oldInfo.BlockState, from, _hulls.Info(next.Index).BlockState, to);
         _field.RestoreFigures(next.Index);
 
         ref var state = ref _hulls.State(next.Index);

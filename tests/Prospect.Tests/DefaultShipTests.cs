@@ -66,6 +66,30 @@ public sealed class DefaultShipTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void EveryTractorBeamSeesTheHoppersIntakeAndItsBinsHoldSeveralChunks()
+    {
+        var pod = Content.Pod;
+        Assert.Single(pod.Hoppers);
+        Assert.Equal(4, pod.Bins.Length);
+        Assert.NotEmpty(pod.Tractors);
+        foreach (var tractor in pod.Tractors)
+        {
+            Assert.True(TractorReach.Intake(pod.Boxes, pod.Mounts, pod.FullSet, pod.BlockSize, tractor, pod.Hoppers[0], out _),
+                $"tractor mount {tractor} does not see the hopper's intake");
+            // A chunk of the mining rules' mark at a tenth ore, the leanest worth a word, is led there and fits the intake's path.
+            var half = OreChunks.Half(Content.Mining, Content.Mining.ChunkOreKg * 10);
+            Assert.True(TractorPath.TryGuideIntake(pod, pod.FullSet, tractor, pod.Hoppers[0], half, Content.Cargo.Tractor.StagingMarginMetres, out var guide));
+            Assert.True(TractorReach.Container(pod.Boxes, pod.FullSet, pod.BlockSize, pod.Mounts[tractor], guide.Staging), "the beam does not see the point outside the intake");
+        }
+
+        // The hopper's hatch-like intake is not mounted over, and the bins together hold at least six such chunks' ore.
+        var capacity = 0.0;
+        foreach (var bin in pod.Bins) capacity += bin.Capacity;
+        Assert.True(capacity >= 6 * Content.Mining.ChunkOreKg * 10, $"the bins hold {capacity:0} kg");
+        output.WriteLine($"SHIP ore: {pod.Hoppers.Length} hopper, {pod.Bins.Length} bins, {capacity / 1000:0.0} t of raw ore, {capacity / 1000 / pod.Flight.Mass * 100:0} % of the ship's mass when full");
+    }
+
+    [Fact]
     public void EveryDroneBayHatchOpensOnClearSpace()
     {
         var pod = Content.Pod;

@@ -20,14 +20,24 @@ public enum FetchRefusal : byte
     Busy = 4,
 }
 
-/// <summary>Authoritative automatic pickup. The fixed free-body pool also holds exclusive transient claims.</summary>
-public sealed class TractorSimulation
+/// <summary>
+/// Authoritative automatic pickup. The fixed free-body pools also hold the exclusive transient claims: a beam holds
+/// one loose container or one ore chunk at a time, and a container always comes first.
+/// </summary>
+public sealed partial class TractorSimulation
 {
     private int _acquireHull, _acquireMount;
     private readonly HoldContainer[] _reserved = new HoldContainer[BlockStateStore.MaxContainers];
 
-    /// <summary>Validates existing claims first, then lets free mounts acquire in hull/mount/body order.</summary>
-    public void Plan(FreeContainers containers, GameContent content, HullField field, Span<byte> occupied, long tick = 0)
+    /// <summary>The same for a world with no ore chunks.</summary>
+    public void Plan(FreeContainers containers, GameContent content, HullField field, Span<byte> occupied, long tick = 0) =>
+        Plan(containers, null, content, field, occupied, tick);
+
+    /// <summary>
+    /// Validates existing claims first, then lets free mounts acquire in hull/mount/body order: a loose container
+    /// first, an ore chunk only when the beam took no container and sees a hopper with room behind it.
+    /// </summary>
+    public void Plan(FreeContainers containers, OreChunks? chunks, GameContent content, HullField field, Span<byte> occupied, long tick = 0)
     {
         var hulls = field.Hulls;
         for (var h = 0; h < hulls.Slots; h++)
@@ -42,7 +52,8 @@ public sealed class TractorSimulation
                 || !item.MayPickup(hulls.Info(handle.Index).Owner, tick)
                 || !Valid(containers, content, field, handle.Index, item.TractorMount, ref item, occupied, needSight: false)) Release(ref item);
         }
-        Acquire(containers, content, field, occupied, tick);
+        if (chunks is not null) ValidateChunks(chunks, field);
+        Acquire(containers, chunks, content, field, occupied, tick);
         foreach (var item in containers.Items)
             if (item.TractorHull != 0)
             {
@@ -50,13 +61,16 @@ public sealed class TractorSimulation
                 var spec = field.Designs[hulls.Info(h).Design].Mounts[item.TractorMount].Type.Tractor!;
                 hulls.Info(h).TractorDemand += spec.Power(Mass(content.Cargo, item));
             }
+        if (chunks is not null) DemandChunks(chunks, field);
     }
 
-    private void Acquire(FreeContainers containers, GameContent content, HullField field, Span<byte> occupied, long tick = 0)
+    private void Acquire(FreeContainers containers, OreChunks? chunks, GameContent content, HullField field, Span<byte> occupied, long tick = 0)
     {
         var hulls = field.Hulls;
-        if (containers.Items.IsEmpty || hulls.Slots == 0) return;
+        var loose = chunks is null ? 0 : chunks.Items.Length;
+        if ((containers.Items.IsEmpty && loose == 0) || hulls.Slots == 0) return;
         var budget = FreeContainers.Capacity;
+        var chunkBudget = OreChunks.Capacity;
         var start = _acquireHull % hulls.Slots;
         for (var offset = 0; offset < hulls.Slots; offset++)
         {
@@ -64,18 +78,19 @@ public sealed class TractorSimulation
             if (!hulls.IsAliveAt(h) || !Eligible(hulls, h)) continue;
             var design = field.Designs[hulls.Info(h).Design];
             var id = hulls.HandleAt(h).Packed;
+            // Chunks are for a hull with a hopper and a bin: every other hull never pays for looking at them.
+            var ore = loose > 0 && design.Hoppers.Length > 0 && design.Bins.Length > 0;
             for (var t = offset == 0 ? _acquireMount : 0; t < design.Tractors.Length; t++)
             {
                 var m = design.Tractors[t];
-                var busy = false;
-                foreach (var item in containers.Items)
-                    if (item.TractorHull == id && item.TractorMount == m) { busy = true; break; }
+                var busy = Holds(containers, chunks, id, m);
                 if (busy || !BlockSet.Has(hulls.Blocks(h), design.Mounts[m].Parent)) continue;
                 // Reserve a full bounded pool scan before starting a mount. Resume here next tick so crowded,
                 // unsuitable cargo cannot starve later mounts or hulls, and no body's tail is skipped forever.
-                if (budget < containers.Items.Length) { _acquireHull = h; _acquireMount = t; return; }
+                if (budget < containers.Items.Length || (ore && chunkBudget < loose)) { _acquireHull = h; _acquireMount = t; return; }
                 var spec = design.Mounts[m].Type.Tractor!;
                 var emitter = hulls.State(h).Position + HullRotation.Rotate(design.MountOffsets[m], hulls.State(h).Orientation);
+                var taken = false;
                 for (var c = 0; c < containers.Items.Length; c++)
                 {
                     budget--;
@@ -83,11 +98,28 @@ public sealed class TractorSimulation
                     if (!item.MayPickup(hulls.Info(h).Owner, tick) || item.TractorHull != 0 || item.FetchHull != 0 || item.Position.RelativeTo(emitter).LengthSquared() > (spec.Range + design.BlockSize) * (spec.Range + design.BlockSize)) continue;
                     if (!Valid(containers, content, field, h, m, ref item, occupied, needSight: true)) continue;
                     item.TractorHull = id; item.TractorMount = m; item.TractorStage = 0; item.TractorBest = 0; item.TractorIdle = 0;
+                    taken = true;
                     break;
                 }
+
+                // A loose container always comes first: the beam looks at chunks only when it took none.
+                if (taken || !ore) continue;
+                chunkBudget -= loose;
+                AcquireChunk(chunks!, field, h, m, emitter, spec.Range + design.BlockSize, tick);
             }
         }
         _acquireHull = _acquireMount = 0;
+    }
+
+    /// <summary>Whether mount <paramref name="mount"/> of hull <paramref name="id"/> holds a container or an ore chunk now.</summary>
+    private static bool Holds(FreeContainers containers, OreChunks? chunks, uint id, int mount)
+    {
+        foreach (ref readonly var item in containers.Items)
+            if (item.TractorHull == id && item.TractorMount == mount) return true;
+        if (chunks is null) return false;
+        foreach (ref readonly var item in chunks.Items)
+            if (item.TractorHull == id && item.TractorMount == mount) return true;
+        return false;
     }
 
     /// <summary>
@@ -126,8 +158,13 @@ public sealed class TractorSimulation
     /// that the beam cannot see, for <see cref="TractorGuidance.StallSeconds"/> is let go and waits
     /// <see cref="TractorGuidance.RetrySeconds"/> before any tractor tries it again, so nothing jams for ever.
     /// </summary>
-    public void Pull(FreeContainers containers, GameContent content, HullField field, Span<byte> occupied, long tick = 0)
+    public void Pull(FreeContainers containers, GameContent content, HullField field, Span<byte> occupied, long tick = 0) =>
+        Pull(containers, null, content, field, occupied, tick);
+
+    /// <summary>The containers' pull, then the ore chunks' (<see cref="PullChunks"/>).</summary>
+    public void Pull(FreeContainers containers, OreChunks? chunks, GameContent content, HullField field, Span<byte> occupied, long tick = 0)
     {
+        if (chunks is not null) PullChunks(chunks, content, field, tick);
         var hulls = field.Hulls; var tuning = content.Cargo.Tractor;
         for (var c = containers.Items.Length - 1; c >= 0; c--)
         {
@@ -198,13 +235,22 @@ public sealed class TractorSimulation
                 && hulls.BlockStates.TryAddCargo(info.BlockState, content, Held(item), occupied))
             { containers.Remove(c); field.Refit(h); continue; }
 
-            var speed = MathF.Sqrt(2 * spec.Acceleration * distance);
-            if (final) speed = Math.Min(speed, tuning.FinalSpeed);
-            var desired = distance > 1e-6f ? HullRotation.Rotate(delta / distance, state.Orientation) * speed : Vector3.Zero;
-            var change = desired - relative;
-            var length = change.Length();
-            if (length > 0) item.Velocity += change * (Math.Min(length, spec.Acceleration * HullSim.Dt) / length);
+            Steer(ref item.Velocity, delta, distance, relative, state.Orientation, spec.Acceleration, final ? tuning.FinalSpeed : float.PositiveInfinity);
         }
+    }
+
+    /// <summary>
+    /// One tick of a beam's pull on a body it holds: its velocity relative to the hull at the target is steered along
+    /// <paramref name="delta"/> (the way left, in the hull's frame) at the speed it can still stop from, at most
+    /// <paramref name="most"/>, changing by no more than the beam's acceleration allows in a tick.
+    /// </summary>
+    private static void Steer(ref Vector3 velocity, Vector3 delta, float distance, Vector3 relative, Quaternion orientation, float acceleration, float most)
+    {
+        var speed = Math.Min(MathF.Sqrt(2 * acceleration * distance), most);
+        var desired = distance > 1e-6f ? HullRotation.Rotate(delta / distance, orientation) * speed : Vector3.Zero;
+        var change = desired - relative;
+        var length = change.Length();
+        if (length > 0) velocity += change * (Math.Min(length, acceleration * HullSim.Dt) / length);
     }
 
     /// <summary>
@@ -215,7 +261,7 @@ public sealed class TractorSimulation
     /// with what stopped it.
     /// </summary>
     public int Receiver(FreeContainers containers, GameContent content, HullField field, int h, in FreeContainer item,
-        float handover, bool free, Span<byte> occupied, out FetchRefusal why, out int rack)
+        float handover, bool free, Span<byte> occupied, out FetchRefusal why, out int rack, OreChunks? chunks = null)
     {
         rack = -1;
         var hulls = field.Hulls; var info = hulls.Info(h); var design = field.Designs[info.Design];
@@ -242,6 +288,9 @@ public sealed class TractorSimulation
                 var busy = false;
                 foreach (var other in containers.Items)
                     if (other.Id != item.Id && other.TractorHull == id && other.TractorMount == m) { busy = true; break; }
+                if (chunks is not null)
+                    foreach (ref readonly var other in chunks.Items)
+                        if (other.TractorHull == id && other.TractorMount == m) { busy = true; break; }
                 if (busy) { why = FetchRefusal.Busy; continue; }
             }
             why = FetchRefusal.None;

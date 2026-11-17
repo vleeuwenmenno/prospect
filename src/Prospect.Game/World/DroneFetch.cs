@@ -59,13 +59,17 @@ public static class DroneFetch
     /// speed it can still stop from at <paramref name="acceleration"/>, at most <paramref name="maxSpeed"/>, changing by no
     /// more than the acceleration allows in a tick.
     /// </summary>
-    public static void Pull(ref FreeContainer container, Vector3 delta, Vector3 carrier, float acceleration, float maxSpeed)
+    public static void Pull(ref FreeContainer container, Vector3 delta, Vector3 carrier, float acceleration, float maxSpeed) =>
+        Pull(ref container.Velocity, delta, carrier, acceleration, maxSpeed);
+
+    /// <summary>The same pull on any carried body's velocity: an ore chunk is carried by the rule a container is.</summary>
+    public static void Pull(ref Vector3 velocity, Vector3 delta, Vector3 carrier, float acceleration, float maxSpeed)
     {
         var distance = delta.Length();
         var speed = Math.Min(maxSpeed, MathF.Sqrt(2 * acceleration * distance));
         var desired = distance > 1e-6f ? delta / distance * speed : Vector3.Zero;
-        var change = desired - (container.Velocity - carrier);
+        var change = desired - (velocity - carrier);
         var length = change.Length();
-        if (length > 0) container.Velocity += change * (Math.Min(length, acceleration * HullSim.Dt) / length);
+        if (length > 0) velocity += change * (Math.Min(length, acceleration * HullSim.Dt) / length);
     }
 }

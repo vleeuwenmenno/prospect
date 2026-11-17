@@ -791,7 +791,7 @@ public sealed class DroneScanTests
         var badRock = Scanning(DroneScanPhase.Moving); badRock.ScanRock = new RockRef(rock.Sector, -1);
         Assert.False(Round(badRock, out _));
 
-        Assert.Equal(69u, ProtocolInfo.Version);
+        Assert.Equal(70u, ProtocolInfo.Version);
         Assert.Equal(49, (int)MessageId.DroneScan);
         Assert.Equal(50, (int)MessageId.DroneScanResult);
         Assert.True(BayMessage.MaxWireSize >= BayMessage.HeaderBytes + DroneBayRules.MaxBays * BayMessage.RecordBytes);
@@ -1386,7 +1386,7 @@ public sealed class DroneScanTests
         var (folder, content, owner, saved) = SavedWithScans();
         var snapshot = folder.Decode();
         Assert.Equal(2, snapshot.DroneScanCount);
-        Assert.Equal(21, WorldSnapshotCodec.Version);
+        Assert.Equal(22, WorldSnapshotCodec.Version);
         Assert.Equal(DroneScanKind.Detailed, snapshot.DroneScans[0].Kind);
         Assert.Equal(DroneScanKind.Survey, snapshot.DroneScans[1].Kind);
         var first = folder.Bytes!;

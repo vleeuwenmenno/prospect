@@ -527,11 +527,26 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
   are not: a load starts them fresh.
 - Layouts before 19 are refused without migration.
 
+## Ore bins and ore pickup (codec 22)
+
+- A saved hull holds what each of its ore bins holds, after its drone bays: a count, then a bin each (13 bytes: ore,
+  kilograms, grade), in the order of its design's bins. Then one byte: whether its drones pick up ores.
+- The header counts every saved bin, as it counts bays, and the size bound grows by what a bin's record is longer
+  than a tank's, for at most 64 bins a hull.
+- A chunk's record is the wire's 85 bytes now: the tractor that held it is written and thrown away on load, like a
+  container's pull. Acquisition starts over.
+- Decoding checks structure: counts within the header's, kilograms and grade finite numbers, an empty bin naming no ore.
+- Load rule (`BlockStateStore.TrySetOre`): one record for each bin of the hull's design, an ore this galaxy has, more
+  than nothing and at most the bin's capacity, nothing in a bin whose block was lost. Ore pickup only on a hull with
+  a drone bay. Otherwise the save is refused whole.
+- Layouts before 22 are refused without migration.
+
 ## Ore chunks and action groups (codec 20)
 
 - A save holds every loose ore chunk and every hull's action group changes made without a rebuild.
 - They follow the rock edits as one section: chunk count, next chunk id, change count, then the records.
-- A chunk is the wire's record (77 bytes: id, pose, spin, resource, grade, mass) and its birth and age (16 bytes).
+- A chunk is the wire's record (77 bytes then: id, pose, spin, resource, grade, mass; 85 since codec 22) and its
+  birth and age (16 bytes).
 - A change is the hull's index in the save, the laser's place in its design's laser list and the group (6 bytes).
 - Limits: `OreChunks.Capacity` (256) chunks; 64 changes a saved hull.
 - Decoding checks structure: ids below the counter and unique, clocks within the world's, figures finite, a hull

@@ -243,6 +243,9 @@ public sealed class ContentIdentityTests
     // The block catalogue: a block's figure, a flight rule, a size rule, a design limit, a block's name.
     [InlineData("blocks/blocks.json", "\"Hull plating\", \"mass\": 2.0, \"hull\": 400", "\"Hull plating\", \"mass\": 2.0, \"hull\": 401")]
     [InlineData("blocks/blocks.json", "\"collisionBounce\": 0.3", "\"collisionBounce\": 0.31")]
+    // What an ore bin holds and whether a block is a hopper: both sides weigh the ore and lead chunks by them.
+    [InlineData("blocks/blocks.json", "\"oreKgPerCubicMetre\": 2400", "\"oreKgPerCubicMetre\": 2500")]
+    [InlineData("blocks/blocks.json", "\"maxBins\": 64", "\"maxBins\": 32")]
     [InlineData("blocks/blocks.json", "\"volumeExponent\": 1.25", "\"volumeExponent\": 1.5")]
     [InlineData("blocks/blocks.json", "\"maxBoxSide\": 64", "\"maxBoxSide\": 63")]
     [InlineData("blocks/cargo.json", "\"hull\": 50", "\"hull\": 51")]
@@ -277,7 +280,7 @@ public sealed class ContentIdentityTests
     [InlineData("net/social.json", "\"partySize\": 8", "\"partySize\": 6")]
     // A shipped design: one block of another type, and one block elsewhere.
     [InlineData("ships/prospector.json", "{\"at\": [0, -1, 2], \"type\": \"hull\"", "{\"at\": [0, -1, 2], \"type\": \"battery\"")]
-    [InlineData("ships/prospector.json", "{\"at\": [0, 0, 3], \"type\": \"hull\"}", "{\"at\": [0, 1, 3], \"type\": \"hull\"}")]
+    [InlineData("ships/prospector.json", "{\"at\": [-1, 0, 3], \"type\": \"hull\"}", "{\"at\": [-1, 1, 3], \"type\": \"hull\"}")]
     // The fleet list: the order of the designs, which is what a design number means, and what a player starts with.
     [InlineData("ships/fleet.json", "\"prospector\", \"drone\", \"work_drone\"", "\"drone\", \"prospector\", \"work_drone\"")]
     [InlineData("ships/fleet.json", "\"startingFleet\": []", "\"startingFleet\": [\"prospector\"]")]

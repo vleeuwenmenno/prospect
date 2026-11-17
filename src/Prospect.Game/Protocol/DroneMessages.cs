@@ -150,29 +150,29 @@ public readonly record struct DroneCommandMessage(uint Hull, DroneCommand Comman
 }
 
 /// <summary>
-/// A player's drone setting for one of their hulls. Reliable; the server checks the hull, its owner and the rate again.
-/// Today the one setting is auto pickup: with it on, the hull's drones fetch loose containers on their own. It is a
-/// message of its own, not a <see cref="DroneCommand"/>, so a click on its checkbox is never lost behind a launch
-/// or recall sent in the same moment (the two are rate-limited apart).
+/// A player's drone settings for one of their hulls, both at once. Reliable; the server checks the hull, its owner
+/// and the rate again. With auto pickup on, the hull's drones fetch loose containers on their own; with ore pickup on
+/// they fetch loose ore chunks. It is a message of its own, not a <see cref="DroneCommand"/>, so a click on a checkbox
+/// is never lost behind a launch or recall sent in the same moment (the two are rate-limited apart).
 /// </summary>
-public readonly record struct DroneSettingsMessage(uint Hull, bool AutoPickup)
+public readonly record struct DroneSettingsMessage(uint Hull, bool AutoPickup, bool PickUpOres = false)
 {
-    /// <summary>Id, hull and the flag.</summary>
-    public const int MaxWireSize = 1 + 4 + 1;
+    /// <summary>Id, hull and the two flags.</summary>
+    public const int MaxWireSize = 1 + 4 + 1 + 1;
 
     /// <summary>Writes the whole message.</summary>
     public void Write(ref NetWriter writer)
     {
         writer.WriteByte((byte)MessageId.DroneSettings);
-        writer.WriteUInt32(Hull); writer.WriteByte(AutoPickup ? (byte)1 : (byte)0);
+        writer.WriteUInt32(Hull); writer.WriteByte(AutoPickup ? (byte)1 : (byte)0); writer.WriteByte(PickUpOres ? (byte)1 : (byte)0);
     }
 
     /// <summary>Refuses a malformed message before the server looks at the hull.</summary>
     public static bool TryRead(ref NetReader reader, out DroneSettingsMessage message)
     {
-        var hull = reader.ReadUInt32(); var flag = reader.ReadByte();
-        message = new DroneSettingsMessage(hull, flag == 1);
-        return reader.IsValid && reader.Remaining == 0 && hull != 0 && flag <= 1;
+        var hull = reader.ReadUInt32(); var flag = reader.ReadByte(); var ores = reader.ReadByte();
+        message = new DroneSettingsMessage(hull, flag == 1, ores == 1);
+        return reader.IsValid && reader.Remaining == 0 && hull != 0 && flag <= 1 && ores <= 1;
     }
 }
 
@@ -224,6 +224,9 @@ public struct BayView
     /// <summary>True while the hull's drones fetch loose containers on their own.</summary>
     public bool AutoPickup;
 
+    /// <summary>True while the hull's drones fetch loose ore chunks on their own.</summary>
+    public bool PickUpOres;
+
     /// <summary>The hull's drone scan: its kind and phase (<see cref="DroneScanPhase.None"/> without one) and its rock.</summary>
     public DroneScanKind ScanKind;
     public DroneScanPhase ScanPhase;
@@ -263,7 +266,7 @@ public struct BayView
 public static class BayMessage
 {
     public const int RecordBytes = 2 + 1 + 1 + 1 + 1 + 1 + 8;
-    public const int HeaderBytes = 1 + 4 + 8 + 4 + 1 + 1 + 1 + 1 + ScanBytes + 1;
+    public const int HeaderBytes = 1 + 4 + 8 + 4 + 1 + 1 + 1 + 1 + 1 + ScanBytes + 1;
 
     /// <summary>The scan: kind, phase, sector, index, drones, in place, start and end.</summary>
     public const int ScanBytes = 1 + 1 + 12 + 4 + 1 + 1 + 8 + 8;
@@ -276,6 +279,7 @@ public static class BayMessage
         writer.WriteUInt32(view.Hull); writer.WriteInt64(view.Tick); writer.WriteUInt32(view.ReplySequence);
         writer.WriteByte((byte)view.Reply); writer.WriteByte(view.ReplyCount); writer.WriteByte(view.Fetching);
         writer.WriteByte(view.AutoPickup ? (byte)1 : (byte)0);
+        writer.WriteByte(view.PickUpOres ? (byte)1 : (byte)0);
         writer.WriteByte((byte)view.ScanKind); writer.WriteByte((byte)view.ScanPhase);
         writer.WriteInt32(view.ScanRock.Sector.X); writer.WriteInt32(view.ScanRock.Sector.Y); writer.WriteInt32(view.ScanRock.Sector.Z);
         writer.WriteInt32(view.ScanRock.Index); writer.WriteByte(view.ScanDrones); writer.WriteByte(view.ScanInPlace);
@@ -298,6 +302,7 @@ public static class BayMessage
         view.Hull = reader.ReadUInt32(); view.Tick = reader.ReadInt64(); view.ReplySequence = reader.ReadUInt32();
         view.Reply = (DroneReply)reader.ReadByte(); view.ReplyCount = reader.ReadByte(); view.Fetching = reader.ReadByte();
         var auto = reader.ReadByte(); view.AutoPickup = auto == 1;
+        var ores = reader.ReadByte(); view.PickUpOres = ores == 1;
         view.ScanKind = (DroneScanKind)reader.ReadByte(); view.ScanPhase = (DroneScanPhase)reader.ReadByte();
         view.ScanRock = new RockRef(new SectorCoord(reader.ReadInt32(), reader.ReadInt32(), reader.ReadInt32()), reader.ReadInt32());
         view.ScanDrones = reader.ReadByte(); view.ScanInPlace = reader.ReadByte();
@@ -309,7 +314,7 @@ public static class BayMessage
                 && view.ScanRock.Index >= 0 && view.ScanDrones is > 0 and <= DroneScanning.MaxDrones && view.ScanInPlace <= view.ScanDrones;
         var scanTime = view.ScanPhase == DroneScanPhase.Scanning ? view.ScanStarted >= 0 && view.ScanCompletes >= view.ScanStarted
             : view.ScanStarted == 0 && view.ScanCompletes == 0;
-        if (!reader.IsValid || auto > 1 || !scanShape || !scanTime || view.Tick < 0 || view.Reply > DroneReply.ScanUnavailable || view.Count > DroneBayRules.MaxBays
+        if (!reader.IsValid || auto > 1 || ores > 1 || !scanShape || !scanTime || view.Tick < 0 || view.Reply > DroneReply.ScanUnavailable || view.Count > DroneBayRules.MaxBays
             || reader.Remaining != view.Count * RecordBytes) return false;
         for (var i = 0; i < view.Count; i++)
         {

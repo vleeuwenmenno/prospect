@@ -98,6 +98,9 @@ public struct HullView
     /// <summary>Containers of the controlled hull, in snapshot-owned memory.</summary>
     public ReadOnlyMemory<HoldContainer> Cargo;
 
+    /// <summary>What the controlled hull's ore bins hold, in snapshot-owned memory, in the order of its design's bins.</summary>
+    public ReadOnlyMemory<OreBin> Ore;
+
     /// <summary>
     /// What the hull's thrust parts are doing, for every hull in view: the throttle toward each direction and the
     /// kinds of part firing, as the simulation's last step left it. <see cref="ThrustState.Firing"/> answers for
@@ -347,7 +350,7 @@ internal sealed partial class ClientWorld : IDisposable
         if (_hasOwnState)
         {
             // The sums do not depend on a world's rules; the figures read off them do.
-            OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats, _blocks.Cargo(_ownBlocks));
+            OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats, _blocks.Cargo(_ownBlocks), _blocks.Bins(_ownBlocks));
         }
         else
         {
@@ -642,10 +645,11 @@ internal sealed partial class ClientWorld : IDisposable
         if (ApplyLosses(_ownBlocks, _replica.Losses(own.Id)))
         {
             // The hull has lost blocks: it flies on what is left.
-            OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats, _blocks.Cargo(_ownBlocks));
+            OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats, _blocks.Cargo(_ownBlocks), _blocks.Bins(_ownBlocks));
         }
 
         ApplyCargo();
+        ApplyOre();
         _ownHealth = own.HasHealth;
         ReadHealth(_ownBlocks, own);
 
@@ -903,7 +907,8 @@ internal sealed partial class ClientWorld : IDisposable
         _blocks.Release(_ownBlocks);
         _ownBlocks = TakeBlocks(OwnDesign, _replica.Losses(record.Id));
         _appliedHoldSerial = 0;
-        OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats, _blocks.Cargo(_ownBlocks));
+        _appliedOreSerial = 0;
+        OwnDesign.Figures(_blocks.Sums(_ownBlocks), out _flight, out _stats, _blocks.Cargo(_ownBlocks), _blocks.Bins(_ownBlocks));
         _hasOwnState = false;
         _correction = Vector3.Zero;
         SetOrder(default);
@@ -1147,6 +1152,7 @@ internal sealed partial class ClientWorld : IDisposable
                 || !BlockSet.Has(_near.Blocks(0), OwnDesign.Mounts[item.TractorMount].Parent)) continue;
             _near.Info(0).TractorDemand += spec.Power(TractorSimulation.Mass(_content.Cargo, item));
         }
+        _near.Info(0).TractorDemand += OwnChunkDemand();
         _near.Info(0).LaserDemand = OwnLaserDemand(_laserClock);
         _field.BeginRound();
         for (var at = 0; at < _canonicalCount; at++)
@@ -1161,7 +1167,7 @@ internal sealed partial class ClientWorld : IDisposable
             && _near.State(0).Jump == JumpPhase.None)
         {
             ref var own = ref _near.Info(0);
-            OwnDesign.Figures(_near.BlockStates.Sums(own.BlockState), out _, out var stats, _near.BlockStates.Cargo(own.BlockState));
+            OwnDesign.Figures(_near.BlockStates.Sums(own.BlockState), out _, out var stats, _near.BlockStates.Cargo(own.BlockState), _near.BlockStates.Bins(own.BlockState));
             ModuleScanRules.Spend(ref _near.State(0).Energy, stats.Module(scan.Family), ref own.Power);
         }
         order = _near.Info(0).Order;

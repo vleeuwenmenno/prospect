@@ -27,7 +27,8 @@ internal static partial class PropulsionModels
     public static bool HasModel(BlockType type, BlockShape shape, PropulsionLook look) =>
         ModelOf(type, shape, look) is not null || TankOf(type, shape, look) is not null || (shape == BlockShape.Box && ScannerOf(type, look) is not null)
         || (shape == BlockShape.Box && LaserOf(type, look) is not null)
-        || (shape == BlockShape.Box && type.Cargo > 0 && look.Rack is not null) || IsBay(type, shape, look);
+        || (shape == BlockShape.Box && type.Cargo > 0 && look.Rack is not null) || IsBay(type, shape, look)
+        || IsHopper(type, shape, look) || IsBin(type, shape, look);
 
     /// <summary>
     /// Adds the model of one part of <paramref name="type"/> filling <paramref name="box"/>, alone: no neighbours,
@@ -53,6 +54,10 @@ internal static partial class PropulsionModels
             BuildScanner(scanner, type, box, vertices, indices);
         else if (IsBay(type, BlockShape.Box, look))
             BuildBay(look.Bay!, box, vertices, indices);
+        else if (IsHopper(type, BlockShape.Box, look))
+            BuildHopper(look.Hopper!, box, vertices, indices);
+        else if (IsBin(type, BlockShape.Box, look))
+            BuildBin(look.Bin!, box, vertices, indices);
     }
 
     // A tank of a design: its frame is closed where a neighbour touches it, since the neighbour leaves out a face the

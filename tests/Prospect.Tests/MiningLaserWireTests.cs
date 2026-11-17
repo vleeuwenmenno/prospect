@@ -12,9 +12,9 @@ public sealed class MiningLaserWireTests
     private static readonly GameContent Content = GameContent.Load();
 
     [Fact]
-    public void TheProtocolIsAtVersion69AndTheNewMessagesHaveTheirOwnIds()
+    public void TheProtocolIsAtVersion70AndTheNewMessagesHaveTheirOwnIds()
     {
-        Assert.Equal(69u, ProtocolInfo.Version);
+        Assert.Equal(70u, ProtocolInfo.Version);
         Assert.Equal(44, (byte)MessageId.LaserAim);
         Assert.Equal(45, (byte)MessageId.SetActionGroup);
         Assert.Equal(46, (byte)MessageId.LaserBeams);
@@ -399,7 +399,7 @@ public sealed class MiningLaserWireTests
     [Fact]
     public void TheSavedChunkRecordIsTheWireRecordWithItsTwoClocks()
     {
-        Assert.Equal(OreChunkMessage.RecordBytes, 4 + 24 + 12 + 16 + 12 + 1 + 4 + 4);
+        Assert.Equal(OreChunkMessage.RecordBytes, 4 + 24 + 12 + 16 + 12 + 1 + 4 + 4 + 4 + 2 + 1 + 1);
         Assert.Equal(OreChunkMessage.RecordBytes + 16, Prospect.Game.Persistence.WorldSnapshotCodec.OreChunkBytes);
         var buffer = new byte[OreChunkMessage.RecordBytes];
         var writer = new NetWriter(buffer);

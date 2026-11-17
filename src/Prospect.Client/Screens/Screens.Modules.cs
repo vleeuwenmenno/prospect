@@ -377,7 +377,7 @@ internal sealed partial class ScreenHost
 
     /// <summary>
     /// The drone settings popup, over the DRONES chip: one Launch/Recall button (the keys' own action), the
-    /// "Pick up cargo" checkbox (the server's auto pickup, read back from the view) and three status lines. It
+    /// "Pick up cargo" and "Pick up ores" checkboxes (the server's settings, read back from the view) and three status lines. It
     /// only takes presses while the pointer is shown; a press anywhere else closes it (<see cref="DronePopup.Press"/>).
     /// A fixed height keeps its place and the outside-press test from depending on what the lines say.
     /// </summary>
@@ -388,7 +388,7 @@ internal sealed partial class ScreenHost
         var gap = Kit.Px(Theme.Space2);
         var line = Kit.Px(16);
         var width = Kit.Px(244);
-        var height = pad * 2 + line + gap + Kit.Px(Theme.ControlHeight) + gap + Kit.Px(24) + gap + line * DronePopupStatusLines
+        var height = pad * 2 + line + gap + Kit.Px(Theme.ControlHeight) + gap + Kit.Px(24) + Kit.Px(24) + gap + line * DronePopupStatusLines
             + gap + line + gap + Kit.Px(Theme.ControlHeight);
         var display = _ui.DisplaySize;
         var edge = Kit.Px(Theme.Space2);
@@ -426,6 +426,12 @@ internal sealed partial class ScreenHost
         ImGui.SetCursorScreenPos(at);
         if (EditorCheckbox("##autopickup"u8, "Pick up cargo"u8, new float2(inner, Kit.Px(24)), true, bays.AutoPickup) && Bridge is { } settings)
             DronePopup.ToggleAutoPickup(bays, own, settings);
+        at.Y += Kit.Px(24);
+
+        // Ore pickup: the second flag beside auto pickup, read back from the server like it.
+        ImGui.SetCursorScreenPos(at);
+        if (EditorCheckbox("##pickupores"u8, "Pick up ores"u8, new float2(inner, Kit.Px(24)), true, bays.PickUpOres) && Bridge is { } oreSettings)
+            DronePopup.ToggleOres(bays, own, oreSettings);
         at.Y += Kit.Px(24) + gap;
 
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, at, Theme.Info, Kit.F($"{stocked} IN  {outside} OUT  {bays.Fetching} FETCHING"));

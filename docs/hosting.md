@@ -408,6 +408,8 @@ What a design need not have:
   as a mount, is refused. Rules: [propulsion](roadmap/propulsion.md), "Face mounts".
 - **At most 255 tanks** (`maxTanks`): a snapshot tells the pilot of every tank. One more is refused. A tank can
   be any size, so this bounds separate tanks, not fuel. Rules: [propulsion](roadmap/propulsion.md), "Fuel per tank".
+- **At most 64 ore bins and 16 ore hoppers** (`maxBins`, `maxHoppers`): the pilot is told of every bin. One more is
+  refused. A bin can be any size, so this bounds separate bins, not ore.
 - Shipped design files still must fly (`HullDesign.Parse`): that check is for content, not for players.
 
 Saved designs (client only):
@@ -1138,3 +1140,19 @@ Active module spending is shared with client prediction through `ModuleScanRules
   1 to 17 rays (an origin and a direction, 24 bytes each) in the rock's own frame; 426 bytes at most.
   Taken only on the in-process link of a server with debug fill allowed, from a player flying a live hull, at most
   once every 0.1 s, with every hit within 600 m of that hull. A refused request has no reply.
+
+### Ore collection (protocol 70)
+
+- Reliable message 51, server to client: what the flown hull's ore bins hold. Hull (uint32), design (byte), tick
+  (int64), count (byte), then a bin each: ore (byte, 255 for none), kilograms (double), grade (float). 847 bytes at
+  most (64 bins). Sent when the bins or the flown hull change; never part of the hull snapshot.
+- A client takes a set only for the hull and design it flies, once its snapshots have reached the set's tick, and
+  only if every bin could hold it: one record a bin of the design, an ore of the galaxy, at most the bin's capacity,
+  nothing in a bin whose block is gone. Otherwise it keeps what it had.
+- An ore chunk's record (message 47) is 85 bytes: it also carries the tractor that holds it (hull, mount, stage,
+  powered). A pull is told only with a hull the client may see and whose design it has, as a container's is.
+- The drone settings message (43) carries two flags, "Pick up cargo" and "Pick up ores"; the bay view (40) answers
+  with both. Seven bytes; a flag past one, truncation and trailing bytes are refused.
+- Disclosure: a chunk in a beam tells who is pulling it, within sensor range only. Another player's bins are never sent.
+- Figures both sides simulate from are in `blocks/blocks.json` (`oreKgPerCubicMetre`, `hopper`, `maxBins`,
+  `maxHoppers`), which is hashed already.

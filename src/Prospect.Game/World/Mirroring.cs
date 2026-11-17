@@ -47,7 +47,7 @@ public static class Mirroring
         if ((mask & 4) != 0) at = at with { Z = centre2.Z - (box.At.Z + box.Size.Z) };
         // Only a thrust part's facing means anything (BoxHullSums); another block keeps its own, so a copy of it that
         // lands on its plane is still the same block.
-        var facing = box.Type is { Thrust: > 0 } or { Bay: not null } ? Facing(box.Facing, mask) : box.Facing;
+        var facing = box.Type is { Thrust: > 0 } or { FacesOut: true } ? Facing(box.Facing, mask) : box.Facing;
         return box with { At = at, Facing = facing, Shape = Shape(box.Shape, mask) };
     }
 
