@@ -208,6 +208,6 @@ public sealed class ActionGroupStripTests
     {
         Assert.Equal(ScreenHost.BackStep.ActionGroups, ScreenHost.NextBackStep(false, false, false, false, false, false, Prospect.Client.World.ViewMode.Command, true));
         Assert.Equal(ScreenHost.BackStep.PilotView, ScreenHost.NextBackStep(false, false, false, false, false, false, Prospect.Client.World.ViewMode.Command));
-        Assert.Equal(ScreenHost.BackStep.SessionMenu, ScreenHost.NextBackStep(false, false, true, false, false, false, Prospect.Client.World.ViewMode.Pilot, true));
+        Assert.Equal(ScreenHost.BackStep.SessionMenu, ScreenHost.NextBackStep(false, true, false, false, false, false, Prospect.Client.World.ViewMode.Pilot, true));
     }
 }
