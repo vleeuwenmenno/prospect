@@ -945,6 +945,55 @@ public sealed class FrameOrderTests : IDisposable
         Assert.Equal(0, _world.Selection.Length);
     }
 
+    [Theory]
+    [InlineData(1f)]
+    [InlineData(2f)]
+    public void AClickOnTheActionGroupStripIsItsOwnAndNeverReachesTheWorld(float scale)
+    {
+        UseTips(scale);
+        _world.SetMode(ViewMode.Command);
+        _world.SelectAllOwned();
+        Frame();
+        Frame();
+        var owned = _world.Selection.Length;
+        Assert.True(owned > 0);
+
+        // Groups 1 (on, firing) and 2 (cutting) and 0 (the tenth), as the production host places them over the chips.
+        var strip = new ActionGroupStrip();
+        strip.Begin();
+        strip.Add(1, false);
+        strip.Add(2, true);
+        strip.Add(10, false);
+        strip.End(ActionGroups.Bit(1), true);
+        var keys = new ActionGroupKeys();
+        keys.Update(_actions);
+        var look = ActionGroupLook.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "action_groups.json"));
+        var modules = ModuleLook.Load(Path.Combine(AppContext.BaseDirectory, "content", "visuals", "modules.json")).Strip;
+        var rect = ScreenHost.ActionGroupsRect(Screen, scale, strip.Count, 3, modules, look, out var cellWidth);
+        var presses = new List<int>();
+        var hovered = new List<int>();
+        _drawOver = () =>
+        {
+            Kit.BeginFrame(_tipKit!);
+            var result = ActionGroupPanel.DrawStrip(strip, keys, rect, cellWidth, look);
+            if (result.Pressed != 0) presses.Add(result.Pressed);
+            if (result.Hovered != 0) hovered.Add(result.Hovered);
+        };
+
+        var second = ActionGroupStrip.CellRect(rect, 1, cellWidth, MathF.Round(look.Gap * scale));
+        ClickAt(new float2((second.Left + second.Right) * 0.5f, (second.Top + second.Bottom) * 0.5f));
+        Assert.Equal([2], presses);
+        Assert.Contains(2, hovered);
+        Assert.Equal(owned, _world.Selection.Length);
+
+        // Between two cells, and anywhere else, the press is the world's again.
+        presses.Clear();
+        ClickAt(EmptySpace);
+        Assert.Empty(presses);
+        Assert.Equal(0, _world.Selection.Length);
+        _drawOver = null;
+    }
+
     [Fact]
     public void ANoticeHeldByThePointerStaysAndOneLeftAloneLeaves()
     {

@@ -644,6 +644,13 @@ reticle. Free look (right mouse button) and a shown pointer (`Shift`) pause it (
 holds it off, and the command view, map and editor keep its state but never act on it. Turning it off stops the
 turn at once.
 
+The number keys `1` to `9` and `0` turn action groups on and off (remappable actions `ActionGroup1` to
+`ActionGroup0`). A group exists while a part of the ship is assigned to it; a strip above the console shows
+each one with its key, whether it is on, and its parts ("LASER x2"). While any group is on, the left mouse
+button fires every group that is on instead of aligning the ship; with all off it aligns as before. With the
+pointer shown (`Shift`, interface mode or the command view), clicking the strip opens a popup that changes which
+group each laser fires with, without a rebuild.
+
 A ship near the reticle is bracketed; the middle mouse button targets it and shows its shield and hull. A target
 out of view, behind you, or under a panel, the jump strip or the console, shows as an arrow at the edge of the clear
 part of the view pointing the way to turn; it slides back into the bracket as the target comes into view. The
