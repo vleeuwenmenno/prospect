@@ -54,7 +54,7 @@ internal sealed partial class ScreenHost
         // Escape that closed a tip was the tip's.
         if (!active || _tipBack || _screen != Screen.Session || snapshot is not { OwnHull: >= 0 } || bridge is null)
             return;
-        if (_controlsHandled || _controlsOpen || _sessionMenuOpen || _mapOpen || _shipInfoOpen || SocialSurfaceOpen || _socialHandled)
+        if (_controlsHandled || _controlsOpen || _sessionMenuOpen || _mapOpen || SocialSurfaceOpen || _socialHandled)
             return;
         // A saved designs dialog over the editor has the keyboard: Enter and Escape are its, and no editor key is read.
         if (_designs.Open)

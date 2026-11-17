@@ -623,7 +623,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
 - **Interface mode and the windows:** `InterfaceMode` is the latch and its key; `ScreenHost` treats it as the old
   social workspace (a surface: pointer shown, `WorldInputEnabled` false). Every window is a `SocialPane` drawn
   through `BeginPane`, pinned and placed by `FloatingWindow`, kept in `SocialPanes` and saved by `WindowLayout`
-  (`ClientSettings.Windows`, unscaled). A new window: add a `SocialPane`, its name in `SocialPanes.NameOf`, its
+  (`ClientSettings.Windows`, unscaled). The Ship window (`I`, `SocialPane.Ship`, `Screens.Ship.cs`) replaces the old data sheet: `ShipSheet` (font-free) picks its subject (flown hull, command selection, selected rock) and which sections show; figures are `HullView.Stats`, the design and the flown hull's live state, never a second computation. Capture with `--open info`; tests `InterfaceWindowTests`. A new window: add a `SocialPane`, its name in `SocialPanes.NameOf`, its
   size and fallback place, a top bar tab, an action in `controls.json`/`bindings.json`. The Charts list is
   `ChartCatalogue` (font-free, allocation-free); its jump goes through `ChartActions` and `JumpPlan`, never a
   second range check. Rules in `docs/windows.md`; `InterfaceWindowTests` and the interface tests in

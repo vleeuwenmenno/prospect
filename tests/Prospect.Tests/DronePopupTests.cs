@@ -64,11 +64,11 @@ public sealed class DronePopupTests
     {
         var pilot = Prospect.Client.World.ViewMode.Pilot;
         var command = Prospect.Client.World.ViewMode.Command;
-        Assert.Equal(ScreenHost.BackStep.DronePopup, ScreenHost.NextBackStep(false, false, false, false, false, false, true, pilot));
-        Assert.Equal(ScreenHost.BackStep.DronePopup, ScreenHost.NextBackStep(false, false, false, false, false, false, true, command));
-        Assert.Equal(ScreenHost.BackStep.CargoCallout, ScreenHost.NextBackStep(false, false, false, false, false, true, true, pilot));
-        Assert.Equal(ScreenHost.BackStep.SessionMenu, ScreenHost.NextBackStep(false, false, true, false, false, false, true, pilot));
-        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, false, false, false, pilot));
+        Assert.Equal(ScreenHost.BackStep.DronePopup, ScreenHost.NextBackStep(false, false, false, false, false, true, pilot));
+        Assert.Equal(ScreenHost.BackStep.DronePopup, ScreenHost.NextBackStep(false, false, false, false, false, true, command));
+        Assert.Equal(ScreenHost.BackStep.CargoCallout, ScreenHost.NextBackStep(false, false, false, false, true, true, pilot));
+        Assert.Equal(ScreenHost.BackStep.SessionMenu, ScreenHost.NextBackStep(false, true, false, false, false, true, pilot));
+        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, false, false, pilot));
     }
 
     [Fact]

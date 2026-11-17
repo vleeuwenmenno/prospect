@@ -71,7 +71,7 @@ internal sealed partial class ScreenHost
             LeaveSettings();
         if (screen == Screen.MainMenu)
         {
-            _controlsOpen = _mapOpen = _shipInfoOpen = _sessionMenuOpen = false;
+            _controlsOpen = _mapOpen = _sessionMenuOpen = false;
             _sectorInfo.Reset();
             ResetSocial();
             ResetTipTracking();

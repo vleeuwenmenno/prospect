@@ -26,7 +26,7 @@ internal sealed class SocialPanes
     [
         new(), new(), new(), new(), new(), new(),
         new() { Open = true }, new() { Open = true }, new() { Open = true },
-        new(),
+        new(), new(),
     ];
 
     /// <summary>The names windows are saved under in the client settings.</summary>
@@ -41,11 +41,12 @@ internal sealed class SocialPanes
         SocialPane.Charts => "Charts",
         SocialPane.Cargo => "Cargo",
         SocialPane.Gas => "Gas",
+        SocialPane.Ship => "Ship",
         _ => "Player",
     };
 
     /// <summary>The number of windows.</summary>
-    public const int Count = 10;
+    public const int Count = 11;
 
     public FloatingWindow this[SocialPane pane] => _windows[(int)pane];
 
@@ -75,7 +76,7 @@ internal sealed class SocialPanes
             return false;
         switch (pane)
         {
-            case SocialPane.Party or SocialPane.Players or SocialPane.Chat or SocialPane.Charts or SocialPane.Cargo or SocialPane.Player or SocialPane.Gas when !inGame:
+            case SocialPane.Party or SocialPane.Players or SocialPane.Chat or SocialPane.Charts or SocialPane.Cargo or SocialPane.Player or SocialPane.Gas or SocialPane.Ship when !inGame:
                 return false;
             case SocialPane.Detail when !(detail.ShowsFriend || (inGame && detail.ShowsPlayer)):
                 return false;

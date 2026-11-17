@@ -4,6 +4,7 @@ using Prospect.Client.Input;
 using Prospect.Client.Screens;
 using Prospect.Client.Settings;
 using Prospect.Client.Social;
+using Prospect.Client.World;
 using Prospect.Game.Client;
 using Prospect.Game.World;
 using Xunit;
@@ -219,6 +220,56 @@ public sealed class InterfaceWindowTests
             Assert.Equal(PaneClose.Closed, panes.Close(pane, false));
             Assert.False(panes[pane].Open || panes[pane].Pinned);
         }
+    }
+
+    [Fact]
+    public void TheShipWindowStartsClosedOpensInAGamePinsAndClosesLikeTheOthers()
+    {
+        var panes = new SocialPanes();
+        var detail = new SocialDetail();
+        Assert.False(panes[SocialPane.Ship].Open);
+        Assert.Equal("Ship", SocialPanes.NameOf(SocialPane.Ship));
+        Assert.False(panes.Shown(SocialPane.Ship, true, true, false, detail));
+
+        panes[SocialPane.Ship].Open = true;
+        Assert.True(panes.Shown(SocialPane.Ship, true, true, false, detail));
+        Assert.False(panes.Shown(SocialPane.Ship, false, true, false, detail));
+        Assert.False(panes.Shown(SocialPane.Ship, true, false, false, detail));
+
+        panes[SocialPane.Ship].Pinned = true;
+        Assert.True(panes.Shown(SocialPane.Ship, false, true, false, detail));
+        Assert.Equal(PaneClose.Closed, panes.Close(SocialPane.Ship, false));
+        Assert.False(panes[SocialPane.Ship].Open || panes[SocialPane.Ship].Pinned);
+    }
+
+    [Fact]
+    public void TheShipWindowSavesItsOpenPinAndPlaceUnscaled()
+    {
+        var settings = new ClientSettings();
+        var panes = new SocialPanes();
+        var layout = new WindowLayout(settings, panes, () => { });
+        layout.Restore(2f);
+        panes[SocialPane.Ship].Open = true;
+        panes[SocialPane.Ship].Pinned = true;
+        panes[SocialPane.Ship].Placed = true;
+        panes[SocialPane.Ship].Min = new float2(300, 100);
+        layout.Track(2f, true);
+        Assert.True(layout.Track(2f, false));
+
+        var again = new SocialPanes();
+        new WindowLayout(settings, again, () => { }).Restore(2f);
+        Assert.True(again[SocialPane.Ship].Open && again[SocialPane.Ship].Pinned && again[SocialPane.Ship].Placed);
+        Assert.Equal(new float2(300, 100), again[SocialPane.Ship].Min);
+    }
+
+    [Fact]
+    public void TheShipSheetFollowsTheCommandSelectionAndOtherwiseTheFlownHull()
+    {
+        Assert.Equal(ShipSheetSubject.Own, ShipSheet.Choose(ViewMode.Pilot, true, true, true));
+        Assert.Equal(ShipSheetSubject.None, ShipSheet.Choose(ViewMode.Pilot, false, false, false));
+        Assert.Equal(ShipSheetSubject.Selected, ShipSheet.Choose(ViewMode.Command, true, true, true));
+        Assert.Equal(ShipSheetSubject.Rock, ShipSheet.Choose(ViewMode.Command, true, false, true));
+        Assert.Equal(ShipSheetSubject.Own, ShipSheet.Choose(ViewMode.Command, true, false, false));
     }
 
     [Fact]

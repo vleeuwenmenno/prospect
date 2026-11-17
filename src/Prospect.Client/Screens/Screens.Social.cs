@@ -39,6 +39,9 @@ internal enum SocialPane : byte
 
     /// <summary>The gas clouds the player has sampled with a gas scanner.</summary>
     Gas,
+
+    /// <summary>The stats of the ship being flown.</summary>
+    Ship,
 }
 
 /// <summary>
@@ -64,7 +67,7 @@ internal sealed partial class ScreenHost
     /// <summary>Seconds a notice (a refusal, a failed send, a request sent) stays readable.</summary>
     private const float NoticeSeconds = 6f;
 
-    private const int PaneCount = 10;
+    private const int PaneCount = 11;
 
     /// <summary>
     /// Interface mode: the navigator and every open window are shown, the pointer is free and flight input is off,
@@ -162,6 +165,9 @@ internal sealed partial class ScreenHost
         if (selectFirst)
             _cargoSelectPending = true;
     }
+
+    /// <summary>Opens the Ship window in interface mode. Used by <c>--open info</c>, for captures.</summary>
+    public void OpenShipWindow() => OpenPane(SocialPane.Ship);
 
     /// <summary>Opens the workspace on the Friends window.</summary>
     public void OpenFriends()
@@ -364,6 +370,11 @@ internal sealed partial class ScreenHost
             TogglePane(SocialPane.Cargo);
             _socialHandled = true;
         }
+        else if (actions.InterfaceShortcutPressed(devices, InputAction.ShipInfo, typing, pointerOwned))
+        {
+            TogglePane(SocialPane.Ship);
+            _socialHandled = true;
+        }
         else if (actions.InterfaceShortcutPressed(devices, InputAction.TogglePlayerInfo, typing, pointerOwned))
         {
             TogglePane(SocialPane.Player);
@@ -476,6 +487,7 @@ internal sealed partial class ScreenHost
         SocialPane.Chat => new float2(Kit.Px(540), Kit.Px(340)),
         SocialPane.Charts => new float2(Kit.Px(520), Kit.Px(580)),
         SocialPane.Cargo => new float2(Kit.Px(460), Kit.Px(320)),
+        SocialPane.Ship => new float2(Kit.Px(380), Kit.Px(600)),
         SocialPane.Player => new float2(Kit.Px(240), Kit.Px(190)),
         SocialPane.Gas => new float2(Kit.Px(ModuleLook.Current.GasWindowWidth), Kit.Px(ModuleLook.Current.GasWindowHeight)),
         _ => new float2(Kit.Px(360), Kit.Px(420)),
@@ -498,6 +510,7 @@ internal sealed partial class ScreenHost
             SocialPane.Chat => new float2(left, display.Y - size.Y - left),
             SocialPane.Charts => new float2(display.X - size.X - left, top),
             SocialPane.Cargo => new float2(display.X - size.X - left, display.Y - size.Y - left),
+            SocialPane.Ship => new float2(beside, top),
             SocialPane.Player => new float2(left, top + PaneSize(SocialPane.Navigator).Y + Kit.Px(Theme.Space4)),
             SocialPane.Gas => new float2(display.X - size.X - left, Math.Max(top, display.Y - size.Y - left - PaneSize(SocialPane.Cargo).Y - Kit.Px(Theme.Space4))),
             _ => new float2(display.X - size.X - left, top),
@@ -551,6 +564,8 @@ internal sealed partial class ScreenHost
                 DrawGasPane(snapshot);
             if (PaneShown(SocialPane.Cargo))
                 DrawCargoPane(snapshot);
+            if (PaneShown(SocialPane.Ship))
+                DrawShipPane(snapshot, _app.World);
             if (PaneShown(SocialPane.Player))
                 DrawPlaceholderPane(SocialPane.Player, "##playerinfo"u8, "Player"u8, "Who you are in the game. Nothing to show yet."u8);
             if (PaneShown(SocialPane.Chat))

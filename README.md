@@ -578,7 +578,7 @@ The cursor is hidden only in the pilot view. The command view, the map and every
   box-select, order, rotate, pan and zoom. `Shift` there only adds to a selection or moves the plane; it never
   hides the cursor or ends a drag. Back in the pilot view the cursor is hidden again unless `Shift` is held or
   something is open.
-- **Menus, data sheet, map, Controls, the Social workspace, Chat while typing:** the cursor shows until they
+- **Menus, map, Controls, the Social workspace, Chat while typing:** the cursor shows until they
   close, and the world gets no mouse. Pinned windows do not count: they leave the cursor hidden.
 - **Ship editor:** the cursor is shown and the mouse works on the ship, except over the editor's panels. The ship
   gets no controls while it is open. A press on a panel never reaches the ship, with one exception: a part card
@@ -617,7 +617,7 @@ This works with middle mouse in pilot view and left-click in command view; movin
 | Command view | `N` or `F9` | `Back` |
 | Galaxy map | `M` | `Y` |
 | Halt (cancel order; the only way to cancel a started jump) | `H` or `Backspace` | `B` |
-| Ship data sheet | `I` | D-pad up |
+| Ship window (stats of the ship flown, or the selection in the command view) | `I` | D-pad up |
 | Target the ship under the reticle, or the asteroid if there is no ship | Middle mouse button | |
 | Take control of the target (same sector only), or leave in a drone | `T` | D-pad down |
 | Menu or back | `Esc` | `Start` |
@@ -729,7 +729,7 @@ on arrival. Outside the map, a move with nothing selected
 still goes to the ship you fly.
 
 Where the command plane cuts through an asteroid or a hull, the cut is drawn as a bright line and the part below
-the plane is dimmed, so it is clear what sits on the plane. `I` shows the data sheet of the first selected hull or
+the plane is dimmed, so it is clear what sits on the plane. `I` opens the Ship window, which then shows the first selected hull or
 asteroid.
 
 `F2` shows or hides the sector panel (name,

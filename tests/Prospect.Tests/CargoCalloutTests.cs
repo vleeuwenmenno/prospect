@@ -45,8 +45,8 @@ public sealed class CargoCalloutTests
         Assert.True(callout.IsOpen);
         callout.Close();
         Assert.False(callout.IsOpen);
-        Assert.Equal(ScreenHost.BackStep.CargoCallout, ScreenHost.NextBackStep(false, false, false, false, false, true, false, Prospect.Client.World.ViewMode.Pilot));
-        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, false, callout.IsOpen, false, Prospect.Client.World.ViewMode.Pilot));
+        Assert.Equal(ScreenHost.BackStep.CargoCallout, ScreenHost.NextBackStep(false, false, false, false, true, false, Prospect.Client.World.ViewMode.Pilot));
+        Assert.Equal(ScreenHost.BackStep.OpenMenu, ScreenHost.NextBackStep(false, false, false, false, callout.IsOpen, false, Prospect.Client.World.ViewMode.Pilot));
     }
 
     [Fact]

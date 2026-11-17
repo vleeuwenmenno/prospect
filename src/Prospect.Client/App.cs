@@ -1499,7 +1499,7 @@ internal sealed class App : IDisposable
                 Session.Client.Input.RequestControl(0);
             }
             else if (view == "info")
-                _screens.OpenShipInfo();
+                _screens.OpenShipWindow();
             else if (view == "world-settings")
                 _screens.RequestWorldSettings();
             else if (view == "menu")

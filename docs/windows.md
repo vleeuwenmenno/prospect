@@ -6,11 +6,11 @@
 - In it: the pointer is free and stays free; flight input is off; a click never reaches the world.
 - A right drag begun over space (not over a window) turns the pilot camera as free look does: same sensitivity, invert and limits, wheel zooms. The hull never turns and no flight input is sent. Letting go leaves the view where it is, as free look does. A press begun on a window never turns it; a drag that leaves onto a window keeps turning until release. The pointer stays shown. Pilot view only: the command view and map are unchanged. `PointerFrame.InterfaceMode` (`Screens.InterfaceCameraDragAllowed`: interface mode is the only surface open); `FrameOrderTests` holds it.
 - In it every window that is open and not pinned is shown. Leaving hides them and recaptures the pointer in the pilot view.
-- Windows: Social (navigator, Friends, Party, Players, Chat, card), Charts, Gas, Cargo, Player.
+- Windows: Social (navigator, Friends, Party, Players, Chat, card), Charts, Gas, Cargo, Ship, Player.
 - Each window has a pin. A pinned window stays on screen outside interface mode. It takes nothing in flight; hold `Shift` to click it.
 - The window's X closes it and unpins it. The top bar button, or its key, opens it again.
 - Charts, Cargo and Player start open. Keys: `G`, `U`, `J` (`ToggleCharts`, `ToggleCargo`, `TogglePlayerInfo`).
-- Top bar in a game: Fleet, Map, Charts, Cargo, Player, Social, Settings. No Play. Fleet again returns to the pilot view.
+- Top bar in a game: Fleet, Map, Charts, Cargo, Ship, Player, Social, Settings. No Play. Fleet again returns to the pilot view.
 - Charts, Cargo, Player and Social buttons open the window in front, entering interface mode. A key or button pressed on the window already in front leaves interface mode.
 - Open, pinned and place of each window are saved per client in `settings.json` (`Windows`), place unscaled. A drag is saved when released.
 - Player is a placeholder ("Coming soon"), by the product owner's request.
@@ -45,10 +45,20 @@
 - It follows the hull and clears with the selection: hold or hull change, jettison, a second click on the tile, window closed, Escape (`BackStep.CargoCallout`).
 - No allocation: `CargoHoldView` keeps its tile buffer fixed.
 
+## Ship window
+
+- Key `I` (`ShipInfo`, D-pad up), or the Ship top bar tab. Starts closed; pinnable like Charts. Replaces the old data sheet.
+- Shows the stats of the ship flown, in sections: identity, flight, power, fuel, shield, cargo, drones, modules. A section with nothing to show is left out.
+- Every figure is the hull's published sheet (`HullView.Stats`), its design's blocks, or the flown hull's live state. Nothing is worked out in the window.
+- Fuel, battery, shield now and cargo carried are told only for the hull flown. The rest show for any hull.
+- In the command view it follows the first selected hull; with only an asteroid selected it shows that asteroid's survey (scan findings only).
+- Not shown: minutes of fuel at full thrust (no shared figure yet); fuel time is at the current burn.
+- Sections are a fixed list (`ShipSheet.Section`, drawn in `DrawShipRows`). A new section is one more entry and one draw call.
+
 ## Checks
 
 - `--charted <n>` (with `--capture` or `--bench`, no `--worlds`) charts every sector within n of the start, for captures.
-- `--open interface`, `charts`, `pinned-charts`, `cargo-window` (pair with `--cargo-sample` for a populated hold), `gas`, `pinned-gas`.
+- `--open interface`, `charts`, `pinned-charts`, `cargo-window`, `info` (the Ship window) (pair with `--cargo-sample` for a populated hold), `gas`, `pinned-gas`.
 
 ## Open
 
