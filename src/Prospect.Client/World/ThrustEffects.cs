@@ -32,6 +32,13 @@ internal sealed class ThrustEffects
     public readonly ExhaustCapsule[] Capsules = new ExhaustCapsule[PropulsionLook.PlumeCapacity];
     public readonly int[] Kinds = new int[PropulsionLook.PlumeCapacity];
     public readonly float[] Strengths = new float[PropulsionLook.PlumeCapacity];
+
+    /// <summary>
+    /// For each plume, the look whose throat lights up with it (an index in <see cref="PropulsionLook.GlowModels"/>,
+    /// or -1 for a nozzle without one or too small on screen), and where that nozzle's bell is.
+    /// </summary>
+    public readonly int[] Glows = new int[PropulsionLook.PlumeCapacity];
+    public readonly NozzleBell[] Bells = new NozzleBell[PropulsionLook.PlumeCapacity];
     private int _count;
     private int _weakest = -1;
     private double _seconds;
@@ -239,6 +246,13 @@ internal sealed class ThrustEffects
             var seed = (float)(((hull.Id * 2654435761u) ^ ((uint)nozzle.Index * 40503u)) & 1023u) / 37f;
             Kinds[target] = nozzle.Plume;
             Strengths[target] = throttle * grow * (released >= 0 ? 1f - released / Math.Max(look.FadeSeconds, 0.001f) : 1f);
+            Glows[target] = -1;
+            if ((uint)nozzle.Glow < (uint)_look.GlowModels.Length && pixels >= _look.GlowModels[nozzle.Glow].Bell!.GlowPixels)
+            {
+                // The bell runs from its throat end, its length behind the exit, out along the nozzle's facing.
+                Glows[target] = nozzle.Glow;
+                Bells[target] = new NozzleBell(at - axis * nozzle.Depth, Quaternion.Concatenate(WorldView.FaceRotation(nozzle.Facing), orientation), new Vector3(radius, radius, nozzle.Depth));
+            }
             Capsules[target] = new ExhaustCapsule(hull.Id, at, axis, length, radius * (1f + spread),
                 look.ShieldStrength * throttle * grow * (released >= 0 ? 1f - released / look.FadeSeconds : 1f),
                 new Vector3(look.ShieldColor[0], look.ShieldColor[1], look.ShieldColor[2]), look.ShieldSpread);
@@ -295,6 +309,9 @@ internal sealed class ThrustEffects
         return t * t * (3f - 2f * t);
     }
 }
+
+/// <summary>A firing nozzle's bell this frame: its throat end (camera-relative), the turn from the bell's own frame (z along its axis) and its exit radius and length.</summary>
+internal readonly record struct NozzleBell(Vector3 Start, Quaternion Turn, Vector3 Size);
 
 /// <summary>Flight keys a scripted run holds (<c>--thrust</c>), so a capture can show plumes without a person at the keys.</summary>
 internal readonly record struct ScriptedThrust(float Strafe, float Vertical, float Forward, bool Boost, bool Turn = false)

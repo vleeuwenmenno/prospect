@@ -94,6 +94,9 @@ internal static class Program
                                   command camera (--rock-scrape-distance <m>, default 40)
           --hover-chunk           With --open laser or laser-command and --capture or --bench: rest the pointer on the
                                   first ore chunk in view, so its tooltip shows
+          --laser-camera <d,y,p>  With --capture or --bench: hold the command camera d metres from the flown hull's first
+                                  mining laser, at yaw y and pitch p degrees in the hull's frame (yaw 180 looks at the
+                                  nose from ahead); with --open laser, from the moment its beam is on
           --align-at <sec>        With --capture or --bench, pilot view: click the align button for a moment this many
                                  seconds after the splash (use with --look <degrees>)
          --zoom <0.5..8>         With --capture or --bench, pilot view: the camera's distance, as the scroll wheel sets it
@@ -442,6 +445,10 @@ internal static class Program
                     break;
                 case "--drone-camera" when hasValue && TryParseScanCamera(args[i + 1], out var droneCamera, 0.5f, 80f):
                     options.DroneCamera = droneCamera;
+                    i++;
+                    break;
+                case "--laser-camera" when hasValue && TryParseScanCamera(args[i + 1], out var laserCamera, 0.5f, 80f):
+                    options.LaserCamera = laserCamera;
                     i++;
                     break;
                 case "--drone-scan-hold" when hasValue && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var scanHold) && scanHold is >= 0f and <= 120f:

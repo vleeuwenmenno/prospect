@@ -477,8 +477,9 @@ Limits:
 - Each ore of a cut makes its own chunk with the rock it came in, so two ores of one cut count that rock twice.
 - Partial ore is forgotten when the laser moves to another rock or stops for good.
 - A rock fills up: 2,048 scrapes a rock, 65,536 a world. A full rock still shows the beam and yields nothing.
-- No rock heat or cracking (I2), no weapons in groups yet, no turret models: the emitter is fixed, the beam turns
-  within its gimbal.
+- No rock heat or cracking (I2), no weapons in groups yet. The laser is drawn as a turret whose head lies along the
+  beam; the server still fires from the mount's outer face, so the drawn beam starts at the lens, up to half a metre
+  from that point. One size only: the small, medium and large turrets of the concept art are not built.
 - The Prospector's two lasers take about 7 MW more than its generators spare: its 240 MJ battery lasts about 35 s
   of cutting, less with the tractor beams pulling chunks. Heat stops a burn after 20 s; the battery sets the pace
   of a long cut.

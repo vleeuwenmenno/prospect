@@ -7,9 +7,9 @@ using Prospect.Game.World;
 
 namespace Prospect.Client.World;
 
-// The mining laser's beams, drawn from what the snapshot says: each starts at its laser's emitter on the hull as the
-// hull is drawn this frame (LaserAim, the point the server fires from) and ends where the server found the end,
-// relative to the hull. All the light is made in laser.vert and laser.frag from one instance a beam, so a frame takes
+// The mining laser's beams, drawn from what the snapshot says: each starts at the lens of its laser's turret as that
+// is drawn this frame (for a turret not drawn, at LaserAim's emitter on the drawn hull, the point the server fires
+// from) and ends where the server found the end, relative to the hull. All the light is made in laser.vert and laser.frag from one instance a beam, so a frame takes
 // no memory; the cut's glow and sparks are in the same draw and only a cutting beam has them.
 internal sealed partial class WorldView
 {
@@ -44,7 +44,7 @@ internal sealed partial class WorldView
                 ref readonly var visual = ref visuals[i];
                 var place = DrawnPosition(visual);
                 LaserAim.World(design, mount, place, visual.Orientation, out var emitter, out _);
-                var from = emitter.RelativeTo(camera);
+                var from = TurretLens(beam.Hull, mount, out var lens) ? lens : emitter.RelativeTo(camera);
                 var to = place.RelativeTo(camera) + beam.End;
                 if ((to - from).LengthSquared() < 1e-6f)
                     break;

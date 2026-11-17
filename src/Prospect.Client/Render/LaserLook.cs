@@ -3,62 +3,109 @@ using Brutal.Numerics;
 namespace Prospect.Client.Render;
 
 /// <summary>
-/// How a mounted mining laser looks, from the <c>laser</c> entry of <c>propulsion.json</c>: its model (round base
-/// plate, housing with field coils, a muzzle shroud round a recessed lens) and its beam. A laser is a small part on a
-/// block face, so every model figure is a share of the thin box it fills (radii of the face's half width, heights of
-/// its depth), exactly as for <see cref="ScannerLook"/>; the model is a pure function of that box and is built on a
-/// worker.
+/// How a mounted mining laser looks, from the <c>laser</c> entry of <c>propulsion.json</c>: a turret and its beam. The
+/// turret is a base ring flush on the block face (in the hull mesh), a yoke that turns about the face normal, and a
+/// head on the yoke's trunnion that pitches to lie along the beam: a chunky body with accent panels, an octagonal
+/// barrel and a muzzle ring round the lens the beam leaves from. Base and yoke are the shared turret
+/// (<see cref="Turret"/>); every length is a share of the base ring's radius, itself a share of the mount's half
+/// width, so a laser on any block size is the same model. The parts are pure functions of that width, built on a worker.
 /// </summary>
 internal sealed class LaserLook
 {
-    /// <summary>Sides of every round part: 8 to 32.</summary>
-    public int Sides { get; init; } = 16;
+    /// <summary>The base ring: its radius as a share of the mount's half width, its height as a share of that radius, its sides (even, 8 to 16) and how many of them carry a glow slot.</summary>
+    public float BaseRadius { get; init; } = 0.94f;
+    public float BaseHeight { get; init; } = 0.24f;
+    public int BaseSides { get; init; } = 12;
+    public int Slots { get; init; } = 6;
 
-    /// <summary>The base plate's radius as a share of the face's half width, and its height as a share of the depth.</summary>
-    public float PlateRadius { get; init; } = 0.94f;
-    public float PlateHeight { get; init; } = 0.2f;
+    /// <summary>The yoke: from the collar's top to the trunnion, from the axis to an arm, half an arm's thickness and the hub cap's radius.</summary>
+    public float YokeHeight { get; init; } = 0.78f;
+    public float YokeSpread { get; init; } = 0.64f;
+    public float YokeArm { get; init; } = 0.1f;
+    public float YokeHub { get; init; } = 0.3f;
 
-    /// <summary>The housing's radius, and where the muzzle shroud starts (a share of the depth); the shroud's radius.</summary>
-    public float HousingRadius { get; init; } = 0.58f;
-    public float MuzzleStart { get; init; } = 0.62f;
-    public float MuzzleRadius { get; init; } = 0.78f;
+    /// <summary>The head's body: how far it reaches behind and ahead of the trunnion, and its half width and half height.</summary>
+    public float HeadBack { get; init; } = 0.34f;
+    public float HeadFront { get; init; } = 0.46f;
+    public float HeadWidth { get; init; } = 0.46f;
+    public float HeadHeight { get; init; } = 0.44f;
 
-    /// <summary>The lens's radius (a share of the half width) and how deep it sits (a share of the depth, from the face).</summary>
-    public float LensRadius { get; init; } = 0.5f;
-    public float LensDepth { get; init; } = 0.8f;
+    /// <summary>The barrel ahead of the body: its length and radius, and the muzzle ring that ends it (part of that length).</summary>
+    public float BarrelLength { get; init; } = 0.6f;
+    public float BarrelRadius { get; init; } = 0.28f;
+    public float MuzzleLength { get; init; } = 0.2f;
+    public float MuzzleRadius { get; init; } = 0.36f;
 
-    /// <summary>Field coils round the housing, 1 to 3, and their radius.</summary>
-    public int Coils { get; init; } = 2;
-    public float CoilRadius { get; init; } = 0.7f;
+    /// <summary>The lens: its radius and how deep it sits in the muzzle.</summary>
+    public float LensRadius { get; init; } = 0.25f;
+    public float LensRecess { get; init; } = 0.05f;
 
-    /// <summary>The plate's tier-coloured rim as a share of its radius.</summary>
-    public float RimShare { get; init; } = 0.9f;
+    /// <summary>How fast the head turns onto a beam, in degrees a second, and how far off the face normal it can pitch.</summary>
+    public float SlewRate { get; init; } = 360f;
+    public float MaxPitch { get; init; } = 75f;
 
-    /// <summary>Shades, 0 dark to 1 bright, as the other models give them (<see cref="PropulsionModels.Tag"/>).</summary>
-    public float PlateShade { get; init; } = 0.36f;
-    public float HousingShade { get; init; } = 0.5f;
-    public float DetailShade { get; init; } = 0.66f;
-    public float DarkShade { get; init; } = 0.05f;
+    /// <summary>The paint of the plating, of the dark frames and of the accent panels, as 0xRRGGBB.</summary>
+    public uint BodyColor { get; init; } = 0x131316;
+    public uint DarkColor { get; init; } = 0x080809;
+    public uint AccentColor { get; init; } = 0xCE3D03;
 
-    /// <summary>The light the lens gives off, and the paint of the coils, as 0xRRGGBB.</summary>
-    public uint LensColor { get; init; } = 0xFF5A1E;
-    public uint CoilColor { get; init; } = 0x8A3A22;
+    /// <summary>The light of the base's glow slots and the strips on the barrel.</summary>
+    public uint LightColor { get; init; } = 0x08668C;
+
+    /// <summary>The light the lens gives off, and what it turns toward as the laser heats.</summary>
+    public uint LensColor { get; init; } = 0xFF6605;
+    public uint HotColor { get; init; } = 0xFF1403;
+
+    /// <summary>Brightness of the lens at rest and while it fires, what full heat adds, and the firing lens's flicker (a second, and how deep).</summary>
+    public float IdleGlow { get; init; } = 0.45f;
+    public float ActiveGlow { get; init; } = 2.6f;
+    public float HeatGlow { get; init; } = 1.2f;
+    public float PulseRate { get; init; } = 7f;
+    public float PulseDepth { get; init; } = 0.12f;
 
     /// <summary>The beam's appearance.</summary>
     public LaserBeamLook Beam { get; init; } = new();
 
-    /// <summary>Refuses a look outside what the model's geometry and the beam shader can hold.</summary>
+    /// <summary>The base ring and yoke of the turret, as the shared turret models take them.</summary>
+    public TurretFrame Turret => new(BaseRadius, BaseHeight, BaseSides, Slots, YokeHeight, YokeSpread, YokeArm, YokeHub, BodyColor, DarkColor, AccentColor, LightColor);
+
+    /// <summary>
+    /// The light the lens gives off: <paramref name="firing"/> (0 to 1) brightens it and <paramref name="heat"/>
+    /// (0 to 1) turns it toward the hot colour and adds its own glow; <paramref name="time"/> is the flicker's clock.
+    /// </summary>
+    public System.Numerics.Vector3 LensLight(float firing, float heat, float time)
+    {
+        var pulse = 1f + PulseDepth * MathF.Sin(time * PulseRate * MathF.Tau);
+        var level = IdleGlow + (ActiveGlow * pulse - IdleGlow) * firing + HeatGlow * heat;
+        // A firing lens stays its own colour; the heat shows as it stops.
+        var hot = heat * (1f - 0.5f * firing);
+        static float Mix(uint a, uint b, int shift, float t) => (((a >> shift) & 0xFF) * (1f - t) + ((b >> shift) & 0xFF) * t) / 255f;
+        return new System.Numerics.Vector3(Mix(LensColor, HotColor, 16, hot), Mix(LensColor, HotColor, 8, hot), Mix(LensColor, HotColor, 0, hot)) * level;
+    }
+
+    /// <summary>Refuses a look outside what the turret's geometry and the beam shader can hold.</summary>
     public void Check(string path)
     {
-        static bool Share(float v, float low = 0.01f) => v >= low && v <= 1f;
-        if (Sides is < 8 or > 32 || Coils is < 1 or > 3
-            || !Share(PlateRadius, 0.2f) || !Share(PlateHeight, 0.05f) || !Share(HousingRadius, 0.1f) || !Share(MuzzleStart, 0.1f)
-            || !Share(MuzzleRadius, 0.1f) || !Share(LensRadius, 0.05f) || !Share(LensDepth, 0.1f) || !Share(CoilRadius, 0.1f) || !Share(RimShare, 0.2f)
-            || PlateHeight >= MuzzleStart || MuzzleStart >= LensDepth || HousingRadius >= PlateRadius || LensRadius >= MuzzleRadius
-            || HousingRadius > MuzzleRadius || CoilRadius <= HousingRadius || CoilRadius > PlateRadius
-            || !(PlateShade is >= 0 and <= 1) || !(HousingShade is >= 0 and <= 1) || !(DetailShade is >= 0 and <= 1) || !(DarkShade is >= 0 and <= 1)
-            || LensColor > 0xFFFFFF || CoilColor > 0xFFFFFF)
-            throw new InvalidDataException($"{path}: laser model is out of range: 8 to 32 sides, 1 to 3 coils, shares up to 1 with the plate under the muzzle, the muzzle under the lens and the lens in the shroud");
+        var turret = Turret;
+        var pitch = MaxPitch * (MathF.PI / 180f);
+        var front = HeadFront + BarrelLength;
+        var room = YokeHeight - TurretFrame.TableHeight - 0.05f;
+        if (!turret.Valid
+            || !(HeadBack is >= 0.1f and <= 1f) || !(HeadFront is >= 0.1f and <= 1.5f) || !(HeadHeight is >= 0.1f and <= 0.8f)
+            // The head fits between the arms, and its back turns clear of the turntable and the brace at every pitch.
+            || !(HeadWidth >= 0.1f && HeadWidth * PropulsionModels.LaserHoodWidth <= YokeSpread - YokeArm - 0.01f)
+            || !turret.Clears(MathF.Sqrt(HeadBack * HeadBack + HeadHeight * HeadHeight))
+            || !(BarrelLength is >= 0.2f and <= 2f) || !(BarrelRadius >= 0.05f && BarrelRadius <= 0.8f * MathF.Min(HeadWidth, HeadHeight))
+            || !(MuzzleLength >= 0.05f && MuzzleLength <= 0.8f * BarrelLength) || !(MuzzleRadius > BarrelRadius && MuzzleRadius <= HeadWidth)
+            || !(LensRadius >= 0.03f && LensRadius <= 0.85f * MuzzleRadius) || !(LensRecess >= 0.01f && LensRecess <= 0.8f * MuzzleLength)
+            || !(SlewRate is >= 30f and <= 1440f) || !(MaxPitch is >= 15f and <= 85f)
+            // Pitched as far as it goes, neither the body's front nor the muzzle dips into the turntable.
+            || HeadFront * MathF.Cos(pitch) - HeadHeight * MathF.Sin(pitch) < -room
+            || front * MathF.Cos(pitch) - MuzzleRadius * MathF.Sin(pitch) < -room
+            || LensColor > 0xFFFFFF || HotColor > 0xFFFFFF
+            || !(IdleGlow is >= 0 and <= 8) || !(ActiveGlow >= IdleGlow && ActiveGlow <= 8) || !(HeatGlow is >= 0 and <= 8)
+            || !(PulseRate is >= 0 and <= 30) || !(PulseDepth is >= 0 and <= 1))
+            throw new InvalidDataException($"{path}: laser turret is out of range: a base of 8 to 16 sides, a head that fits between the yoke's arms and turns clear of the yoke at every pitch, a muzzle wider than the barrel and a lens inside it");
         Beam.Check(path);
     }
 }

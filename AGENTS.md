@@ -763,6 +763,16 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   group in `ThrustEffects` is the fourth, and its plume kind is `ion`: a steady glow and a beam worked out from the
   ray's closest approach, with no sparks, shock nodes, flicker or burst (`PlumeLook.Check` refuses them). Rules in
   `docs/roadmap/propulsion.md`; `PropulsionVisualTests` holds them. Check with `--thrust` captures (below).
+  A main engine (`bell` in its entry, `BellLook`; `engine` and `microengine`) is built by `PropulsionModels.BuildEngine`
+  (`PropulsionModels.Engine.cs`) instead: a square bolted mount plate over the whole face, and a nozzle a ring collar
+  (accent bands, a light on each side) and an eight-sided bell whose lining is lit near the throat. The bell is not
+  gimballed: the model is static. Its nozzle still ends on the box's outer face (`MeshData.Nozzles`), so plumes leave
+  the bell. The throat glows brighter with thrust: `ThrustNozzle.Glow` names the look (`PropulsionLook.GlowModels`),
+  `ThrustEffects.Add` notes each firing nozzle's bell (`Glows`, `Bells`; none under `glowPixels` on screen), and
+  `WorldView.DrawNozzleGlow` draws one worker-built unit model a plume (`PartModels.TryGetNozzleGlow`,
+  `BuildEngineGlow`), scaled to the nozzle, as light at `BellLook.GlowLight(Strengths[i])`. Never work thrust out for it.
+  Paint and light colours in these looks are linear values, as `mesh.vert` reads them: a colour taken from a picture
+  must be converted from sRGB first, or it comes out pale.
   Shield exhaust reads those same drawn plumes (`ThrustEffects.Capsules`), never recalculates thrust or nozzle geometry.
   `ShieldExhaust` ray-tests the actual cached shell triangles, rejecting own hull ids and bounding spheres first.
   Cached groups of 64 triangles reject most work; at most 262,144 triangle tests a frame. An incomplete search
@@ -1212,12 +1222,34 @@ How to apply it:
 
 ## Mining laser visuals (R3)
 
-- Model: `PropulsionModels.BuildLaser` (look: the `laser` entry of `visuals/propulsion.json`, `LaserLook`, validated), a pure
-  function of the thin mount box like a scanner's; wired through `AddMount`, `HasModel` and `BuildPart`, so hull meshes,
-  damage meshes, the editor and far hulls all take it. The lens is emissive and level with the outer face the beam leaves from.
-- Beams: `WorldView.DrawLaserBeams` writes one `LaserInstance` a beam (`LaserBeamLook.Instance`) from `LaserAim.World` on the
-  drawn hull pose to `drawn position + End`; `laser.vert`/`laser.frag` make everything (ribbon, pulses, the cut's glow, sparks)
+- The laser is a turret (look only; reach, `LaserSpec.WithinGimbal` and the mount box are unchanged). Figures are the
+  `laser` entry of `visuals/propulsion.json` (`LaserLook`, validated: the head must fit between the yoke's arms and turn
+  clear of the turntable and the brace at every pitch), all shares of the base ring's radius:
+  - Base: `PropulsionModels.BuildLaser`, in the hull mesh, wired through `AddMount`, `HasModel` and `BuildPart` (hull
+    meshes, damage meshes, the editor, far hulls). It is the shared turret base (below): a twelve-sided ring, cyan glow
+    slots, orange accent panels, the collar in the tier's colour.
+  - Yoke, head and lens: `BuildTurretYoke`, `BuildLaserHead`, `BuildLaserLens`, worker-built per mount size
+    (`PartModels.TryGetTurret(TurretKind.Laser, ...)`), posed each frame by `WorldView.DrawLaserTurrets`
+    (`WorldView.LaserTurrets.cs`; three draws a turret, state in the shared `_turrets` table, no memory).
+  - Aim: the head lies along the beam the snapshot lists for its laser (`FindLaserBeam`, toward `drawn position + End`)
+    and rests straight out of the face, its top toward the nose (`LaserRestAzimuth`). `LaserTurretAim` is the rule: the
+    head pitches either way, so the yoke never turns more than a quarter circle, and an aim within `LaserAimDeadband` of
+    the normal turns nothing. Never make the head pitch one way only: a laser aims near its normal, where that spins the yoke.
+  - The lens is light (`MaterialLight`): `LaserLook.LensLight` (idle, firing with a flicker, and hotter and redder with
+    `SessionSnapshot.LaserHeat`, which a client has for the flown hull only; other hulls' lenses show no heat).
+- The shared turret (tractor beam and mining laser): `TurretFrame` (base radius, height, sides, slots, yoke, colours;
+  `TractorLook.Turret`, `LaserLook.Turret`) is what `PropulsionModels.BuildTurretBase` and `BuildTurretYoke` take;
+  `WorldView.Turrets.cs` holds the seat (`SeatTurret`), the remembered angles (`AcquireTurretSlot`, `SlewTurret`), the
+  three draws (`DrawTurret`), where a beam starts (`TurretLens`) and the editor's idle turret (`DrawIdleTurret`). A new
+  turret is a `TurretKind`, a head and a light builder, and a draw that calls those; never copy the yoke or the posing.
+- Beams: `WorldView.DrawLaserBeams` writes one `LaserInstance` a beam (`LaserBeamLook.Instance`) from the turret's lens as
+  drawn this frame (`TurretLens`; `LaserAim.World` on the drawn hull pose for a turret not drawn) to `drawn position + End`; `laser.vert`/`laser.frag` make everything (ribbon, pulses, the cut's glow, sparks)
   from time and a seed, so nothing is pooled or allocated. A free beam fades toward its end, a cutting one has glow and sparks.
+- Check the turret with `--laser-camera <metres>,<yaw>,<pitch>` (scripted runs only: the command camera held on the
+  flown hull's first laser, angles in the hull's frame, yaw 180 from straight ahead, the command plane's mark left out;
+  with `--open laser` it waits for the beam): `--laser-camera 2.2,125,-18` idle, with `--open laser --capture-after 7`
+  firing and `--capture-after 25` overheated. `--open edit-laser --zoom 3.2` puts the editor's camera that many metres
+  from the held ghost. Tests: `LaserVisualTests`.
 - Ore chunks: `OreChunkVisuals` keeps two sets and matches chunks by id once per set (and carries them tumbling at the replicated
   spin); `WorldView.OreChunks.cs` draws the worker-built `OreChunkModels` lump scaled to `OreChunks.Half`. A lump is a convex
   polyhedron cut from a box by random planes (sharp break faces, each split into a fan round a pushed middle), `variants` of them
@@ -1306,8 +1338,10 @@ shield and the server know the design's blocks.
   - Base: `PropulsionModels.BuildTractorBase`, in the hull mesh. Octagonal ring, glow slots on its flats, accent panels
     on its corners, the collar banded in the tier's colour.
   - Yoke, head and bars: `BuildTractorYoke`, `BuildTractorHead`, `BuildTractorBars`, worker-built per mount size
-    (`PartModels.TryGetTractorTurret`), posed each frame by `WorldView.DrawTractorTurrets` through
+    (`PartModels.TryGetTurret(TurretKind.Tractor, ...)`), posed each frame by `WorldView.DrawTractorTurrets` through
     `SceneRenderer.AddTriangles` (three draws a turret; state in the fixed `_turrets` table, no memory).
+  - Base, yoke and posing are the shared turret the mining laser uses too (`TurretFrame`, `WorldView.Turrets.cs`; see
+    "Mining laser visuals (R3)").
   - The head aims at what its beam holds (`FindHeldContainer`: a container or an ore chunk, where it is drawn) and
     otherwise rests by `WorldView.TurretRest`: along the hull's nose, `turretRestPitch` off the face normal. The
     editor's draft uses the same rest (`DrawIdleTractorTurret`). The beam starts at the bars (`TractorLensOffset`).
