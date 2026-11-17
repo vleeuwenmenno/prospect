@@ -70,6 +70,7 @@ internal static class Program
           --capture-every <sec>   Time between numbered screenshots (default 0.25)
           --capture-hit-age <s>   With --capture/--bench: wait for a real shield hit to reach this age (0 to 1 s)
           --ram <m/s>            Unsaved private scripted run: settle by a giant at 3 s, strike it at 6 s (0 to 100 m/s)
+          --coast <m/s>          Unsaved private scripted run: dampeners off, own hull set coasting along its nose at 2 s (0 to 400 m/s)
           --map-cell <pixels>     With --capture or --bench and a map view: open the map at this many pixels per sector (1.4 to 190)
           --close-map-at <sec>    With --capture or --bench and a map view: close the map at this time after the splash (captures of the first frames back in the world)
           --cancel-scan-at <sec>  With --capture or --bench and a scan view (scan, scan-pilot): cancel the scan at this time after the splash, as the scan key pressed again would
@@ -391,6 +392,10 @@ internal static class Program
                     options.HoldThrust = holdThrust;
                     i++;
                     break;
+                case "--coast" when hasValue && float.TryParse(args[i + 1], out var coastSpeed) && coastSpeed is >= 0f and <= 400f:
+                    options.CoastSpeed = coastSpeed;
+                    i++;
+                    break;
                 case "--ram" when hasValue && float.TryParse(args[i + 1], out var ramSpeed) && ramSpeed is >= 0f and <= 100f:
                     options.RamSpeed = ramSpeed;
                     i++;
@@ -558,8 +563,8 @@ internal static class Program
         if (options.HoldThrust is not null && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--hold-thrust works only with --capture or --bench: it replaces the pilot's forward key.");
 
-        if ((options.BreakShieldSeconds is not null || options.RamSpeed is not null) && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
-            return Fail("--break-shield and --ram work only with --capture or --bench, in an unsaved private local game.");
+        if ((options.BreakShieldSeconds is not null || options.RamSpeed is not null || options.CoastSpeed is not null) && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
+            return Fail("--break-shield, --ram and --coast work only with --capture or --bench, in an unsaved private local game.");
 
         if ((options.Thrust is not null || options.Zoom is not null || options.LookHeight is not null || options.CaptureHitAge is not null) && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--thrust and --zoom work only with --capture or --bench.");

@@ -124,7 +124,10 @@ public sealed class TractorSimulation
                 hulls.BlockStates.Cargo(info.BlockState), occupied, out var guide)) { Release(ref item); continue; }
             var mount = design.Mounts[item.TractorMount]; var spec = mount.Type.Tractor!;
             var final = item.TractorStage != 0;
-            var local = Local(design, state, item.Position);
+            // The hull has already stepped this tick and the body drifts only after the pull, so its position now is a
+            // tick older than the hull's pose. Measure where it will be at the end of the tick instead: at 240 m/s the
+            // stale position sat 4 m astern, behind the hull's own blocks, and the beam lost sight and let go.
+            var local = Local(design, state, item.Position + item.Velocity * HullSim.Dt);
             // On the final glide the slot may lie behind the hull's own corner as the emitter sees it; what held the
             // container was the rack's open face in view (TryGuide), so only the range is asked of it then.
             var sight = final ? TractorReach.InRange(design.Boxes, hulls.Blocks(h), design.BlockSize, mount, local, guide.Slack)

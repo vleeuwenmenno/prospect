@@ -131,6 +131,9 @@ internal sealed class AppOptions
     public float? BreakShieldSeconds { get; set; }
     public float? RamSpeed { get; set; }
 
+    /// <summary>Scripted runs only (<c>--coast</c>): the speed the own hull is set coasting at, dampeners off.</summary>
+    public float? CoastSpeed { get; set; }
+
     /// <summary>Scripted runs only (<c>--hurt-fleet</c>): seconds into the run at which the other owned hulls are hurt.</summary>
     public float? HurtFleetSeconds { get; set; }
 
@@ -672,6 +675,7 @@ internal sealed class App : IDisposable
                 VisualBenchmark = _options.VisualBenchmark,
                 ScriptedShieldBreakSeconds = _options.BreakShieldSeconds,
                 ScriptedRamSpeed = _options.RamSpeed,
+                ScriptedCoastSpeed = _options.CoastSpeed,
                 ScriptedExhaustShield = Devices.Muted ? _options.OpenView switch { "exhaust-shield" => 1, "exhaust-shield-cold" => 2, _ => 0 } : 0,
                 ScriptedFleetHurtSeconds = _options.HurtFleetSeconds,
                 ScriptedFleetHurtBroken = _options.HurtFleetBroken,
@@ -1537,6 +1541,7 @@ internal sealed class App : IDisposable
         World.GasOverlayOpening = _options.GasFixture == GasShaderFixture.OverlayCheck
             && Volatile.Read(ref _screenshotJob.Saved) > 0;
         World.ScriptedForward = Devices.Muted && Session is not null ? _options.HoldThrust : null;
+        World.CaptureCoast = Devices.Muted && Session is not null && _options.CoastSpeed is not null;
         if (_options.LookDegrees is { } look && Session is not null)
         {
             if (_options.LookToDegrees is { } lookTo)
@@ -1634,7 +1639,7 @@ internal sealed class App : IDisposable
                 }
                 if ((_options.JettisonSeconds is not null || _options.HurtFleetCargo) && Session is not null)
                 {
-                    if (World.TryGetContainer(1, out var loose)) Console.WriteLine($"capture cargo position: {loose.Position.RelativeTo(World.OwnPosition)}; on screen {World.Project(loose.Position, out var screen)} at {screen}; tractor {loose.TractorHull}/{loose.TractorMount}, stage {loose.TractorStage}, powered {loose.TractorPowered}");
+                    if (World.TryGetContainer(1, out var loose)) Console.WriteLine($"capture cargo position: {loose.Position.RelativeTo(World.OwnPosition)}; own speed {World.Own.Velocity.Length():F1} m/s; on screen {World.Project(loose.Position, out var screen)} at {screen}; tractor {loose.TractorHull}/{loose.TractorMount}, stage {loose.TractorStage}, powered {loose.TractorPowered}");
                     Console.WriteLine($"capture cargo: held {World.Own.Cargo.Length}, free {World.FreeContainerCount}, drawn {World.DrawnFreeContainers}, target {World.TargetContainer}");
                 }
                 if (World.PulseShown.Strength > 0f)

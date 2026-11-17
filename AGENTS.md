@@ -919,8 +919,12 @@ How to apply it:
   through `MaySeeContainer`/`Covered`, as used by `MaySeeHull`. No ownership bypass and no hull snapshot growth.
 - Codec 15 saves bodies, birth/age/id clocks, ClaimOwner and PickupReadyTick; tractor pulls restart on load. `containerLifetimeMinutes` defaults to 60, zero never;
   connected pilots within the base sensor radius pause aging. Oldest-first caps remain active.
-- `FreeContainerVisuals` interpolates and detects contact velocity changes; existing worker container meshes draw
-  the result. Middle-click shows the target panel. Tractor pickup is described below; no weapon support yet.
+- `FreeContainerVisuals` interpolates between the last two sets, flies the newest on at its velocity (at most
+  `MaxAheadTicks`) and detects contact velocity changes; existing worker container meshes draw the result. Every
+  drawing, pick, hover and beam end reads one pose, `WorldView.ContainerPose`, at `FreeContainerVisuals.ShownTick`: the
+  instant of the hull it is seen against (the beam's hull, else the own hull, which is predicted ahead), never the
+  server's tick less an interval. Drawn one interval behind, a container riding along at 240 m/s trailed by 37 m and
+  was out of beam range where it was drawn. Middle-click shows the target panel. Tractor pickup is described below; no weapon support yet.
 - Tests: `FreeContainerTests`, `FreeContainerWireTests`, `FreeContainerSaveTests`, `FreeContainerEjectionTests`,
   `FreeContainerVisualTests`, and two-client jettison in `EditorSessionTests`.
   Capture: `--open cargo --jettison 6`, or `--open cargo --hurt-fleet 7 --hurt-kind cargo`, always with `--capture`.
@@ -962,7 +966,12 @@ How to apply it:
   cannot see, for `stallSeconds` is released and gets `PickupReadyTick` = now + `retrySeconds`. `FreeContainer.TractorBest`
   and `TractorIdle` are server-only (not on the wire, not saved). Figures are the `tractor` entry of `blocks/cargo.json`
   (`TractorGuidance`, validated). `TractorReach.Rack` skips an aim point lying against another live box (a face
-  against a neighbour is a deck, not an entrance). Tests: `TractorGuideTests`.
+  against a neighbour is a deck, not an entrance). The pull runs after the hulls step and before the bodies drift, so it
+  measures a body where it will be at the end of the tick (`Position + Velocity * Dt`) against the hull's new pose;
+  the stale position sat `hull speed * Dt` astern (4 m at 240 m/s), lost sight behind the hull and stowed metres
+  off. Above a hull's rated speed `FlightModel` sheds speed faster than the beam's 4 m/s² can follow, so at boost
+  speed a held body can still be outrun. Tests: `TractorGuideTests`, `TractorSpeedTests` (coasting at 240 m/s, and
+  closing at 10 m/s on a body 100 m ahead).
 - Protocol 62 replicates pickup ownership and ready tick as well as transient pulls for beams and prediction;
   redact only transient pulls whose hull/design is unavailable to a client.
   Codec 15 preserves pickup ownership and ready tick; restore clears only transient pulls and restarts acquisition. `TractorPreview` caches the shared
@@ -974,3 +983,7 @@ How to apply it:
 Capture fixture: `tools/prepare_tractor_capture.py` copies a built client and equips its pod with a tractor,
 one reachable rack and one blocked rack. Run that copy with `--open cargo --jettison 6 --capture ...` for pickup,
 or `--open edit-cargo --capture ...` for reach guidance (both close the editor camera on the first rack after 0.3 s). Keep `agent.prospect` hidden as for other captures.
+At speed: add `--coast <m/s>` (0–400; scripted, unsaved private game: dampeners off, the server sets the own hull
+flying along its nose at 2 s) and `--sector -5,0,0` (no rocks), with `--look 60 --look-height 2 --zoom 1.5`; the
+tractor pod is rated 122 m/s, so for 240 raise `speedPerRootAcceleration` in the copy's `blocks.json` to 130. Each
+capture prints the container's offset from the own hull and the own speed.

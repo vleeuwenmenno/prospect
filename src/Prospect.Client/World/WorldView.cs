@@ -1122,6 +1122,13 @@ internal sealed partial class WorldView
             controls.Align = scriptedForward != 0f;
         }
 
+        // Capture only (--coast): the hull must coast, so the dampeners go off once, editor open or not.
+        if (CaptureCoast && !_captureCoastToggled && snapshot.Dampeners)
+        {
+            controls.ToggleDampeners = true;
+            _captureCoastToggled = true;
+        }
+
         bridge.Submit(controls);
         UpdateJump(dt);
         UpdateCamera(dt);
@@ -3677,6 +3684,10 @@ internal sealed partial class WorldView
 
     public bool CaptureCargoSpace { get; set; }
     public float? CaptureJettisonSeconds { get; set; }
+
+    /// <summary>Capture only (<c>--coast</c>): turn the dampeners off once, so the hull the server sets moving coasts.</summary>
+    public bool CaptureCoast { get; set; }
+    private bool _captureCoastToggled;
     private bool _captureJettisonSent;
     private bool _cargoWindowReady;
     private int _captureCargoMode, _captureCargoSent;
