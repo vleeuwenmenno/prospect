@@ -2163,7 +2163,8 @@ internal sealed class ShipEditor(JobSystem jobs)
 
     private void Enter(SessionSnapshot snapshot, in HullView own, in EditorView view)
     {
-        CancelPartGestures();
+        // Every edit, however it came to open, starts in the select tool: no part is held and no ghost shows.
+        StopPlacing();
         Menu.Close();
         Token = view.Token;
         Hull = own.Id;
