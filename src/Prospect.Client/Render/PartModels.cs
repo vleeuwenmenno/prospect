@@ -67,6 +67,31 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         return vertices.Length > 0;
     }
 
+    private readonly OreBuild _ore = new();
+    private JobHandle _oreHandle;
+    private bool _oreStarted, _oreReady;
+
+    /// <summary>
+    /// The lump of an ore chunk, variant <paramref name="variant"/> (any number; it wraps), as a triangle list; false
+    /// while the worker has not finished. Allocates nothing.
+    /// </summary>
+    public bool TryGetOreChunk(int variant, out ReadOnlySpan<MeshVertex> vertices)
+    {
+        vertices = default;
+        if (!_oreReady) return false;
+        vertices = _ore.Results[(int)((uint)variant % OreChunkModels.Variants)];
+        return true;
+    }
+
+    private sealed class OreBuild : IJob
+    {
+        public readonly MeshVertex[][] Results = new MeshVertex[OreChunkModels.Variants][];
+        public void Run()
+        {
+            for (var i = 0; i < Results.Length; i++) Results[i] = OreChunkModels.Build(i);
+        }
+    }
+
     private sealed class ContainerBuild(PropulsionLook look) : IJob
     {
         public readonly MeshVertex[][] Clamps = new MeshVertex[8 * 6][];
@@ -123,6 +148,8 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
         _frame++;
         if (!_containersStarted) { _containerHandle = jobs.Schedule(_containers, 2); _containersStarted = true; }
         if (!_containersReady && jobs.IsComplete(_containerHandle)) _containersReady = true;
+        if (!_oreStarted) { _oreHandle = jobs.Schedule(_ore, 2); _oreStarted = true; }
+        if (!_oreReady && jobs.IsComplete(_oreHandle)) _oreReady = true;
         if (!_pending || !jobs.IsComplete(_handle))
             return;
         _pending = false;

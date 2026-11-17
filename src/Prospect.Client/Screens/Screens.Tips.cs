@@ -114,6 +114,7 @@ internal sealed partial class ScreenHost
         Edge(inSpace && _moduleGate[0] is ModuleGate.Ready or ModuleGate.OutOfRange, ref _tipSawGasScanner, TipTriggers.GasScannerReady);
         Edge(inSpace && _moduleGate[1] != ModuleGate.Absent && _moduleTargets.Rock is { } tipRock && FindAnalysis(snapshot, tipRock) < 0, ref _tipSawAsteroidTarget, TipTriggers.AsteroidScannerReady);
         Edge(inSpace && _moduleGate[2] != ModuleGate.Absent, ref _tipSawLocator, TipTriggers.LocatorReady);
+        Edge(inSpace && _actionGroups.Count > 0, ref _tipSawActionGroup, TipTriggers.ActionGroupReady);
 
         // The battery is low below one level and not again until it has recovered past a higher one, so a battery
         // hovering at the line does not bring the tip back every few seconds.
@@ -190,7 +191,7 @@ internal sealed partial class ScreenHost
             case TipRegion.Console:
                 if (_mapOpen || world.Editor.Shown || world.Mode is not (ViewMode.Pilot or ViewMode.Command))
                     return false;
-                area = ConsoleArea(display, Kit.Scale, StripChips(), ModuleStyle.Strip);
+                area = ConsoleArea(display, Kit.Scale, StripChips(), ModuleStyle.Strip, ActionGroupsRect(out _));
                 return true;
             case TipRegion.NewShipDialog:
                 if (!_newShip.Open)
@@ -215,14 +216,20 @@ internal sealed partial class ScreenHost
     /// The console's cluster as a tip sees it: the console, and the chip row over it when the ship has modules.
     /// Pure, so a test can check a tip clears both at any size and scale.
     /// </summary>
-    internal static HudRect ConsoleArea(float2 display, float scale, int modules, ModuleLook.StripLook strip)
+    internal static HudRect ConsoleArea(float2 display, float scale, int modules, ModuleLook.StripLook strip, HudRect groups = default)
     {
         var console = FlightConsole.Layout(display, scale);
         var area = new HudRect(console.LeftX, console.Top, console.Right, console.FuelTop + console.FuelRow);
-        if (modules <= 0)
-            return area;
-        var chips = StripRect(display, scale, modules, strip);
-        return new HudRect(Math.Min(area.Left, chips.Left), chips.Top, Math.Max(area.Right, chips.Right), area.Bottom);
+        if (modules > 0)
+        {
+            var chips = StripRect(display, scale, modules, strip);
+            area = new HudRect(Math.Min(area.Left, chips.Left), chips.Top, Math.Max(area.Right, chips.Right), area.Bottom);
+        }
+
+        // The action group strip, when the ship has groups, sits above both.
+        return groups.Height > 0f
+            ? new HudRect(Math.Min(area.Left, groups.Left), Math.Min(area.Top, groups.Top), Math.Max(area.Right, groups.Right), area.Bottom)
+            : area;
     }
 
     private bool PointFor(TipRegion region, WorldView world, out float2 point)

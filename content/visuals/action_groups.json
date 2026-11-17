@@ -1,0 +1,21 @@
+{
+  "cellWidth": 104,
+  "cellHeight": 30,
+  "minCellWidth": 40,
+  "gap": 4,
+  "rowGap": 6,
+  "offAlpha": 0.6,
+  "onAlpha": 0.95,
+  "firingAlpha": 1,
+  "offColor": "596778",
+  "onColor": "FFB020",
+  "firingColor": "FF8A4F",
+  "cuttingColor": "FF5A52",
+  "markPixels": 4,
+  "popupWidth": 372,
+  "popupVisibleRows": 5,
+  "selectorHeight": 24,
+  "kinds": [
+    { "kind": "laser", "label": "LASER" }
+  ]
+}

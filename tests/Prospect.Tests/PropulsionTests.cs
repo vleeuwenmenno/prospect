@@ -1119,12 +1119,12 @@ public sealed class PropulsionTests
             design.Write(stream);
             var again = Parse(System.Text.Encoding.UTF8.GetString(stream.ToArray()));
             Assert.Equal(design.Blocks.ToArray(), again.Blocks.ToArray());
-            Assert.Contains("\"version\":6", System.Text.Encoding.UTF8.GetString(stream.ToArray()));
+            Assert.Contains("\"version\":7", System.Text.Encoding.UTF8.GetString(stream.ToArray()));
         }
 
         Assert.Contains("Unknown block facing", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 4, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\", \"facing\": \"forward\" }] }")).Message);
-        Assert.Contains("unsupported design version 7", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 7, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\" }] }")).Message);
-        Assert.Equal(6, BoxDesign.FormatVersion);
+        Assert.Contains("unsupported design version 8", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 8, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\" }] }")).Message);
+        Assert.Equal(7, BoxDesign.FormatVersion);
     }
 
     [Fact]
@@ -1136,7 +1136,7 @@ public sealed class PropulsionTests
             Box("engine", 4, 0, 0, BlockFacing.Up, new GridSize(1, 4, 4)),
             Box("hull", 5, 0, 0, BlockFacing.Down));
         var bytes = DesignBytes.Encode(design);
-        Assert.Equal(4, DesignBytes.Version);
+        Assert.Equal(5, DesignBytes.Version);
         var decoded = DesignBytes.Decode(bytes, SHA256.HashData(bytes), Content);
         Assert.Equal(design.Boxes.ToArray(), decoded.Boxes.ToArray());
         Assert.Equal(design.Flight, decoded.Flight);
@@ -1220,10 +1220,10 @@ public sealed class PropulsionTests
         var swapped = (byte[])bytes.Clone();
         var cold = "coldGasThruster"u8;
         var first = bytes.AsSpan().IndexOf(cold);
-        var second = first + cold.Length + 9 + 1;
+        var second = first + cold.Length + 10 + 1;
         Assert.True(bytes.AsSpan(second).StartsWith(cold));
-        bytes.AsSpan(second + cold.Length, 9).CopyTo(swapped.AsSpan(first + cold.Length));
-        bytes.AsSpan(first + cold.Length, 9).CopyTo(swapped.AsSpan(second + cold.Length));
+        bytes.AsSpan(second + cold.Length, 10).CopyTo(swapped.AsSpan(first + cold.Length));
+        bytes.AsSpan(first + cold.Length, 10).CopyTo(swapped.AsSpan(second + cold.Length));
         Assert.Contains("Noncanonical", Assert.Throws<InvalidDataException>(() => DesignBytes.Decode(swapped, SHA256.HashData(swapped), Content)).Message);
 
         // What a file or a sender may not do.

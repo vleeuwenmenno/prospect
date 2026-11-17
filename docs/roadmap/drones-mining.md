@@ -154,7 +154,8 @@ Three tracks. A track's steps run in order; the tracks run side by side, each in
    and level of detail. A temporary debug scrape (local games only) drives it until the laser exists.
    **Done** (2026-11-17), see "R1 as built".
 2. R2, cracks: radial pieces as new rocks, rough natural break faces, wire and save of the pieces.
-3. R3, mining laser: a face mount that scrapes on an order; it frees floating ore chunks.
+3. R3, mining laser: a face mount the pilot aims and fires in action groups; it scrapes through `ScrapeRock` and
+   frees floating ore chunks. **Done** (2026-11-17), see "R3 as built".
 4. R4, ore: chunks pulled by tractor into an ore hopper, raw ore containers, the Ore Cargo window.
 
 ### Track D: drones
@@ -252,9 +253,9 @@ The `scans` entry of `content/blocks/drones.json`, shared content:
 
 ### Wire and save
 
-- Protocol 69: message 47 (scan command: request, start, cancel), message 48 (one result, at most 1,281 bytes).
+- Protocol 69: message 49 (scan command: request, start, cancel), message 50 (one result, at most 1,281 bytes).
 - The bay view (message 40) carries the scan: kind, phase, rock, drones, in place, start and end ticks.
-- Save codec 21: every player's results. A scan under way is not saved; its drones dock as all drones do.
+- Save codec 21, after codec 20's mining section: every player's results. A scan under way is not saved; its drones dock as all drones do.
 
 ### Not built, known limits
 
@@ -333,7 +334,60 @@ Measured (this machine, Release, one thread, a three-pass groove of 48 scrapes, 
 - A block pressed more than a cell (0.25 m) into a groove's wall in one tick reads no wall there and is pushed
   out by the base shape instead: fast impacts into a groove can bounce out of it.
 - A full patch buffer (2,000,000 vertices) drops the patch drawn longest ago and tries again later.
-- Nothing is yielded: no ore, no chunks. Scraped volume is not counted.
+- Yield came with R3 (see "R3 as built").
+
+## R3 as built
+
+How to work on it is in `AGENTS.md`, "Mining lasers, action groups and ore chunks". This is what exists.
+
+### What exists
+
+- `miningLaser`: a face mount with `laser` figures and `laserTiers` in `blocks.json`. Only Common is in the palette.
+- Action groups 1 to 10 (key `0` is group 10). A mount's group is in the design (file version 7, wire version 5);
+  a hull can change it without a rebuild (`SetActionGroup`, saved).
+- Firing: the client sends the groups that fire and the aim ray when they change. The server plans the lasers
+  before the hull round (group, block there, gimbal, own hull clear, power asked), fires after it and cuts through
+  `ScrapeRock`.
+- Ore: each scrape's volume times the rock's density, shared out by the interior sample at the cut's deepest point.
+  Each ore adds up per laser; at the mark it breaks off as a chunk.
+- Chunks: a fixed pool of 256 apart from loose containers, drifting, bouncing off rocks and hull blocks, replicated
+  by sensor cover and saved.
+- Wire: protocol 68, messages 44 to 48. Save: codec 20.
+
+### Why a pool of its own for chunks
+
+- Containers carry a payload, claims, tractor and fetch state; every tractor and drone path reads that pool.
+- Chunks carry resource, grade and mass only, and nothing picks them up until the hopper (R4).
+- Apart, no tractor or drone code had to learn to skip them. R4 decides how they are taken in.
+
+### Figures
+
+| Figure | Value |
+| --- | --- |
+| Laser range, gimbal | 60 m, 40° off its face |
+| Cut radius, rate | 0.5 m, 0.25 m deep a second |
+| Power while firing | 3 MW, paid all or nothing after the tractors |
+| Scrape | 0.25 m bite, at least 0.15 s apart; a new stroke after 0.5 s off the rock |
+| Chunk | 300 kg of one ore; thrown out from the rock's centre at 2 m/s |
+| Chunks | 64 a sector, 256 a world, 30 minutes unattended |
+| Lasers fired a hull | 16; 64 can have a group changed without a rebuild |
+
+`make bench` fires one laser at a 199 m rock for 16 s: 15 scrapes, chunks freed, no managed allocation.
+
+### Not built, known limits
+
+- Beams pass through other ships; only the firing hull's own blocks block them.
+- A beam is drawn from the server's end point, sent every tick it fires (unreliable); a lost packet holds the beam.
+- Ore is an estimate from the scrape's volume, not the volume the bricks really lost. Rock that holds no ore is lost.
+- Each ore of a cut makes its own chunk with the rock it came in, so two ores of one cut count that rock twice.
+- Partial ore is forgotten when the laser moves to another rock or stops for good.
+- A rock fills up: 2,048 scrapes a rock, 65,536 a world. A full rock still shows the beam and yields nothing.
+- No heat (I2), no weapons in groups yet, no turret models: the emitter is fixed, the beam turns within its gimbal.
+- Power is paid all or nothing each tick: a laser on a flat battery fires on the ticks the generator's trickle pays
+  for, and a beam cut short loses the cut it had not yet made into a scrape.
+- Chunk contacts generate one sector at a time, as loose containers do: chunks spread over two sectors take turns.
+- Group changes are not mirrored in the editor (placing is).
+- The F10 debug scrape stays: `make bench` and the `--open rock-scrape` captures still use it.
 
 ## Open
 

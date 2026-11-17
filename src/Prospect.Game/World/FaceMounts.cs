@@ -22,9 +22,10 @@ public sealed record MountSpec(int Side, int Depth, string LegacyBlock, int Last
 /// <paramref name="Face"/> the side of it the part sits on and points out of, and <paramref name="U"/> and
 /// <paramref name="V"/> the low corner of its square on that face, in tenths of a cell from the face's low corner
 /// along the axes <c>(axis + 1) % 3</c> and <c>(axis + 2) % 3</c>. A mount has no state of its own: a hull has it
-/// exactly while it has the parent block.
+/// exactly while it has the parent block. <paramref name="Group"/> is the part's action group
+/// (<see cref="ActionGroups"/>): 1 to 10, or 0 for none; only a groupable part (a mining laser) has one.
 /// </summary>
-public readonly record struct DesignMount(int Parent, BlockFacing Face, int U, int V, BlockType Type);
+public readonly record struct DesignMount(int Parent, BlockFacing Face, int U, int V, BlockType Type, byte Group = 0);
 
 /// <summary>
 /// The geometry and the rules of face mounts, shared by design files, received designs and the editor's drafts.
@@ -157,6 +158,8 @@ public static class FaceMounts
             ref readonly var mount = ref mounts[i];
             if (mount.Type?.Mount is null)
                 throw new InvalidDataException($"{source}: mount {i}: a {mount.Type?.Name ?? "part of no type"} is a block and cannot be mounted on a face");
+            if (!ActionGroups.Allowed(mount.Type, mount.Group))
+                throw new InvalidDataException($"{source}: mount {i}: a {mount.Type.Name} cannot be in action group {mount.Group}");
             switch (Check(blocks, mounts[..i], mount))
             {
                 case DraftEdit.Done:

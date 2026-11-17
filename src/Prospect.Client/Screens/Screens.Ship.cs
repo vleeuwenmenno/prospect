@@ -14,7 +14,7 @@ internal sealed partial class ScreenHost
 
     /// <summary>
     /// The Ship window: the stats of the ship being flown, grouped as identity, flight, power, fuel, shield, cargo,
-    /// drones and modules. Every figure is the hull's own published sheet (<see cref="HullView.Stats"/>), the
+    /// drones, modules and, for the flown hull's lasers, action groups. Every figure is the hull's own published sheet (<see cref="HullView.Stats"/>), the
     /// design's blocks or the flown hull's live state; nothing is worked out here. In the command view it follows
     /// the first selected hull, or shows a selected asteroid's survey (what the old data sheet did).
     /// </summary>
@@ -199,6 +199,16 @@ internal sealed partial class ScreenHost
 
             if (shown > MaxBeamRows)
                 ShipRow(draw, width, "More tractor beams"u8, Kit.F($"+{shown - MaxBeamRows}"), Theme.TextMute);
+        }
+
+        // The flown hull's lasers and their groups, changed here without a rebuild (ActionGroupPanel, as the strip's
+        // popup draws it). Only the flown hull: the server takes a change for any owned hull, but the client hears
+        // the changes of the flown one only.
+        if (hull.IsOwn && design.Lasers.Length > 0 && _app.Session?.Client.Input is { } bridge)
+        {
+            ShipSection(draw, width, "ACTION GROUPS"u8);
+            _actionGroupKeys.Update(_app.Actions);
+            ActionGroupPanel.DrawActionGroupsSection(snapshot, hull.Id, design, bridge, _actionGroupKeys, width, ActionGroupLook.Current);
         }
     }
 

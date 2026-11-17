@@ -75,13 +75,18 @@ pocket lies under it (red). `\` turns the hologram on or off. Results are yours,
 with the world; the drones come home and are used again. Not built: giants (they need over a hundred drones), drone
 power use for a scan, and checking places against other rocks or ships.
 
-Rocks can be scraped: a scrape cuts a groove into an asteroid for everyone who has it in view, hulls and loose
-containers touch the groove, and it is saved with the world. This is the foundation of mining and has no tool yet:
-the only way to scrape is the temporary debug key (`F10`, held in the pilot view, private local games only), which
-cuts a metre-wide groove where the view's centre meets a rock within 600 m of the ship. Far away a scraped rock is
-drawn without its grooves. Not there: the mining laser, ore, cracks, scraping ice shards, and the pointer and
-exhaust marks following a groove (they still see the unscraped surface). A rock holds at most 2,048 scrapes and a
-world 65,536 (`content/rules/rock_edits.json`). See [drones and mining](docs/roadmap/drones-mining.md).
+Rocks can be mined with a mining laser: a small part mounted on a block's face, in an action group (1 to 9 and 0)
+chosen per part in the editor. The number keys turn groups on and off; while any group is on, the left mouse button
+fires every group that is on at the view's centre, and with all off it turns the hull onto the view as before. A
+laser reaches 60 m, turns at most 40° off its face, draws 3 MW while it fires, and cuts a groove 1 m wide into the
+first rock its beam meets, seen by everyone who has the rock in view and saved with the world. What it cuts away
+yields ore from the rock's interior; every 300 kg of one ore breaks off as a loose ore chunk that drifts and bounces
+off rocks and ships. Chunks cannot be picked up yet: the ore hopper comes next. No shipped ship carries a laser yet;
+build one on in the editor. The temporary debug scrape (`F10`, held in the pilot view, private local games only)
+still exists. Not there: picking up ore, cracks, scraping ice shards, beams blocked by other ships, and the pointer
+and exhaust marks following a groove. A rock holds at most 2,048 scrapes and a world 65,536
+(`content/rules/rock_edits.json`); laser and chunk figures are in `content/rules/mining.json` and `blocks.json`. See
+[drones and mining](docs/roadmap/drones-mining.md).
 
 Propulsion burns fuel and is directional: engines, hot thrusters and cold gas thrusters each push the opposite way
 to the way they face, and burn bipropellant, hydrazine and nitrogen from tank blocks. Engines are blocks of any
@@ -660,6 +665,13 @@ While on, the hull follows the view as if the left button were held, and an `AUT
 reticle. Free look (right mouse button) and a shown pointer (`Shift`) pause it (the tag dims for them), a jump
 holds it off, and the command view, map and editor keep its state but never act on it. Turning it off stops the
 turn at once.
+
+The number keys `1` to `9` and `0` turn action groups on and off (remappable actions `ActionGroup1` to
+`ActionGroup0`). A group exists while a part of the ship is assigned to it; a strip above the console shows
+each one with its key, whether it is on, and its parts ("LASER x2"). While any group is on, the left mouse
+button fires every group that is on instead of aligning the ship; with all off it aligns as before. With the
+pointer shown (`Shift`, interface mode or the command view), clicking the strip opens a popup that changes which
+group each laser fires with, without a rebuild.
 
 A ship near the reticle is bracketed; the middle mouse button targets it and shows its shield and hull. A target
 out of view, behind you, or under a panel, the jump strip or the console, shows as an arrow at the edge of the clear

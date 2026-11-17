@@ -1467,6 +1467,25 @@ public sealed class SqliteWorldStoreTests : IDisposable
 
         for (var i = 0; i < limits.MaxRocks; i++)
             snapshot.Rocks[snapshot.RockCount++] = new RockDelta { Rock = new RockRef(new SectorCoord(i % 256, 0, 0), i), Velocity = Vector3.UnitX, StartTick = 1 };
+
+        // Every owner's drone scans, each a detailed map with every vein, point and pocket a record may hold.
+        var map = new DroneScanMap { VeinCount = RockInteriorRules.MaxVeins, PocketCount = RockInteriorRules.MaxPockets };
+        for (var v = 0; v < RockInteriorRules.MaxVeins; v++)
+            map.Veins[v] = new DroneScanVein { Points = RockInteriorRules.MaxVeinPoints, Resource = -1 };
+        for (var p = 0; p < RockInteriorRules.MaxPockets; p++)
+            map.Pockets[p] = new DroneScanPocket { Kind = RockPocketKind.Ice, Resource = -1 };
+        for (var i = 0; i < snapshot.DroneScans.Length; i++)
+            snapshot.DroneScans[snapshot.DroneScanCount++] = new DroneScanRecord
+            {
+                Owner = (uint)(i % limits.MaxOwners + 1),
+                Kind = DroneScanKind.Detailed,
+                Sector = new SectorCoord(i / limits.MaxOwners, 0, 0),
+                Radius = 10,
+                Resource = -1,
+                Mix1 = -1,
+                Mix2 = -1,
+                Map = map,
+            };
         return snapshot;
     }
 

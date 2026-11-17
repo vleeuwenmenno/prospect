@@ -77,7 +77,7 @@ public static partial class WorldSnapshotCodec
         for (var i = 0; i < snapshot.HullCount; i++)
             size += HullFixedBytes + snapshot.Hulls[i].Visual.Count * DentBytes;
         size += (long)snapshot.LossCount * sizeof(int) + (long)snapshot.BlockCount * sizeof(float) + (long)snapshot.TankCount * sizeof(double) + (long)snapshot.CargoCount * CargoRecordBytes + (long)snapshot.BayCount * BayBytes;
-        return size + (long)snapshot.FreeContainerCount * FreeContainerBytes + (long)snapshot.RockCount * RockBytes + (long)snapshot.ChartCount * ChartBytes + (long)snapshot.ModuleObservationCount * ModuleObservationBytes;
+        return size + MiningBytes(snapshot) + (long)snapshot.FreeContainerCount * FreeContainerBytes + (long)snapshot.RockCount * RockBytes + (long)snapshot.ChartCount * ChartBytes + (long)snapshot.ModuleObservationCount * ModuleObservationBytes;
     }
 
     /// <summary>Encodes a snapshot into an array of exactly its size.</summary>
@@ -248,6 +248,7 @@ public static partial class WorldSnapshotCodec
         foreach (var container in snapshot.FreeContainers.AsSpan(0, snapshot.FreeContainerCount)) WriteFreeContainer(ref writer, container);
 
         WriteRockEdits(ref writer, snapshot);
+        WriteMining(ref writer, snapshot);
 
         for (var i = 0; i < snapshot.DroneScanCount; i++)
         {
@@ -661,6 +662,8 @@ public static partial class WorldSnapshotCodec
             error = "invalid saved rock edits";
             return false;
         }
+
+        if (!ReadMining(ref reader, result, nextTick, out error)) return false;
 
         // Drone scans: structure, a known owner, a time before the save, each rock once per owner, and no more an
         // owner than the server keeps. Whether the rock and its resources exist is the server's to judge at restore.

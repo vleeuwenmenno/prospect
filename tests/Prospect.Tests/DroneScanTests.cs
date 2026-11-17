@@ -792,8 +792,8 @@ public sealed class DroneScanTests
         Assert.False(Round(badRock, out _));
 
         Assert.Equal(69u, ProtocolInfo.Version);
-        Assert.Equal(47, (int)MessageId.DroneScan);
-        Assert.Equal(48, (int)MessageId.DroneScanResult);
+        Assert.Equal(49, (int)MessageId.DroneScan);
+        Assert.Equal(50, (int)MessageId.DroneScanResult);
         Assert.True(BayMessage.MaxWireSize >= BayMessage.HeaderBytes + DroneBayRules.MaxBays * BayMessage.RecordBytes);
     }
 

@@ -26,10 +26,12 @@ public sealed class GameContent
         ContentIdentity saveIdentity,
         DroneRules drones,
         int workDrone,
-        RockEditing.RockEditRules rockEdits
+        RockEditing.RockEditRules rockEdits,
+        MiningRules mining
     )
     {
         RockEdits = rockEdits;
+        Mining = mining;
         Drones = drones;
         WorkDroneDesign = workDrone;
         Cargo = cargo;
@@ -68,6 +70,9 @@ public sealed class GameContent
 
     /// <summary>What a scrape of a rock may be, the size of the bricks it is kept in and how much a world may hold.</summary>
     public RockEditing.RockEditRules RockEdits { get; }
+
+    /// <summary>How a mining laser's beam turns into scrapes, and how the ore it frees adds up into loose chunks.</summary>
+    public MiningRules Mining { get; }
 
     /// <summary>
     /// Social limits as this machine's files have them. A server enforces its own; a client's only shape what
@@ -141,12 +146,12 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length];
         for (var i = 0; i < designs.Length; i++)
             designs[i] = Designs[i].WithRules(rules);
-        return new GameContent(Galaxy.Under(SettingCatalog, clean), Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, WorkDroneDesign, RockEdits);
+        return new GameContent(Galaxy.Under(SettingCatalog, clean), Blocks, SettingCatalog, clean, rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, WorkDroneDesign, RockEdits, Mining);
     }
 
     internal GameContent WithCatalogue(HullDesign[] designs, int pod, int drone, int[] fleet, int workDrone) =>
         new(Galaxy, Blocks, SettingCatalog, Settings, Rules, (HullDesign[])designs.Clone(), pod, drone,
-            (int[])fleet.Clone(), Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, workDrone, RockEdits);
+            (int[])fleet.Clone(), Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, workDrone, RockEdits, Mining);
 
     /// <summary>
     /// This content with one more design at the end of the catalogue. Every design it had keeps its number and is
@@ -158,7 +163,7 @@ public sealed class GameContent
         var designs = new HullDesign[Designs.Length + 1];
         Designs.CopyTo(designs, 0);
         designs[^1] = design;
-        return new GameContent(Galaxy, Blocks, SettingCatalog, Settings, Rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, WorkDroneDesign, RockEdits);
+        return new GameContent(Galaxy, Blocks, SettingCatalog, Settings, Rules, designs, PodDesign, DroneDesign, StartingFleet, Social, Identity, BlockTransfers, Editor, Exploration, Cargo, SaveIdentity, Drones, WorkDroneDesign, RockEdits, Mining);
     }
 
     /// <summary>Loads the content shipped beside the executable.</summary>
@@ -204,6 +209,11 @@ public sealed class GameContent
         var settingCatalog = WorldSettingCatalog.Parse(Shared("rules", "settings.json"), At("rules", "settings.json"));
         var exploration = ExplorationRules.Parse(Shared("rules", "exploration.json"));
         var rockEdits = RockEditing.RockEditRules.Parse(Shared("rules", "rock_edits.json"));
+        var mining = MiningRules.Parse(Shared("rules", "mining.json"));
+        foreach (var type in blocks.Types)
+            if (type.Laser is { } laser && (laser.CutRadius * 1000 < rockEdits.MinRadiusMm || laser.CutRadius * 1000 > rockEdits.MaxRadiusMm
+                || mining.BiteMetres > laser.CutRadius * 2))
+                throw new InvalidDataException($"{type.Id}: a laser's cut radius must be a scrape radius rock_edits.json allows, and mining.json's bite at most its width.");
         var settings = settingCatalog.Defaults;
         var rules = blocks.Rules.Under(settingCatalog, settings);
         using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(At("ships", "fleet.json")));
@@ -267,7 +277,8 @@ public sealed class GameContent
             saveIdentity.Build(),
             drones,
             WorkDrone(Index(root.GetProperty("workDrone"u8).GetString()!)),
-            rockEdits
+            rockEdits,
+            mining
         );
 
         // The drone a bay launches is a small craft of drone parts with no drive to leave its base behind with.

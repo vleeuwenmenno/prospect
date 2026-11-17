@@ -230,6 +230,7 @@ public sealed class WorldSnapshot
         Rocks = new RockDelta[rocks];
         Charts = new SectorChart[charts];
         ModuleObservations = new ModuleObservation[moduleObservations];
+        ActionGroups = new SavedActionGroup[checked(hulls * Protocol.ActionGroupsMessage.MaxParts)];
     }
 
     /// <summary>A snapshot with room for the most a world under <paramref name="limits"/> can hold: a capture buffer.</summary>
@@ -326,6 +327,18 @@ public sealed class WorldSnapshot
     public readonly FreeContainer[] FreeContainers = new FreeContainer[Prospect.Game.World.FreeContainers.Capacity];
     public int FreeContainerCount;
     public uint NextContainerId = 1;
+
+    /// <summary>Loose ore chunks: a fixed budget of their own, like loose cargo. The first <see cref="OreChunkCount"/> are meaningful.</summary>
+    public readonly OreChunk[] OreChunks = new OreChunk[Prospect.Game.World.OreChunks.Capacity];
+    public int OreChunkCount;
+    public uint NextOreChunkId = 1;
+
+    /// <summary>
+    /// Every hull's changes of its parts' action groups made without a rebuild, by the hull's index in
+    /// <see cref="Hulls"/>. The first <see cref="ActionGroupCount"/> are meaningful.
+    /// </summary>
+    public readonly SavedActionGroup[] ActionGroups;
+    public int ActionGroupCount;
     public SavedCargoRules CargoRules;
     public int TankCount;
 

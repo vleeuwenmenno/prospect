@@ -119,11 +119,26 @@ public enum MessageId : byte
     /// <summary>Client to server, reliable: a drone setting of a hull. See <see cref="DroneSettingsMessage"/>.</summary>
     DroneSettings = 43,
 
+    /// <summary>Client to server, reliable: which action groups fire and where they aim. See <see cref="LaserAimMessage"/>.</summary>
+    LaserAim = 44,
+
+    /// <summary>Client to server, reliable: one part's action group on the flown hull. See <see cref="SetActionGroupMessage"/>.</summary>
+    SetActionGroup = 45,
+
+    /// <summary>Server to client, unreliable: the beams of the hulls a client may see. See <see cref="LaserBeamsMessage"/>.</summary>
+    LaserBeams = 46,
+
+    /// <summary>Server to client, reliable: every loose ore chunk a client may see. See <see cref="OreChunkMessage"/>.</summary>
+    OreChunks = 47,
+
+    /// <summary>Server to client, reliable: the flown hull's action group changes. See <see cref="ActionGroupsMessage"/>.</summary>
+    ActionGroups = 48,
+
     /// <summary>Client to server, reliable: a drone scan of a rock asked for, started or given up. See <see cref="DroneScanCommandMessage"/>.</summary>
-    DroneScan = 47,
+    DroneScan = 49,
 
     /// <summary>Server to client, reliable: one of the player's drone scan results. See <see cref="DroneScanResultMessage"/>.</summary>
-    DroneScanResult = 48,
+    DroneScanResult = 50,
 }
 
 public enum RejectReason : byte

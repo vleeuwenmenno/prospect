@@ -313,6 +313,7 @@ internal static class EditorGeometry
         : type.EnergyStorage > 0 ? PartRole.Storage
         : type.Shield > 0 ? PartRole.Shield
         : type.Tractor is not null ? PartRole.Tractor
+        : type.Laser is not null ? PartRole.Laser
         : type.Bay is not null ? PartRole.Bay
         : type.Cargo > 0 ? PartRole.Cargo
         : type.Crew > 0 ? PartRole.Crew
@@ -333,6 +334,7 @@ internal static class EditorGeometry
         PartRole.Shield => new Vector3(0.30f, 0.75f, 1.00f),
         PartRole.Cargo => new Vector3(0.70f, 0.55f, 0.40f),
         PartRole.Bay => new Vector3(0.95f, 0.75f, 0.25f),
+        PartRole.Laser => new Vector3(1.00f, 0.35f, 0.30f),
         PartRole.Crew => new Vector3(0.90f, 0.90f, 0.95f),
         PartRole.Module => new Vector3(0.35f, 0.90f, 0.85f),
         _ => Vector3.Zero,
@@ -369,4 +371,7 @@ internal enum PartRole : byte
 
     /// <summary>A drone bay: keeps drones and lets them out through its hatch.</summary>
     Bay,
+
+    /// <summary>A mining laser mounted on a face, fired as one of an action group.</summary>
+    Laser,
 }

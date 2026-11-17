@@ -65,6 +65,9 @@ public sealed class BlockType
     /// <summary>Set for a drone bay: a box block that keeps drones and lets them out through one hatch face.</summary>
     public BaySpec? Bay { get; init; }
 
+    /// <summary>Optional mining laser, present only on a face mount. Such a part belongs to an action group.</summary>
+    public LaserSpec? Laser { get; init; }
+
     /// <summary>
     /// True for a block that is always a box and never a wedge (<c>"boxOnly"</c> in <c>blocks.json</c>): tanks, whose
     /// round vessels a slant would cut, and sensors and scanners. <see cref="BoxDesign.ShapeAllowed"/> is the one rule.
@@ -346,6 +349,7 @@ public sealed class BlockCatalog
                 Id = entry.Name,
                 Module = ModuleSpec.Read(block, root),
                 Tractor = TractorSpec.Read(block, root),
+                Laser = LaserSpec.Read(block, root),
                 Bay = BaySpec.Read(block, root),
                 Name = block.GetProperty("name"u8).GetString()!,
                 Mass = block.GetProperty("mass"u8).GetSingle(),
@@ -412,6 +416,10 @@ public sealed class BlockCatalog
             if (type.Tractor is not null && (type.Mount is null || type.Thrust != 0 || type.PowerDraw != 0))
                 throw new InvalidDataException($"{path}: {type.Id}: a tractor requires a non-thrust mount with active-only power");
 
+            // A laser draws its power only while it fires, through the flight model's laser share.
+            if (type.Laser is not null && (type.Mount is null || type.Thrust != 0 || type.PowerDraw != 0 || type.Tractor is not null || type.Module.Family != ModuleFamily.None))
+                throw new InvalidDataException($"{path}: {type.Id}: a mining laser is a mount with no thrust, tractor, module or standing power draw");
+
             // A bay is one box with one hatch, its facing: never a mount, a wedge or a part of the drone itself.
             if (type.Bay is not null && (type.Mount is not null || !type.BoxOnly || type.Drone || type.Thrust != 0 || type.Tank != FuelKind.None || type.Cargo != 0 || type.Core))
                 throw new InvalidDataException($"{path}: {type.Id}: a drone bay is a box-only ship block and nothing else");
@@ -419,9 +427,9 @@ public sealed class BlockCatalog
                 continue;
             if (spec.Side is < 1 or > FaceMounts.MaxSide || spec.Depth is < 1 or > FaceMounts.MaxDepth)
                 throw new InvalidDataException($"{path}: {type.Id}: a mount's side is 1 to {FaceMounts.MaxSide} tenths of a cell and its depth 1 to {FaceMounts.MaxDepth}");
-            if (!(type.Thrust > 0 || type.Tractor is not null || type.Module.Family != ModuleFamily.None) || type.Core || type.Sensor || type.Charting || type.Ftl != FtlKind.None || type.Tank != FuelKind.None
+            if (!(type.Thrust > 0 || type.Tractor is not null || type.Laser is not null || type.Module.Family != ModuleFamily.None) || type.Core || type.Sensor || type.Charting || type.Ftl != FtlKind.None || type.Tank != FuelKind.None
                 || (type.Module.Family != ModuleFamily.None && (type.Thrust != 0 || type.Tractor is not null)) || type.Crew != 0 || type.MaxSide != 0 || type.SizeRules.Count != 0 || type.BoxOnly)
-                throw new InvalidDataException($"{path}: {type.Id}: only a thrust part, tractor or module scanner mounts on a face, and it has no size rules, maxSide or boxOnly");
+                throw new InvalidDataException($"{path}: {type.Id}: only a thrust part, tractor, mining laser or module scanner mounts on a face, and it has no size rules, maxSide or boxOnly");
             if (spec.LastBlockVersion is < 4 or >= BoxDesign.FormatVersion)
                 throw new InvalidDataException($"{path}: {type.Id}: blockThrough must name a design file version from 4 up to the one before {BoxDesign.FormatVersion}");
             if (!types.TryGetValue(spec.LegacyBlock, out var legacy) || legacy.Mount is not null)
@@ -536,6 +544,9 @@ public sealed class HullDesign
         var tractors = new List<int>();
         for (var i = 0; i < mounts.Length; i++) if (mounts[i].Type.Tractor is not null) tractors.Add(i);
         Tractors = tractors.ToArray();
+        var lasers = new List<int>();
+        for (var i = 0; i < mounts.Length; i++) if (mounts[i].Type.Laser is not null) lasers.Add(i);
+        Lasers = lasers.ToArray();
         MountOffsets = new Vector3[mounts.Length];
         MountHalfExtents = new Vector3[mounts.Length];
         for (var i = 0; i < mounts.Length; i++)
@@ -719,6 +730,9 @@ public sealed class HullDesign
 
     /// <summary>Tractor mount indices, prepared with the immutable design off the tick.</summary>
     public int[] Tractors { get; }
+
+    /// <summary>Mining laser mount indices, in mount order, prepared with the immutable design off the tick.</summary>
+    public int[] Lasers { get; }
 
     /// <summary>The immutable design pivot in grid units.</summary>
     public Double3 Pivot => _boxes.Center;

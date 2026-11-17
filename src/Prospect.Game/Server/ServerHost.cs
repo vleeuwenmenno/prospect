@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using System.Security.Cryptography;
 using Prospect.Engine.Diagnostics;
 using Prospect.Engine.Net;
@@ -348,6 +349,15 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public readonly long[] DroneScanSent = new long[DroneScanRecordRules.KnowledgePerOwner];
         public int DroneScanCursor;
 
+        /// <summary>The action groups the pilot fires (zero for none) and the aim: the flown hull's packed handle, the camera's offset from it and the ray.</summary>
+        public ushort FireGroups;
+        public uint AimHull;
+        public Vector3 AimOffset, AimDirection;
+
+        /// <summary>Whether the last beams sent held any, whether the last ore chunks sent held any, and which hull's group changes, at which revision, were sent last.</summary>
+        public bool BeamsSent, OreChunksSent;
+        public uint GroupsHull, GroupsRevision;
+
         public void Reset()
         {
             Array.Clear(Visible);
@@ -426,6 +436,11 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             DroneReply = DroneReply.None;
             DroneReplyCount = 0;
             BaysHull = BaysRevision = BaysReply = 0;
+            FireGroups = 0;
+            AimHull = 0;
+            AimOffset = AimDirection = default;
+            BeamsSent = OreChunksSent = false;
+            GroupsHull = GroupsRevision = 0;
         }
     }
 
@@ -473,6 +488,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
     private readonly FreeContainers _containers = new();
     private readonly TractorSimulation _tractors = new();
     private readonly ContainerSimulation _containerSimulation;
+    private readonly OreChunkSimulation _chunkSimulation;
     private readonly RockImpulses _impulses = new();
     private readonly string _name;
 
@@ -659,6 +675,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             _rockEditRadii = new float[_content.RockEdits.MaxEditedRocks];
             _rocks.Edits = _rockEdits;
             _containerSimulation = new ContainerSimulation(Galaxy);
+            _chunkSimulation = new OreChunkSimulation(Galaxy);
             _hulls.BlockStates.CargoEjection = EjectDestroyedRack;
 
             // Room for the largest design the editor can add, taken now: a new design costs the tick no memory.
@@ -939,6 +956,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             _participants[i] = _hulls.IsAliveAt(i) ? _hulls.HandleAt(i) : default;
         _field.BeginRound();
         _tractors.Plan(_containers, _content, _field, CargoScratch, _tick);
+        PlanLasers();
         for (var i = 0; i < participantCount; i++)
         {
             var handle = _participants[i];
@@ -951,14 +969,19 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         }
 
         _tractors.Pull(_containers, _content, _field, CargoScratch, _tick);
+        FireLasers();
         TickCarries();
         _containerSimulation.Step(_containers, _content, _field, _rocks, _tick);
+        _chunkSimulation.Step(_chunks, _content, _field, _rocks, _tick);
         TickWreckage();
         SendCargo();
         SendBays();
         GatherSensors();
         CleanupFreeContainers();
         SendFreeContainers();
+        CleanupOreChunks();
+        SendOreChunks();
+        SendActionGroups();
         foreach (var connection in _connections)
             if (connection.State == ConnectionState.Active && connection.CatalogueReady) UpdateVisibility(connection, tick);
 
@@ -1006,6 +1029,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         }
 
         SendRockEdits();
+        SendLaserBeams();
         TickExploration(tick);
         foreach (var connection in _connections)
             if (connection.State == ConnectionState.Active) { SendExploration(connection); SendModules(connection); SendDroneScans(connection); }
@@ -1289,6 +1313,14 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
             case MessageId.JettisonCargo when channel == NetChannel.Reliable:
                 if (JettisonCargoMessage.TryRead(ref reader, out var cargo))
                     ReleaseCargo(connection, cargo.Hull, cargo.Rack, cargo.Index, cargo.Tick, cargo.Mode);
+                break;
+            case MessageId.LaserAim when channel == NetChannel.Reliable:
+                if (LaserAimMessage.TryRead(ref reader, out var aim))
+                    ReceiveLaserAim(connection, aim);
+                break;
+            case MessageId.SetActionGroup when channel == NetChannel.Reliable:
+                if (SetActionGroupMessage.TryRead(ref reader, out var setGroup))
+                    ReceiveSetActionGroup(connection, setGroup);
                 break;
             case MessageId.RockScrape when channel == NetChannel.Reliable:
                 if (RockScrapeRequest.TryRead(ref reader, out var scrape))

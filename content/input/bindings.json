@@ -41,7 +41,17 @@
     "SurveyRock": ["Key:Semicolon"],
     "DetailedScan": ["Key:Apostrophe"],
     "ToggleScanHologram": ["Key:Backslash"],
-    "DebugScrape": ["Key:F10"]
+    "DebugScrape": ["Key:F10"],
+    "ActionGroup1": ["Key:Number1"],
+    "ActionGroup2": ["Key:Number2"],
+    "ActionGroup3": ["Key:Number3"],
+    "ActionGroup4": ["Key:Number4"],
+    "ActionGroup5": ["Key:Number5"],
+    "ActionGroup6": ["Key:Number6"],
+    "ActionGroup7": ["Key:Number7"],
+    "ActionGroup8": ["Key:Number8"],
+    "ActionGroup9": ["Key:Number9"],
+    "ActionGroup0": ["Key:Number0"]
   },
   "axes": {
     "Strafe": [{ "negative": "Key:A", "positive": "Key:D" }, { "axis": "Pad:LeftX" }],

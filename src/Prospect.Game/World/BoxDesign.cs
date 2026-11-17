@@ -156,8 +156,11 @@ public sealed class BoxDesign
         return new System.Collections.ObjectModel.ReadOnlyDictionary<string, double>(result);
     }
 
-    /// <summary>The version <see cref="Write"/> writes: 2 added sizes, 3 shapes, 4 facings, 5 face mounts for thrusters and 6 for module scanners.</summary>
-    public const int FormatVersion = 6;
+    /// <summary>
+    /// The version <see cref="Write"/> writes: 2 added sizes, 3 shapes, 4 facings, 5 face mounts for thrusters, 6 for
+    /// module scanners and 7 a mount's action group (<c>"group"</c>, written only when set; older files have none).
+    /// </summary>
+    public const int FormatVersion = 7;
 
     /// <summary>
     /// Loads legacy unit cells, version 2 boxes, version 3 shapes, version 4 facings, version 5 face mounts or version
@@ -253,7 +256,14 @@ public sealed class BoxDesign
                     {
                         var place = entry.GetProperty("at"u8);
                         if (place.GetArrayLength() != 2) throw new FormatException("expected two face positions");
-                        mounts.Add(new DesignMount(entry.GetProperty("on"u8).GetInt32(), Facings.Parse(entry.GetProperty("face"u8).GetString()), place[0].GetInt32(), place[1].GetInt32(), catalog.Get(entry.GetProperty("type"u8).GetString()!)));
+                        var group = 0;
+                        if (entry.TryGetProperty("group"u8, out var listedGroup))
+                        {
+                            if (version < 7) throw new FormatException("an action group requires version 7");
+                            group = listedGroup.GetInt32();
+                            if (!ActionGroups.Valid(group)) throw new FormatException($"action group {group} is not 0 to {ActionGroups.Count}");
+                        }
+                        mounts.Add(new DesignMount(entry.GetProperty("on"u8).GetInt32(), Facings.Parse(entry.GetProperty("face"u8).GetString()), place[0].GetInt32(), place[1].GetInt32(), catalog.Get(entry.GetProperty("type"u8).GetString()!), (byte)group));
                     }
                     catch (Exception e) when (e is InvalidDataException or InvalidOperationException or KeyNotFoundException or FormatException or OverflowException)
                     { throw new InvalidDataException($"{source}: mount {at}: {e.Message}", e); }
@@ -533,7 +543,9 @@ public sealed class BoxDesign
         foreach (var m in _mounts)
         {
             w.WriteStartObject(); w.WriteString("type"u8, m.Type.Id); w.WriteNumber("on"u8, m.Parent); w.WriteString("face"u8, Facings.Name(m.Face));
-            w.WriteStartArray("at"u8); w.WriteNumberValue(m.U); w.WriteNumberValue(m.V); w.WriteEndArray(); w.WriteEndObject();
+            w.WriteStartArray("at"u8); w.WriteNumberValue(m.U); w.WriteNumberValue(m.V); w.WriteEndArray();
+            if (m.Group != ActionGroups.None) w.WriteNumber("group"u8, m.Group);
+            w.WriteEndObject();
         }
         w.WriteEndArray(); w.WriteEndObject();
     }

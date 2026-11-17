@@ -838,6 +838,7 @@ internal sealed partial class WorldView
             _damage.Clear();
             _sparks.Clear();
             _freeVisuals.Clear();
+            _oreVisuals.Clear();
             TargetContainer = 0;
             _thrust.Clear();
             _rockExhaust.Clear();
@@ -860,6 +861,7 @@ internal sealed partial class WorldView
         }
 
         UpdateFreeContainers(snapshot);
+        UpdateOreChunks(snapshot);
         ApplyRockDeltas(snapshot);
         _time += dt;
 
@@ -974,7 +976,12 @@ internal sealed partial class WorldView
         }
 
         if (!(inputEnabled && !editing && Mode == ViewMode.Pilot))
+        {
             _align.Clear();
+            // Only the pilot view fires; a scripted capture keeps its last aim so another view can watch the beam.
+            if (ScriptedFireGroup == 0) StopFiring(bridge);
+            else if (!editing && Mode == ViewMode.Pilot) UpdateFiring(snapshot, bridge, false, false);
+        }
         if (inputEnabled && !editing && Mode == ViewMode.Pilot)
         {
             controls.Strafe = _actions.Axis(_devices, InputAxis.Strafe, keyboard);
@@ -1043,7 +1050,11 @@ internal sealed partial class WorldView
             // The temporary debug scrape: held, it scrapes the rock at the view's centre. The server takes it in local games only.
             UpdateDebugScrape(bridge, dt, _actions.Held(_devices, InputAction.DebugScrape, keyboard), snapshot.Content.RockEdits.DebugRadiusMm);
 
-            var alignHeld = _actions.Held(_devices, InputAction.AlignToView, keyboard) || AlignLockOn;
+            // With a group on, the align button fires instead (WorldView.Lasers.cs); the lock still aligns. Firing
+            // needs the captured pointer and no jump, as aligning does; free look aims with the view.
+            var fireBlocked = _devices.SuppressMouse || Own.Jump != JumpPhase.None || Own.Order.Kind == OrderKind.Jump;
+            var mayAlign = UpdateFiring(snapshot, bridge, keyboard, fireBlocked);
+            var alignHeld = (mayAlign && _actions.Held(_devices, InputAction.AlignToView, keyboard)) || AlignLockOn;
             var nose = Vector3.Transform(-Vector3.UnitZ, OwnOrientation);
             if (_align.Update(alignHeld && !alignBlocked, alignBlocked, nose, _lookDirection))
                 controls.Align = true;
@@ -1461,6 +1472,8 @@ internal sealed partial class WorldView
 
         DrawFreeContainers(frameIndex, snapshot, camera);
         DrawTractorBeams(frameIndex, snapshot, camera);
+        DrawLaserBeams(frameIndex, snapshot, camera);
+        DrawOreChunks(frameIndex, snapshot, camera);
         _scene.AddSparks(frameIndex, _sparks.Expand(camera, _right, _up, _forward, aspect, _tanHalfFov, _viewport.Y, snapshot.ServerTickPrecise + alpha, _collision));
         var f = 1f / _tanHalfFov;
         var sunColor = galaxy.StarClasses[Sector.StarClass].Color * 1.7f;
@@ -3782,6 +3795,13 @@ internal sealed partial class WorldView
     private string? _capturePart;
     private GridSize _capturePartSize;
 
+    // --open edit-laser-group: once the held mining laser's ghost has room, the harness clicks it into place through the
+    // editor's own Click, lets go of the part and selects what it placed, so the details panel shows the group selector.
+    private bool _capturePlaceThenSelect;
+
+    /// <summary>For a capture (<c>--open edit-laser-group</c>): place the held part by the editor's click, then select it.</summary>
+    internal void PlaceHeldPartForCapture() => _capturePlaceThenSelect = true;
+
     private bool _captureMount;
     private bool _captureIon;
 
@@ -4140,6 +4160,16 @@ internal sealed partial class WorldView
         if (_captureGhost)
         {
             HoldCaptureGhost();
+            if (_capturePlaceThenSelect && Editor.HasMountGhost && Editor.GhostCheck == DraftEdit.Done)
+            {
+                Editor.Click();
+                _capturePlaceThenSelect = false;
+                _captureGhost = false;
+                Editor.StopPlacing();
+                if (Editor.Draft is { } placed)
+                    Editor.SelectMount(placed.Mounts.Length - 1, false);
+            }
+
             if (_captureRings && !Editor.RotatingPart && GhostRings(out _ringMiddle, out _ringRadius))
                 Editor.BeginPartRotation();
             GlideEditorCamera(dt);

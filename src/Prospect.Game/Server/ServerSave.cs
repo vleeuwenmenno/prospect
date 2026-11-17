@@ -346,6 +346,7 @@ public sealed partial class ServerHost
         RestoreDroneScans(world);
 
         var entities = new HashSet<ulong>(world.HullCount);
+        var restoredHulls = new HullHandle[world.HullCount];
         var blocks = 0;
         var losses = 0;
         var tanks = 0;
@@ -366,6 +367,8 @@ public sealed partial class ServerHost
                 throw new InvalidDataException($"Saved hull {i} does not hold together.");
 
             var handle = _hulls.Restore(saved.Owner, saved.Design, design, saved.State);
+            restoredHulls[i] = handle;
+            ClearActionGroups(handle.Index);
             ref var info = ref _hulls.Info(handle.Index);
             if (!_hulls.BlockStates.TryRestore(info.BlockState, world.Losses.AsSpan(losses, saved.LossCount), world.HitPoints.AsSpan(blocks, saved.Blocks), saved.HitTotal, out var error))
                 throw new InvalidDataException($"Saved hull {i}: {error}.");
@@ -468,6 +471,7 @@ public sealed partial class ServerHost
         }
 
         RestoreRockEdits(world);
+        RestoreMining(world, restoredHulls);
         _nextPlayerId = world.NextOwnerId;
         _nextEntityId = world.NextEntityId;
         _tick = world.NextWorldTick;
@@ -574,6 +578,7 @@ public sealed partial class ServerHost
         buffer.TankCount = 0;
         buffer.CargoCount = 0;
         buffer.BayCount = 0;
+        buffer.ActionGroupCount = 0;
         buffer.CargoRules = SavedCargoRules.Of(_content);
         buffer.FreeContainerCount = _containers.Items.Length;
         buffer.NextContainerId = _containers.NextId;
@@ -638,7 +643,13 @@ public sealed partial class ServerHost
                 buffer.BayStocked[buffer.BayCount] = (byte)stocked;
                 buffer.BayRebuild[buffer.BayCount++] = stocked >= capacity ? 0 : SavedRebuild(page, b);
             }
+
+            CaptureActionGroups(buffer, i, buffer.HullCount - 1);
         }
+
+        buffer.OreChunkCount = _chunks.Items.Length;
+        buffer.NextOreChunkId = _chunks.NextId;
+        _chunks.Items.CopyTo(buffer.OreChunks);
 
         // An owner whose hull went while they were away is saved as flying nothing: they get a drone when let in.
         for (var i = 0; i < _ownerCount; i++)
@@ -910,6 +921,7 @@ public sealed partial class ServerHost
 
         _hulls.Info(handle.Index).Entity = entity != 0 ? entity : _nextEntityId++;
         AttachBays(handle);
+        ClearActionGroups(handle.Index);
         return handle;
     }
 

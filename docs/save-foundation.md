@@ -525,6 +525,20 @@ Generation 8 and codec 5 made older worlds incompatible; they are refused withou
   are not: a load starts them fresh.
 - Layouts before 19 are refused without migration.
 
+## Ore chunks and action groups (codec 20)
+
+- A save holds every loose ore chunk and every hull's action group changes made without a rebuild.
+- They follow the rock edits as one section: chunk count, next chunk id, change count, then the records.
+- A chunk is the wire's record (77 bytes: id, pose, spin, resource, grade, mass) and its birth and age (16 bytes).
+- A change is the hull's index in the save, the laser's place in its design's laser list and the group (6 bytes).
+- Limits: `OreChunks.Capacity` (256) chunks; 64 changes a saved hull.
+- Decoding checks structure: ids below the counter and unique, clocks within the world's, figures finite, a hull
+  the save has, each part once.
+- Load rule (`RestoreMining`): every chunk of an ore this galaxy has, every change of a laser the restored hull's
+  design has and a group it may take. Otherwise the save is refused whole.
+- Beams, strokes and ore not yet broken off are not saved: a laser starts over after a load.
+- `mining.json` is in the save identity. Layouts before 20 are refused without migration.
+
 ## Tractor acquisition (codec 15)
 
 - Free-body position, velocity, orientation and payload are part of the 110-byte saved record.

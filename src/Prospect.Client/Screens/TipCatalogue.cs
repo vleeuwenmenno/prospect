@@ -56,8 +56,11 @@ internal static class TipTriggers
     /// <summary>The ship being flown has an asteroid locator, in the flight or command view: fired when it first comes to have one.</summary>
     public const string LocatorReady = "locatorReady";
 
+    /// <summary>The ship being flown has an action group (a part assigned to a number key), in the flight or command view: fired when it first comes to have one.</summary>
+    public const string ActionGroupReady = "actionGroupReady";
+
     /// <summary>Every trigger, for validation.</summary>
-    public static readonly string[] All = [MapOpened, CommandViewOpened, EditorOpened, ScanAvailable, UnchartedSector, ShieldOffline, EnergyLow, DroneEditHint, InterfaceOpened, GasScannerReady, AsteroidScannerReady, LocatorReady];
+    public static readonly string[] All = [MapOpened, CommandViewOpened, EditorOpened, ScanAvailable, UnchartedSector, ShieldOffline, EnergyLow, DroneEditHint, InterfaceOpened, GasScannerReady, AsteroidScannerReady, LocatorReady, ActionGroupReady];
 }
 
 /// <summary>What a tip is placed against: the screen, a panel the editor or flight view draws, or a point.</summary>
@@ -345,7 +348,7 @@ internal sealed class TipCatalogue
         foreach (var binding in actions.Bindings(action))
         {
             if (binding.Device == InputBinding.Source.Key && names.Count < 2)
-                names.Add(Spaced(binding.DisplayName).ToUpperInvariant());
+                names.Add(Spaced(ActionGroupKeys.Short(binding.DisplayName)).ToUpperInvariant());
         }
 
         if (names.Count == 0)

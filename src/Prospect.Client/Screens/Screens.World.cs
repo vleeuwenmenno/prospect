@@ -139,6 +139,7 @@ internal sealed partial class ScreenHost
         var world = _app.World;
         UpdateExploration(snapshot, world);
         UpdateModules(snapshot, world);
+        UpdateActionGroups(snapshot, world);
         UpdateFuelCallout(world);
         UpdateCargoCallout(snapshot, world);
         // While the ship editor is shown its own keys apply: the map and the data sheet wait until it closes.
@@ -177,6 +178,9 @@ internal sealed partial class ScreenHost
             // for the whole list, the panel drops its ore and server lines (they are on the map and in the menu),
             // and if that is still not enough the list turns into one-line rows. A closed panel takes no room.
             var limit = pilot > 0.01f ? HudLayout.ConsoleTop(_ui.DisplaySize, Kit.Scale) : _ui.DisplaySize.Y - Kit.Px(Theme.Space5);
+            // The action group strip above the console keeps the party list off its row where the two share width.
+            if (_actionGroups.Count > 0 && ActionGroupsRect(out _) is var groupsRow && groupsRow.Spans(Kit.Px(HudLayout.Margin), HudLayout.ColumnRight(_ui.DisplaySize, Kit.Scale)))
+                limit = Math.Min(limit, groupsRow.Top - Kit.Px(Theme.Space2));
             var (sectorBottom, compactSector, cards) = SectorInfoToggle.Column(Kit.Scale, _sectorInfo.Open,
                 SectorPanelHeight(world, false), SectorPanelHeight(world, true), PartyHudCardsHeight(snapshot), limit);
             _columnBottom = HudLayout.PartyRows(sectorBottom, limit, cards, snapshot.Social.Invitation.Player != 0,
@@ -208,6 +212,7 @@ internal sealed partial class ScreenHost
             DrawContainerHover(snapshot, world);
             DrawScanStrip(draw, snapshot, world, 1f, WorldInputEnabled && (world.Mode == ViewMode.Command || (world.Mode == ViewMode.Pilot && _app.PointerReleased)));
             DrawModuleStrip(draw, snapshot, world, 1f);
+            DrawActionGroups(snapshot, world);
             if (pilot > 0.01f || world.TargetContainer != 0)
                 DrawTargetReadout(draw, snapshot, world, world.TargetContainer != 0 ? 1 : pilot);
             if (_sectorInfo.Open)

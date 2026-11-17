@@ -649,7 +649,7 @@ internal sealed partial class ScreenHost
             if (!_palette.ShowsCard(tuning, types, i))
                 continue;
             shown++;
-            DrawPartCard(i, type, figures[i], tuning.Compact(type), type.Module.Family != ModuleFamily.None || type.Tractor is not null || type.Bay is not null ? Kit.Px(ModuleCardHeight) : cardHeight, hull, editor);
+            DrawPartCard(i, type, figures[i], tuning.Compact(type), type.Module.Family != ModuleFamily.None || type.Tractor is not null || type.Laser is not null || type.Bay is not null ? Kit.Px(ModuleCardHeight) : cardHeight, hull, editor);
             Kit.Space(Theme.Space1);
         }
 
@@ -907,6 +907,13 @@ internal sealed partial class ScreenHost
             return;
         }
 
+        if (type.Laser is { } laser)
+        {
+            DrawLaserCard(draw, at, laser, figures, left, room);
+            ImGui.PopID();
+            return;
+        }
+
         if (type.Bay is { } bay)
         {
             DrawBayCard(draw, at, bay, figures, left, room);
@@ -969,6 +976,26 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>
+    /// A mining laser's card below its name, laid out as a tractor's: what it is, its quality as a badge in the tier's
+    /// colour, the mass, then how far it reaches and how wide and fast it cuts, and what it draws while firing and how
+    /// far off its face it may aim. Every figure is the block's own at its quality.
+    /// </summary>
+    private void DrawLaserCard(ImDrawListPtr draw, float2 at, LaserSpec spec, in PartFigures figures, float left, float room)
+    {
+        var tier = ModuleLook.Current.Tier(spec.Quality);
+        Kit.ClippedText(draw, _ui.Sans, Theme.FontCaption, at + new float2(left, Kit.Px(21)), Theme.TextMute, "MINING LASER: CUTS ROCK"u8, room);
+        var badge = Kit.Measure(_ui.SansMedium, Theme.FontCaption, tier.Label);
+        var badgeMin = at + new float2(left, Kit.Px(36));
+        var badgeMax = badgeMin + badge + new float2(Kit.Px(8), Kit.Px(2));
+        draw.AddRectFilled(badgeMin, badgeMax, Kit.Color(tier.Rgb, 0.18f));
+        draw.AddRect(badgeMin, badgeMax, Kit.Color(tier.Rgb, 0.9f));
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, badgeMin + new float2(Kit.Px(4), Kit.Px(1)), tier.Rgb, tier.Label);
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(55)), Theme.TextDim, Kit.F($"{figures.Mass:0.##} T   FACE MOUNT"), room);
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(70)), Theme.Text, Kit.F($"RANGE {spec.Range:0} M   CUT {spec.CutRadius:0.##} M   {spec.CutRate:0.##} M/S"), room);
+        Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, at + new float2(left, Kit.Px(85)), Theme.Text, Kit.F($"DRAWS {spec.Power:0.##} MW   AIMS {spec.GimbalDegrees:0} DEG"), room);
+    }
+
+    /// <summary>
     /// A drone bay's card below its name, laid out as a tractor's: what it is, its quality as a badge in the tier's
     /// colour, the mass and hit points, then how many drones it keeps, launches at once and how long one takes to rebuild.
     /// </summary>
@@ -998,6 +1025,7 @@ internal sealed partial class ScreenHost
         PartRole.Shield => Kit.F($"{f.Shield:0} SHIELD   {f.Recharge:0.#}/S   DRAWS {f.PowerDraw:0.##} MW"),
         PartRole.Cargo => Kit.F($"{f.Cargo:0.#} u CARGO"),
         PartRole.Tractor => "AUTOMATIC CARGO PICKUP"u8,
+        PartRole.Laser => "CUTS ROCK"u8,
         PartRole.Crew => Kit.F($"{f.Crew:0} CREW"),
         PartRole.Drive => Kit.F($"CHARGES AT {f.FtlPower:0.#} MW"),
         PartRole.Core => Kit.F($"DRAWS {f.PowerDraw:0.##} MW"),
@@ -1198,10 +1226,19 @@ internal sealed partial class ScreenHost
             var mount = mounts[editor.SelectedMount];
             ClippedLine(_ui.SansMedium, Theme.FontSmall, Theme.Text, Kit.F($"{mount.Type.Name}"), width);
             ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"MOUNTED ON {boxes[mount.Parent].Type.Name}, {SideName((int)mount.Face)} FACE"), width);
-            ClippedLine(_ui.Mono, Theme.FontCaption, ExhaustOrange, FacingText(mount.Face), width);
-            ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"{mount.Type.Thrust:0.#} KN   {mount.Type.FuelBurn:0.####} KG/S   {mount.Type.Mass:0.###} T"), width);
+            if (mount.Type.Laser is { } laser)
+            {
+                ClippedLine(_ui.Mono, Theme.FontCaption, Theme.Text, Kit.F($"RANGE {laser.Range:0} M   CUT {laser.CutRadius:0.##} M"), width);
+                ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"{laser.CutRate:0.##} M/S   {laser.Power:0.##} MW   {mount.Type.Mass:0.###} T"), width);
+            }
+            else
+            {
+                ClippedLine(_ui.Mono, Theme.FontCaption, ExhaustOrange, FacingText(mount.Face), width);
+                ClippedLine(_ui.Mono, Theme.FontCaption, Theme.TextDim, Kit.F($"{mount.Type.Thrust:0.#} KN   {mount.Type.FuelBurn:0.####} KG/S   {mount.Type.Mass:0.###} T"), width);
+            }
             if (editor.IsMissing(mount.Parent))
                 Paragraph(Theme.Bad, "The ship has lost the block this sits on. Repair rebuilds both."u8, width);
+            DrawGroupSelector(editor, width);
             Kit.Space(Theme.Space2);
             if (EditorButton("##placemore"u8, "Place more of these"u8, new float2(width, Kit.Px(26)), editor.CanEdit))
                 editor.CopySelection();
@@ -1879,6 +1916,7 @@ internal sealed partial class ScreenHost
         PartRole.Shield => "Shield emitter"u8,
         PartRole.Cargo => "Cargo space"u8,
         PartRole.Tractor => "Tractor beam: pulls containers into reachable racks"u8,
+        PartRole.Laser => "Mining laser: cuts rock while its action group fires"u8,
         PartRole.Bay => "Drone bay: drones leave and dock through its hatch"u8,
         PartRole.Crew => "Crew quarters"u8,
         _ => "Structure and armour"u8,
