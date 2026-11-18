@@ -30,6 +30,7 @@
   "handoverSpeed": 1.0,
   "fetchSeconds": 600.0,
   "autoPickupWindow": 16,
+  "autoPickupMaxFetches": 4,
   "autoPickupRetrySeconds": 20.0,
   "autoPickupPauseSeconds": 30.0,
   "scans": {

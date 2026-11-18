@@ -160,6 +160,12 @@ public sealed record DroneRules
     /// </summary>
     public required int AutoPickupWindow { get; init; }
 
+    /// <summary>
+    /// Fetches one hull may have under way at once, containers and ore chunks together, so a hull never sends its whole
+    /// bay after dust. Auto pickup starts no fetch beyond it; a manual fetch still may.
+    /// </summary>
+    public required int AutoPickupMaxFetches { get; init; }
+
     /// <summary>Seconds a container that a fetch was refused for is left alone by one hull's auto pickup.</summary>
     public required float AutoPickupRetrySeconds { get; init; }
 
@@ -237,6 +243,7 @@ public sealed record DroneRules
             HandoverSpeed = Number("handoverSpeed", 0.01f, 50),
             FetchSeconds = Number("fetchSeconds", 1, 86400),
             AutoPickupWindow = Whole("autoPickupWindow", 1, FreeContainers.Capacity),
+            AutoPickupMaxFetches = Whole("autoPickupMaxFetches", 1, DroneBayRules.MaxFetches),
             AutoPickupRetrySeconds = Number("autoPickupRetrySeconds", 1, 3600),
             AutoPickupPauseSeconds = Number("autoPickupPauseSeconds", 0, 3600),
             Scans = DroneScanRules.Read(root.GetProperty("scans"u8), root.GetProperty("maxPerPlayer"u8).GetInt32()),
@@ -265,6 +272,9 @@ public static class DroneBayRules
 
     /// <summary>Orders the server can hold at once: one per hull below the ceiling.</summary>
     public const int MaxOrders = 256;
+
+    /// <summary>Fetches one hull may have under way at once, each with its own launches: the server's fixed storage.</summary>
+    public const int MaxFetches = 8;
 
     /// <summary>The way a bay's hatch faces: the block's facing, chosen when it was placed.</summary>
     public static BlockFacing Hatch(HullDesign design, int block) => design.Boxes[block].Facing;

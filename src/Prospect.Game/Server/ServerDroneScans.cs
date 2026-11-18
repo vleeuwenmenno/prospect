@@ -102,7 +102,7 @@ public sealed partial class ServerHost
         if (Galaxy.Interiors is null) return DroneReply.ScanUnavailable;
         if (_hulls.State(hull.Index).Jump != JumpPhase.None) return DroneReply.InTransit;
         ref var p = ref _bayPages[page];
-        if (p.Scan.Phase != DroneScanPhase.None || p.FetchPending > 0) return DroneReply.ScanBusy;
+        if (p.Scan.Phase != DroneScanPhase.None || PendingLaunches(ref p) > 0) return DroneReply.ScanBusy;
         if ((uint)rock.Index >= (uint)Galaxy.MaxAsteroidsPerSector) return DroneReply.NotFound;
         var sector = _rocks.Sector(rock.Sector);
         if (rock.Index >= sector.AsteroidCount) return DroneReply.NotFound;

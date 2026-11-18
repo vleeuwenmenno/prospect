@@ -314,7 +314,9 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   - Drones: `OrderTask.FetchOre`, in the one executor. `StartOreFetch` (`ServerOre.cs`) and the container fetch share
     `AssignCarriers`, `FetchBody`, `CarryGroup` and `EndFetch`; `TickOreCarries` hands the chunk to a beam
     (`TractorSimulation.OreReceiver`), which leads it in. "Pick up ores" is `BayPage.PickUpOres`: `TickAutoOre` calls
-    `StartOreFetch`, never a second path, and skips chunks a beam reaches, with no room, or refused lately.
+    `StartOreFetch`, never a second path, and skips chunks a beam reaches, with no room, or refused lately. Several
+    fetches run at once (see "Orders and drones", auto pickup), each chunk going to a beam no other running fetch
+    already targets (`OreReceiver`'s `busy` mounts); a chunk whose beam is busy waits at the hand-over point.
     `DroneSettingsMessage` carries both flags; whoever flips one sends the other as `BayView` has it
     (`DronePopup.ToggleOres`, `PlayerInputBridge.SetDroneSettings`).
   - Wire: protocol 70. `OreBinsMessage` (51, reliable, the flown hull's bins on change, at most 847 bytes, never in
@@ -512,9 +514,15 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   containers a tick from a rotating cursor and starts a fetch through `StartFetch`, the one body of the manual `/`
   fetch: never a second path. Skips containers a tractor or drones have, the owner may not take (`MayPickup`), out of
   range or sensor sight (`Covered`), reached by the hull's own beam (`TractorSimulation.Reaches`), or refused lately
-  (four-slot `AutoSkip`, `autoPickupRetrySeconds`). One fetch a hull at a time, counted by drones on a fetch order, so
-  a fetch that is over frees the next at once and the drones holding station go before any more are launched; a manual
-  recall pauses it (`autoPickupPauseSeconds`), a manual launch ends the pause. The second checkbox, "Pick up ores", is in
+  (four-slot `AutoSkip`, `autoPickupRetrySeconds`). Every free drone goes out, one fetch a body: it starts as many
+  fetches at once as the hull has drones free (those holding station first, then those still in the bays), up to
+  `autoPickupMaxFetches` (4) a hull, which is a fixed table of `DroneBayRules.MaxFetches` fetch records in `BayPage`
+  (`Fetches`: body, launches still to come, place, end). `FetchesOf` counts them and forgets a record whose drones are
+  all out and gone; `FreeCarriers` says whether a drone is left. Ore fetches share the cap, and the bins' room is
+  promised once: `TickAutoOre` takes off `OreOnItsWay` (chunks fetched or beam-held), so several fetches never promise
+  more than the bins hold. A manual `/` fetch runs beside them and is not capped. A fetch that is over frees its drones
+  at once, and the ones holding station go before any more are launched; a manual recall pauses it
+  (`autoPickupPauseSeconds`), a manual launch ends the pause. The second checkbox, "Pick up ores", is in
   "Ore collection (R4)". Tests:
   `DroneFetchTests` (auto pickup), `DronePopupTests`. Capture: `tools/prepare_drone_fetch_capture.py`, then
   `--open cargo --jettison 5 --drone-autopickup 3 --drone-popup` (scripted runs only); `--drone-ores <s>` turns
