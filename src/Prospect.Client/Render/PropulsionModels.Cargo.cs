@@ -29,6 +29,11 @@ internal sealed class RackLook
     public float Seam { get; init; }
     /// <summary>Depth of the framed rim band round the opening on the outer walls, in units.</summary>
     public float Rim { get; init; }
+    /// <summary>
+    /// Where the seam backing's inside face sits, as a share of the wall's thickness from its outer surface: what the
+    /// seams between the wall panels show. It is under one, so the panels stand proud of it and every seam is a groove.
+    /// </summary>
+    public float SeamBed { get; init; }
     /// <summary>Rim band RGB.</summary>
     public float[] RimPaint { get; init; } = [];
     /// <summary>Hazard stripe RGB (with <see cref="RimPaint"/> between them).</summary>
@@ -118,6 +123,9 @@ internal sealed class RackLook
         foreach (var thin in new[] { Wall, Jaw })
             if (!(thin > 0 && thin <= budget)) throw new InvalidDataException("A rack part is thicker than the clearance a container keeps.");
         if (!(RailHeight > 0 && Wall + RailHeight <= budget)) throw new InvalidDataException("A rack's rails reach into the containers' clearance.");
+        // The seam backing keeps to the wall's inner half, clear of the band the seams are cut through and of the
+        // inside face the panels end on, so it never shares a plane with either.
+        if (!(SeamBed is > .5f and < .95f)) throw new InvalidDataException("A rack's seam backing is not inside its wall.");
         if (PanelEvery is < 1 or > 16 || !(Seam > 0 && Seam <= .3f * PanelEvery) || !(Rim is > 0 and <= 2)
             || !(HazardWidth > 0 && HazardPitch >= 2 * HazardWidth && HazardPitch <= 4) || !(AccentSize is > 0 and <= 2)
             || !(LightLength is > 0 and <= 1) || !(LightWidth > 0 && LightWidth <= Rim) || !(Rail is > 0 and <= 1)
@@ -159,12 +167,13 @@ internal static partial class PropulsionModels
 
     /// <summary>
     /// A cargo rack: a closed box whose one open face is <c>box.Facing</c> (<see cref="OpenFaces"/>). Five walls of
-    /// panels with seams between them; round the opening, a band on the outer walls framed in the rim paint, with
-    /// hazard stripes along the long edges, light strips along the short ones, accent plates at the corners and the
-    /// walls' edges at the opening lit. Inside, rails run along the depth with guide lights at the opening, and a light
-    /// strip crosses the back wall. Every part lies within the rack's share of the clearance
-    /// (<see cref="RackLook.RackBudget"/>). A face a neighbour covers (<paramref name="closed"/>) is a plain wall; an
-    /// open face that is covered or carries a mount is closed by one. Built only on model workers.
+    /// panels standing on a recessed backing that shows in the seams between them; round the opening, a band on the
+    /// outer walls framed in the rim paint, with hazard stripes along the long edges, light strips along the short ones,
+    /// accent plates at the corners and the walls' edges at the opening lit. Inside, rails run along the depth with
+    /// guide lights at the opening, and a light strip crosses the back wall. Every part lies within the rack's share of
+    /// the clearance (<see cref="RackLook.RackBudget"/>). A face a neighbour covers (<paramref name="closed"/>) is a
+    /// plain wall; an open face that is covered or carries a mount is closed by one. No two faces of the model lie in
+    /// one plane facing the same way, which would make them flicker against each other. Built only on model workers.
     /// </summary>
     public static void BuildRack(in PartBox box, RackLook look, CargoCatalog cargo, List<MeshVertex> vertices, List<uint> indices, int closed = 0, int mounted = 0)
     {
@@ -178,6 +187,10 @@ internal static partial class PropulsionModels
         var budget = look.RackBudget * unit;
         var wall = MathF.Min(look.Wall * unit, budget);
         var skin = wall * .08f;
+        // How far a wall keeps inside the block's faces: two skins, so that the faces of one wall that close it off
+        // lie in planes of their own. A wall one skin inside ended in the same plane as the outside of the wall that
+        // meets it in a corner, and the two flickered there.
+        var edge = 2 * skin;
         var u = (a + 1) % 3;
         var v = (a + 2) % 3;
         // The opening's long edges run along `along`; the walls across it carry the hazard stripes.
@@ -185,6 +198,7 @@ internal static partial class PropulsionModels
         var across = along == u ? v : u;
         var rim = opening ? MathF.Min(look.Rim * unit, h[a]) : 0;
         var lit = wall * .5f;
+        var bed = wall * look.SeamBed;
         var wallTag = Paint(look.WallPaint);
         var seamTag = Paint(look.SeamPaint);
         var rimTag = Paint(look.RimPaint);
@@ -207,17 +221,30 @@ internal static partial class PropulsionModels
             if (f == open && opening) continue;
             var p = (b + 1) % 3;
             var q = (b + 2) % 3;
-            // The wall spans its face a skin short of the box's edges, and a side wall stops short of the lit edge at the
+            // The wall spans its face short of the box's edges, and a side wall stops short of the lit edge at the
             // opening, so no two faces lie in one plane.
-            var lo = c - h + new Vector3(skin);
-            var hi = c + h - new Vector3(skin);
+            var lo = c - h + new Vector3(edge);
+            var hi = c + h - new Vector3(edge);
             if (b != a && opening)
             {
                 if (s > 0) hi[a] = plane - lit; else lo[a] = plane + lit;
             }
-            // The backing: the inner half of the wall, whole, so the seams show it.
-            Span3(vertices, indices, On(f, wall * .5f, p, lo[p], q, lo[q]), On(f, wall, p, hi[p], q, hi[q]), seamTag);
-            if ((closed & 1 << f) != 0) continue;
+            // A wall a neighbour covers is one plain slab, its inside flush with the walls that carry panels.
+            if ((closed & 1 << f) != 0)
+            {
+                Span3(vertices, indices, On(f, skin, p, lo[p], q, lo[q]), On(f, wall, p, hi[p], q, hi[q]), seamTag);
+                continue;
+            }
+            // The seam backing: the floor the seams show, a skin inside the panels' edges and ending on an inside face
+            // of its own, so no face of it shares a plane with the panels, the band or the lit rim. Ended level with
+            // the panels' insides, it lay in their plane and the two flickered in stripes wherever they overlapped.
+            var bedLo = c - h + new Vector3(edge + skin);
+            var bedHi = c + h - new Vector3(edge + skin);
+            if (b != a && opening)
+            {
+                if (s > 0) bedHi[a] = plane - lit - skin; else bedLo[a] = plane + lit + skin;
+            }
+            Span3(vertices, indices, On(f, bed - skin, p, bedLo[p], q, bedLo[q]), On(f, bed, p, bedHi[p], q, bedHi[q]), seamTag);
             // The part of the face that is panels: all of it, less the rim band on a side wall.
             if (b != a && rim > 0)
             {
@@ -226,15 +253,17 @@ internal static partial class PropulsionModels
             Panels(vertices, indices, look, unit, f, p, q, lo, hi, skin, wall, wallTag, On);
             if (b == a || rim <= 0) continue;
 
-            // The rim band: framed, short of the lit edge in the opening's plane.
+            // The rim band: framed, short of the lit edge in the opening's plane. It and its details stop short of the
+            // wall's edges, clear of the faces of the walls that meet this one in a corner.
             var other = b == along ? across : along;
-            var extent = h[other] - skin;
+            var extent = h[other] - edge;
             var bandLo = plane - s * rim;
             var bandHi = plane - s * lit;
             var stripe = wall * .3f;
             Span3(vertices, indices, On(f, skin + stripe, a, bandLo, other, c[other] - extent), On(f, wall, a, bandHi, other, c[other] + extent), rimTag);
-            // The walls' edges at the opening glow: the lit rim.
-            Span3(vertices, indices, On(f, skin, a, plane - s * lit, other, c[other] - extent), On(f, wall, a, plane, other, c[other] + extent), lightTag);
+            // The walls' edges at the opening glow: the lit rim, which stops a wall's own skin short of the block's face
+            // like every other part, so no face of the model lies in one of the block's own planes.
+            Span3(vertices, indices, On(f, skin, a, plane - s * lit, other, c[other] - extent), On(f, wall, a, plane - s * edge, other, c[other] + extent), lightTag);
             var normal = Unit(b) * ((f & 1) == 0 ? 1f : -1f);
             var middle = (bandLo + bandHi) * .5f;
             var accent = MathF.Min(look.AccentSize * unit, MathF.Min(MathF.Abs(bandHi - bandLo), extent)) * .5f;
@@ -284,7 +313,7 @@ internal static partial class PropulsionModels
     private delegate Vector3 FacePoint(int f, float depth, int p, float atP, int q, float atQ);
 
     // Wall panels over the box lo..hi on face f (in-plane axes p and q), from skin to the full wall depth, with seams
-    // of the backing between them every few units.
+    // between them every few units that show the recessed backing through them.
     private static void Panels(List<MeshVertex> vertices, List<uint> indices, RackLook look, float unit, int f, int p, int q,
         Vector3 lo, Vector3 hi, float skin, float wall, float tag, FacePoint on)
     {

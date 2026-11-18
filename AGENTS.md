@@ -101,10 +101,13 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   placement by `OpenFaces.Choose` (`Prospect.Game`, the one rule for racks, bay hatches and hopper intakes: away from
   what it is set against; with nothing, up) through `ShipEditor.GhostFacing`, mirrored with it. Design file 10;
   an older file's racks take that rule on load, or, when that face is touched or mounted, the first free face in face
-  order (`BoxDesign.OpenRacks`). The model (`BuildRack`): panelled walls, a rim band round the opening with hazard
+  order (`BoxDesign.OpenRacks`). The model (`BuildRack`): panelled walls on a recessed seam backing (`seamBed`, a share
+  of the wall's thickness) that shows through the seams between them, a rim band round the opening with hazard
   stripes, light strips, accent corners and lit edges, rails and lights inside. The clearance is split
   (`RackLook.RackBudget`, `RackLook.DetailShare`): rack parts take the outer half of a one-unit container's, a
-  container's details the inner half of its own; `RackModelTests` and `ContainerModelTests` hold both.
+  container's details the inner half of its own; `RackModelTests` and `ContainerModelTests` hold both. No two faces
+  of a rack or a container lie in one plane facing the same way unless they are painted alike: those fight for the
+  pixel, which is what an empty rack's walls did in stripes. `ModelFaces.Fight` in the tests holds it.
   Mag-lock jaws are per container (`PartModels.TryGetClamp`, keyed by the rack's back face), their lights a model of
   their own lit by the container's stage (`CargoMotion`).
   A container (`PropulsionModels.ContainerModel`, one model for racked and free ones, per size and resource, built
