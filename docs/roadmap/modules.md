@@ -186,6 +186,20 @@ Evaluator version is 18; protocol 65; generation 8; save codec 18. Older incompa
   if no face is free. Old saved worlds are refused (save layout 18).
 - The sector scanner (`charting`) and the passive `sensor` stay blocks for now.
 
+## Decided: advanced locator
+
+Decided 2026-11-18, not built yet.
+
+- An advanced locator is a second locator part in the editor's Sensors tab: heavier, with more power draw.
+- A ship carries one kind of locator, never both: the editor refuses the second kind and says why, and a design
+  with both is refused wherever designs are checked.
+- Its pulse takes a filter: a diameter range and the main ores to look for. Only matching rocks are reported, so
+  the pulse's candidate limit is spent on rocks the player wants.
+- Each of its marks shows the rock's diameter. The basic locator still reports no size.
+- Clicking its LOCATOR chip opens a popup, as the DRONES chip does: the pulse button and the filter.
+  The basic locator's chip pulses as before.
+- Range, scan time and cooldown stay the basic locator's; the extra is the filter and the diameter.
+
 ## Open
 
 - Whether the sector scanner (`charting`) and the passive `sensor` also become face mounts. Not decided: they stay blocks.
