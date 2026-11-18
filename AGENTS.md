@@ -443,7 +443,8 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   (`HomeSlot`, recall phase `RecallFromAfar`), and only one drone of a bay lines up at a time (`LaneTaken`).
   Tests: `DroneFlightTests` (one per cause: moving hull, light load, crossing, far side, docking) and
   `DroneSteeringTests`; rules and numbers in `docs/roadmap/drones-mining.md`, "Drone flight as built". Wire: protocol 66, `DroneCommandMessage.Subject`,
-  `BayView.Fetching`, replies 11–20. Interface: `FetchContainer` (`/`) on the hovered free container
+  `BayView.Fetching`, replies 11–20; protocol 77 tells every client which drones carry which body
+  (`DroneCarryMessage` 52), sent only to those that may see both, and never saved. Interface: `FetchContainer` (`/`) on the hovered free container
   (`WorldView.HoverContainerId`) or the targeted one, the target panel's FETCH WITH DRONES button
   (`DrawFetchButton`), the chip's "N FETCHING". Tests: `DroneFetchTests`. Capture:
   `tools/prepare_drone_fetch_capture.py` then `--open cargo --jettison 5 --drone-fetch 12` (jettisoned at 6 m/s, out of
@@ -1391,13 +1392,20 @@ shield and the server know the design's blocks.
   by `WorldView.DrawWorkDroneGlow` with `MaterialLight`: the tractor array under the nose (brighter and pulsing while
   carrying) and the strips on the pods (brighter with `HullView.Thrust`). The eye, the lamps and the antenna tip are
   in the mesh. Dark on a wreck (owner zero) and under `glowPixels` on screen.
-- Carrying is read from what the client has, nothing new on the wire: nearness to a free container or ore chunk
-  within a carrier's reach (`WorkDroneLook.Carry`: tether, attach gap, drone radius; fades over `carryFadeMetres`).
+- Carrying is what the server says (`SessionSnapshot.DroneCarries`, `IsCarrying`): a drone on a fetch order holding on
+  to its body (`ServerHost.GatherCarries`), sent as `DroneCarryMessage` (52). Never guess it from nearness: a drone
+  parked beside a loose container carries nothing.
+- A carrying drone draws a beam, as a ship's tractor beam is drawn: `DroneCarryBeams.Fill` writes one `TractorInstance`
+  a carry, from the middle of the drone's belly tray (`PropulsionModels.WorkDroneArrayPoint`) to the body at the pose it
+  is drawn at (`FreeContainerVisuals.Pose`, `OreChunkVisuals.Pose`, both at the own hull's instant), into the scene's
+  tractor buffer in `WorldView.DrawTractorBeams`. `--drone-camera` captures show it.
 - The escape drone is a ship like any other and keeps its blocks.
-- Tests: `WorkDroneModelTests`. Check with `--open drones --drone-camera <metres>,<yaw>,<pitch>` (scripted runs only:
+- Tests: `WorkDroneModelTests`, `DroneCarryTests`. Check with `--open drones --drone-camera <metres>,<yaw>,<pitch>` (scripted runs only:
   the command camera held on the first work drone out, nearer than a player may come, pitch up to 80 for the
   underside; capture after 10 s), and carrying with `tools/prepare_drone_fetch_capture.py` then
-  `--open cargo --jettison 5 --drone-fetch 12 --drone-camera 12,120,-12 --capture-after 31`.
+  `--open cargo --jettison 5 --drone-fetch 12 --drone-camera 10,120,-8 --capture-after 16 --capture-count 7
+  --capture-every 2` (the beam is out from about 20 s until the beam takes the container, about 29 s), and an ore chunk
+  with `--open ore --drone-ores 3 --drone-camera 7,150,-22 --capture-after 36 --capture-count 5 --capture-every 3`.
 - Keep the draw path free of new `static readonly` fields with initialisers (`WorldView`, the look): the first read
   set the type up inside the frame that drew the first drone, 88 bytes on the render thread, which `make bench`'s
   drone scan run caught. The model's instance colour is `WorkDroneLook.Tint`, worked out when asked.

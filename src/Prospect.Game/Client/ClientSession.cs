@@ -190,6 +190,20 @@ public sealed class SessionSnapshot(GameContent content)
     public long OreChunkTick = -1;
 
     /// <summary>
+    /// The drones the server says carry a body, and which body: a loose container or an ore chunk, filtered by the
+    /// server's sensor coverage of both. A drone that is only near a body is not here.
+    /// </summary>
+    public readonly DroneCarry[] DroneCarries = new DroneCarry[DroneCarryMessage.MaxCarries];
+    public int DroneCarryCount;
+
+    /// <summary>Whether the server says hull <paramref name="drone"/> carries a body: it pulls one, wherever it is.</summary>
+    public bool IsCarrying(uint drone)
+    {
+        for (var i = 0; i < DroneCarryCount; i++) if (DroneCarries[i].Drone == drone) return true;
+        return false;
+    }
+
+    /// <summary>
     /// The flown hull's per-hull action group changes (<see cref="ActionGroupHull"/>, its packed handle): one entry a
     /// groupable part in the order of <see cref="HullDesign.Lasers"/>, <see cref="ActionGroups.NotOverridden"/> where
     /// the design's group stands. <see cref="ActionGroupRevision"/> moves on with each change the server reports.
@@ -484,6 +498,7 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
         snapshot.Bays = _state == SessionState.Active ? _bays : default;
         _world.PublishFreeContainers(snapshot);
         _world.PublishLasers(snapshot, tick);
+        _world.PublishDroneCarries(snapshot);
         snapshot.OwnIsDrone = _state == SessionState.Active && snapshot.HullCount > 0 && _world.OwnIsDrone;
         snapshot.Dampeners = _world.Dampeners;
         snapshot.PredictionError = _world.PredictionError;
@@ -623,6 +638,9 @@ public sealed class ClientSession : ITickHandler, ITransportHandler, IDisposable
                 break;
             case MessageId.OreChunks when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= OreChunkMessage.MaxWireSize:
                 _world.OnOreChunks(ref reader);
+                break;
+            case MessageId.DroneCarries when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= DroneCarryMessage.MaxWireSize:
+                _world.OnDroneCarries(ref reader);
                 break;
             case MessageId.ActionGroups when _state == SessionState.Active && channel == NetChannel.Reliable && payload.Length <= ActionGroupsMessage.MaxWireSize:
                 _world.OnActionGroups(ref reader);

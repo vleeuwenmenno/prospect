@@ -129,7 +129,6 @@
     "pulseRate": 1.2,
     "pulseDepth": 0.25,
     "thrustGlow": 1.4,
-    "carryFadeMetres": 3,
     "glowPixels": 4
   },
   "models": {

@@ -40,7 +40,8 @@ and the model shows it (frame, orange doors, a light). A Common bay keeps 4 dron
 a lost one in 90 s; tiers are content, only Common is in the palette. `.` launches every drone inside; they leave through the hatch and hold station 14 m out in front of it. `,` calls
 them home: they line up in front of the hatch, fly in and dock. A blocked hatch
 (a block or a part of the ship in front of it) refuses a launch, and the chip says why. Drones are small real hulls
-(drawn as the MD-7 utility drone, a model of their own: the tractor array under the nose brightens while carrying)
+(drawn as the MD-7 utility drone, a model of their own: while a drone carries a container or an ore chunk, the tractor
+array under its nose brightens and a beam, drawn as a ship's tractor beam is, runs from that array to the body)
 flown by the server: they collide, can be destroyed (the bay rebuilds them) and use power. A player has at most 12
 out. A jump calls them home; one still out when the ship leaves is lost. A saved world docks every drone.
 
