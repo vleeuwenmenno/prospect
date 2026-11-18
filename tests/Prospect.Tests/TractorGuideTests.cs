@@ -176,6 +176,71 @@ public sealed class TractorGuideTests
     }
 
     [Fact]
+    public void ABodyTheBeamLosesBehindTheHullIsPulledBackIntoViewInsteadOfDriftingUntilTheStall()
+    {
+        // A load the beam has lost used to be neither steered nor let go: it kept whatever speed it had until the stall
+        // dropped it, 4 s later (a turned hull, or a body passing behind the hull's own blocks). The trace had it sitting
+        // behind the core at 2.7 m/s with a frozen velocity for 240 ticks, then released and gone. The beam now pulls it
+        // back to its exit point, the one place it always sees, and the ordinary guide resumes from there.
+        var design = Ridge(); using var hulls = new HullStore();
+        var origin = Content.Galaxy.CenterOf(new(0, 100, 0));
+        var h = hulls.Create(1, 0, design, origin);
+        var field = new HullField(hulls, [design]); var bodies = new FreeContainers();
+        Assert.True(bodies.Add(Content, Body(design, origin, AboveTheRidge), out _));
+        var tractor = new TractorSimulation(); var scratch = new byte[8];
+        var contact = new ContainerSimulation(Content.Galaxy); var rocks = new RockField(Content.Galaxy);
+        var pivot = Pivot(design); var mount = design.Mounts[0];
+        var lostSight = false; var pulledWhileLost = false; var released = false; var stowed = -1;
+        var wasHeld = false;
+        for (var tick = 0; tick < 1800 && stowed < 0; tick++)
+        {
+            field.BeginRound();
+            tractor.Plan(bodies, Content, field, scratch, tick);
+            if (tick == 40)
+            {
+                // The hull comes about: the core, the generator and the battery now stand between the beam and the body.
+                hulls.State(h.Index).Orientation = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI);
+            }
+            field.Step(h.Index, default);
+            tractor.Pull(bodies, Content, field, scratch, tick);
+            contact.Step(bodies, Content, field, rocks, tick);
+            if (bodies.Items.IsEmpty) { stowed = tick; break; }
+            var item = bodies.Items[0];
+            released |= wasHeld && item.TractorHull == 0;
+            wasHeld = item.TractorHull == h.Packed;
+            if (!wasHeld) continue;
+            var state = hulls.State(h.Index);
+            var local = HullRotation.Rotate(item.Position.RelativeTo(state.Position), Quaternion.Conjugate(state.Orientation)) + pivot;
+            var sight = TractorReach.Container(design.Boxes, hulls.Blocks(h.Index), design.BlockSize, mount, local);
+            if (!sight)
+            {
+                lostSight = true;
+                // The beam keeps pulling -- and so keeps its hold on the body -- even though the emitter cannot see it.
+                if (tick > 40) pulledWhileLost |= item.TractorPowered;
+            }
+        }
+        Assert.True(lostSight, "the turn put the hull's own blocks in the beam's way");
+        Assert.False(released, "the beam keeps its load while it brings it back, instead of dropping it at the stall");
+        Assert.True(pulledWhileLost, "a body out of sight is steered back, not left drifting");
+        Assert.InRange(stowed, 0, 900);
+        Assert.Single(hulls.BlockStates.Cargo(hulls.Info(h.Index).BlockState).ToArray());
+    }
+
+    [Fact]
+    public void ASlowGlideAlwaysShowsProgress()
+    {
+        // The least shrink that counts as progress must never exceed what the approach rule closes in a tick, or a
+        // body creeping in at the final glide's 0.6 m/s would need two ticks to show any gain at all; the count of ticks
+        // without one must never reach the stall. A fast approach still needs the whole progressMetres to count.
+        var tuning = Content.Cargo.Tractor;
+        foreach (var speed in new[] { tuning.FinalSpeed, 1.2f, 3, 10 })
+            Assert.True(Approach.NeededProgress(speed, tuning.ProgressMetres) <= speed * HullSim.Dt,
+                $"{speed} m/s closes more than the shrink it must show");
+        Assert.Equal(tuning.ProgressMetres, Approach.NeededProgress(20, tuning.ProgressMetres));
+        Assert.Equal(0f, Approach.NeededProgress(0, tuning.ProgressMetres));
+    }
+
+    [Fact]
     public void TheApproachSpeedKeepsBrakingRoomInHand()
     {
         // The speed used to be exactly the speed that stops on the goal, so a single tick in which the pull was skipped

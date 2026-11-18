@@ -101,11 +101,11 @@ public sealed partial class TractorSimulation
 
     /// <summary>
     /// The chunks' pull, by the containers' rules: only power the flight step already billed, the hull's new pose
-    /// against where the chunk will be at the end of the tick, a stall lets it go for
-    /// <see cref="TractorGuidance.RetrySeconds"/>. A chunk whose centre reaches the point inside the intake is taken by
-    /// the hopper: its kilograms go into the bins (<see cref="BlockStateStore.AddOre"/>) and the chunk is gone. A
-    /// claim is checked for room every tick, so the bins take the whole chunk; should they ever take less, what is
-    /// left stays a smaller chunk, let go where it is, and no ore is lost.
+    /// against where the chunk will be at the end of the tick, a body lost from sight pulled back to the emitter's exit,
+    /// and a stall letting it go for <see cref="TractorGuidance.RetrySeconds"/>. A chunk whose centre reaches the point
+    /// inside the intake is taken by the hopper: its kilograms go into the bins (<see cref="BlockStateStore.AddOre"/>)
+    /// and the chunk is gone. A claim is checked for room every tick, so the bins take the whole chunk; should they ever
+    /// take less, what is left stays a smaller chunk, let go where it is, and no ore is lost.
     /// </summary>
     private void PullChunks(OreChunks chunks, GameContent content, HullField field, long tick)
     {
@@ -129,27 +129,44 @@ public sealed partial class TractorSimulation
             var local = Local(design, state, item.Position + item.Velocity * HullSim.Dt);
             var sight = final ? TractorReach.InRange(design.Boxes, alive, design.BlockSize, mount, local, guide.Slack)
                 : TractorReach.Container(design.Boxes, alive, design.BlockSize, mount, local, guide.Slack);
-            var viaExit = !final && !TractorReach.Clear(design.Boxes, alive, design.BlockSize, local, guide.Staging);
+            // A chunk the beam has lost is pulled back to the emitter's exit, where the beam sees it again; losing the
+            // range on the final leg takes it off that leg and it starts again there.
+            if (!sight && final) { final = false; item.TractorStage = 0; }
+            var viaExit = !final && (!sight || !TractorReach.Clear(design.Boxes, alive, design.BlockSize, local, guide.Staging));
             var target = final ? guide.Slot : viaExit ? guide.Exit : guide.Staging;
-            var left = Vector3.Distance(local, target) + (viaExit ? Vector3.Distance(guide.Exit, guide.Staging) : 0)
+            var delta = target - local;
+            var distance = delta.Length();
+            var left = distance + (viaExit ? Vector3.Distance(guide.Exit, guide.Staging) : 0)
                 + (final ? 0 : Vector3.Distance(guide.Staging, guide.Slot));
             var powered = info.TractorDemand > 0 && info.Power.Tractor >= info.TractorDemand;
-            if (!sight) item.TractorIdle++;
-            else if (powered)
+            var speed = Math.Min(Approach.Speed(spec.Acceleration, distance, tuning.ApproachBrakeShare),
+                final ? tuning.FinalSpeed : float.PositiveInfinity);
+            // The beam must keep bringing the body closer: a tick it spends without power, or one in which it pulls
+            // and the body still gains nothing on the way it is taking, counts against it.
+            var gained = false;
+            if (powered)
             {
-                if (item.TractorBest <= 0 || left < item.TractorBest - tuning.ProgressMetres) { item.TractorBest = Math.Max(left, 1e-6f); item.TractorIdle = 0; }
-                else item.TractorIdle++;
+                // A longer way (the exit route, or a goal that moved) starts the count again: a body sent round the
+                // hull's own blocks is coming in, not stalled.
+                if (item.TractorBest > 0 && left > item.TractorBest) item.TractorBest = left;
+                // The least shrink that counts is the configured distance, but never more than the approach rule lets
+                // the body close in a tick: a body creeping in on the final glide is coming in, not stalled.
+                if (item.TractorBest <= 0 || left < item.TractorBest - Approach.NeededProgress(speed, tuning.ProgressMetres))
+                {
+                    item.TractorBest = Math.Max(left, 1e-6f);
+                    gained = true;
+                }
             }
+            if (gained) item.TractorIdle = 0;
+            else item.TractorIdle++;
             if (item.TractorIdle >= tuning.StallTicks)
             {
                 item.RetryTick = tick + retry;
                 OreChunks.ClearTractor(ref item);
                 continue;
             }
-            if (!powered || !sight) continue;
+            if (!powered) continue;
 
-            var delta = target - local;
-            var distance = delta.Length();
             var offset = target - Pivot(design);
             var carrierVelocity = state.Velocity + HullRotation.Rotate(Vector3.Cross(state.AngularVelocity,
                 offset - hulls.Flight(h).CenterOfMass), state.Orientation);
@@ -168,7 +185,7 @@ public sealed partial class TractorSimulation
                 continue;
             }
 
-            Steer(ref item.Velocity, delta, distance, relative, state.Orientation, spec.Acceleration, final ? tuning.FinalSpeed : float.PositiveInfinity, tuning.ApproachBrakeShare);
+            Steer(ref item.Velocity, delta, distance, relative, state.Orientation, spec.Acceleration, speed);
         }
     }
 

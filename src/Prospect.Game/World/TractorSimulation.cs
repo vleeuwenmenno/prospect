@@ -124,7 +124,7 @@ public sealed partial class TractorSimulation
 
     /// <summary>
     /// Whether the mount may hold the body and has a rack to load it into. A new claim also needs the beam's line of
-    /// sight to it; a held body that has lost it is not let go at once, <see cref="Pull"/> times it out.
+    /// sight to it; a held body that has lost it is pulled back into view (<see cref="Pull"/>).
     /// </summary>
     private bool Valid(FreeContainers containers, GameContent content, HullField field, int h, int mount,
         ref FreeContainer item, Span<byte> occupied, bool needSight)
@@ -153,10 +153,10 @@ public sealed partial class TractorSimulation
     /// <summary>
     /// Uses only power already billed by FlightModel. Bodies remain free until the rack accepts them. A held body
     /// follows <see cref="TractorPath"/>: to the staging point outside the rack's face (by way of the emitter's exit
-    /// when the straight line is blocked), then a slow glide along the face normal into its slot, where it is stowed.
-    /// <see cref="ContainerSimulation"/> lets it pass its own hull's blocks meanwhile. A body that makes no progress, or
-    /// that the beam cannot see, for <see cref="TractorGuidance.StallSeconds"/> is let go and waits
-    /// <see cref="TractorGuidance.RetrySeconds"/> before any tractor tries it again, so nothing jams for ever.
+    /// when the straight line is blocked, or when the beam has lost sight of it), then a slow glide along the face
+    /// normal into its slot, where it is stowed. <see cref="ContainerSimulation"/> lets it pass its own hull's blocks
+    /// meanwhile. A body the beam fails to bring closer for <see cref="TractorGuidance.StallSeconds"/> is let go and
+    /// waits <see cref="TractorGuidance.RetrySeconds"/> before any tractor tries it again, so nothing jams for ever.
     /// </summary>
     public void Pull(FreeContainers containers, GameContent content, HullField field, Span<byte> occupied, long tick = 0) =>
         Pull(containers, null, content, field, occupied, tick);
@@ -187,29 +187,48 @@ public sealed partial class TractorSimulation
             // container was the rack's open face in view (TryGuide), so only the range is asked of it then.
             var sight = final ? TractorReach.InRange(design.Boxes, hulls.Blocks(h), design.BlockSize, mount, local, guide.Slack)
                 : TractorReach.Container(design.Boxes, hulls.Blocks(h), design.BlockSize, mount, local, guide.Slack);
-
-            // Staging first; by way of the emitter's exit only when the container has no clear line to it.
-            var viaExit = !final && !TractorReach.Clear(design.Boxes, hulls.Blocks(h), design.BlockSize, local, guide.Staging);
+            // A body the beam has lost sight of is pulled back to just outside the emitter, the one place the beam
+            // always sees, instead of hanging where it is until the stall lets it go: a body lost behind the hull, or
+            // carried out of range, used to drift unsteered for the whole stall time. Losing the range on the final
+            // glide takes it off that leg and it starts again at the exit.
+            if (!sight && final) { final = false; item.TractorStage = 0; }
+            // Staging first; by way of the emitter's exit when the container has no clear line to it, or none at all.
+            var viaExit = !final && (!sight
+                || !TractorReach.Clear(design.Boxes, hulls.Blocks(h), design.BlockSize, local, guide.Staging));
             var target = final ? guide.Slot : viaExit ? guide.Exit : guide.Staging;
-            var left = Vector3.Distance(local, target) + (viaExit ? Vector3.Distance(guide.Exit, guide.Staging) : 0)
+            var delta = target - local;
+            var distance = delta.Length();
+            var left = distance + (viaExit ? Vector3.Distance(guide.Exit, guide.Staging) : 0)
                 + (final ? 0 : Vector3.Distance(guide.Staging, guide.Slot));
             var powered = info.TractorDemand > 0 && info.Power.Tractor >= info.TractorDemand;
-            if (!sight) item.TractorIdle++;
-            else if (powered)
+            var speed = Math.Min(Approach.Speed(spec.Acceleration, distance, tuning.ApproachBrakeShare),
+                final ? tuning.FinalSpeed : float.PositiveInfinity);
+            // The beam must keep bringing the body closer: a tick it spends without power, or one in which it pulls
+            // and the body still gains nothing on the way it is taking, counts against it.
+            var gained = false;
+            if (powered)
             {
-                if (item.TractorBest <= 0 || left < item.TractorBest - tuning.ProgressMetres) { item.TractorBest = Math.Max(left, 1e-6f); item.TractorIdle = 0; }
-                else item.TractorIdle++;
+                // A longer way (the exit route, or a goal that moved) starts the count again: a body sent round the
+                // hull's own blocks is coming in, not stalled.
+                if (item.TractorBest > 0 && left > item.TractorBest) item.TractorBest = left;
+                // The least shrink that counts is the configured distance, but never more than the approach rule lets
+                // the body close in a tick: a body creeping in on the final glide is coming in, not stalled.
+                if (item.TractorBest <= 0 || left < item.TractorBest - Approach.NeededProgress(speed, tuning.ProgressMetres))
+                {
+                    item.TractorBest = Math.Max(left, 1e-6f);
+                    gained = true;
+                }
             }
+            if (gained) item.TractorIdle = 0;
+            else item.TractorIdle++;
             if (item.TractorIdle >= tuning.StallTicks)
             {
                 item.PickupReadyTick = tick + (long)Math.Ceiling(tuning.RetrySeconds * Prospect.Engine.Time.TickLoop.SimulationHz);
                 Release(ref item);
                 continue;
             }
-            if (!powered || !sight) continue;
+            if (!powered) continue;
 
-            var delta = target - local;
-            var distance = delta.Length();
             var offset = target - Pivot(design);
             var carrierVelocity = state.Velocity + HullRotation.Rotate(Vector3.Cross(state.AngularVelocity,
                 offset - hulls.Flight(h).CenterOfMass), state.Orientation);
@@ -235,19 +254,17 @@ public sealed partial class TractorSimulation
                 && hulls.BlockStates.TryAddCargo(info.BlockState, content, Held(item), occupied))
             { containers.Remove(c); field.Refit(h); continue; }
 
-            Steer(ref item.Velocity, delta, distance, relative, state.Orientation, spec.Acceleration, final ? tuning.FinalSpeed : float.PositiveInfinity, tuning.ApproachBrakeShare);
+            Steer(ref item.Velocity, delta, distance, relative, state.Orientation, spec.Acceleration, speed);
         }
     }
 
     /// <summary>
     /// One tick of a beam's pull on a body it holds: its velocity relative to the hull at the target is steered along
-    /// <paramref name="delta"/> (the way left, in the hull's frame) at the speed it can still stop from with
-    /// <paramref name="approach"/> of its braking in hand (<see cref="Approach"/>), at most <paramref name="most"/>,
-    /// changing by no more than the beam's acceleration allows in a tick.
+    /// <paramref name="delta"/> (the way left, in the hull's frame) at <paramref name="speed"/> (what
+    /// <see cref="Approach.Speed"/> gives it), changing by no more than the beam's acceleration allows in a tick.
     /// </summary>
-    private static void Steer(ref Vector3 velocity, Vector3 delta, float distance, Vector3 relative, Quaternion orientation, float acceleration, float most, float approach)
+    private static void Steer(ref Vector3 velocity, Vector3 delta, float distance, Vector3 relative, Quaternion orientation, float acceleration, float speed)
     {
-        var speed = Math.Min(Approach.Speed(acceleration, distance, approach), most);
         var desired = distance > 1e-6f ? HullRotation.Rotate(delta / distance, orientation) * speed : Vector3.Zero;
         var change = desired - relative;
         var length = change.Length();

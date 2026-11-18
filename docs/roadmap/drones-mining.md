@@ -361,6 +361,29 @@ The fix, one rule in `Prospect.Game/World/Approach.cs`:
 | 400 kg chunk 30 m above the ship, running at 20 m/s | beam held it at 20 m/s, drifted out of reach, stowed at 77.8 s after a 620 m chase | beam leaves it, drones bring it in and hand it over, stowed at 39.3 s |
 | Same, `Reaches` for "Pick up ores" | true (drones never sent) | false while it is too fast, true once it is slow |
 
+### A held body the beam loses
+
+Fixed 2026-11-20. A body a beam held and then lost sight of was neither steered nor let go: it kept whatever speed it
+had until the 4 s stall dropped it. The trace (`TractorGuideTests`, headless, 60 Hz) had the hull come about 0.7 s into
+a pull: the container sat behind the core at 2.7 m/s with a frozen velocity for 240 ticks, was released at 4 s and flew
+off, never stowed. Three ore chunks in the capture hung out of sight at 30-37 m the same way, for about 23 s of ticks
+across claims, and the ore run's battery is flat from 36 s to 66 s.
+
+- A held body out of the beam's sight (out of range, or behind the hull's own blocks) is pulled toward the emitter's
+  exit point, the one place the beam always sees, and stays powered so it passes its own hull as a guided body does.
+  The ordinary guide resumes as soon as the line comes back. Nothing new on the wire or in a save: the stage is the
+  server's transient field it already was.
+- The stall is "the beam could not bring the body closer for `stallSeconds`", not "the body was out of sight": a tick
+  without power to pull, or one in which the pull gains nothing on the way the body is taking. The least shrink that
+  counts is `Approach.NeededProgress`, `tractor.progressMetres` (0.02 m), but never more than the approach rule closes
+  in a tick (0.01 m on the final glide at `finalSpeed` 0.6 m/s), so a creeping glide is progress. A longer way, the exit
+  route or a goal that moved, re-bases the count instead of looking like a stall.
+- `ContentIdentity.EvaluatorVersion` is 26.
+
+| `TractorGuideTests`, Ridge design | Before | After |
+| --- | --- | --- |
+| Body above the ridge, hull turned 180 deg at 0.7 s | velocity frozen at 2.7 m/s, released at the 4 s stall, never stowed | pulled back through the exit, stowed at 5.5 s, never released |
+
 ### Numbers (headless, shipped ship, command to delivered)
 
 - Container 150 m out: 32–33 s before, 26–27 s after.
