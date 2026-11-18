@@ -79,16 +79,21 @@ public sealed class DefaultShipTests(ITestOutputHelper output)
         {
             Assert.True(TractorReach.Intake(pod.Boxes, pod.Mounts, pod.FullSet, pod.BlockSize, tractor, pod.Hoppers[0], out _),
                 $"tractor mount {tractor} does not see the hopper's intake");
-            // A chunk of the mining rules' mark at a tenth ore, the leanest worth a word, is led there and fits the intake's path.
-            var half = OreChunks.Half(Content.Mining, Content.Mining.ChunkOreKg * 10);
+            // The heaviest chunk the mining rules make is led there and fits the intake's path.
+            var half = OreChunks.Half(Content.Mining, Content.Mining.ChunkMaxMassKg);
             Assert.True(TractorPath.TryGuideIntake(pod, pod.FullSet, tractor, pod.Hoppers[0], half, Content.Cargo.Tractor.StagingMarginMetres, out var guide));
             Assert.True(TractorReach.Container(pod.Boxes, pod.FullSet, pod.BlockSize, pod.Mounts[tractor], guide.Staging), "the beam does not see the point outside the intake");
+            // The heaviest chunk is smaller than the hopper's cell face less the content's margin: it goes through.
+            var box = pod.Boxes[pod.Hoppers[0]];
+            var face = Math.Min(box.Size.X, Math.Min(box.Size.Y, box.Size.Z)) * pod.BlockSize;
+            Assert.True(2 * half <= face - Content.Mining.ChunkIntakeMarginMetres,
+                $"a chunk {2 * half:0.###} m across against a hopper face of {face:0.###} m");
         }
 
         // The hopper's hatch-like intake is not mounted over, and the bins together hold at least six such chunks' ore.
         var capacity = 0.0;
         foreach (var bin in pod.Bins) capacity += bin.Capacity;
-        Assert.True(capacity >= 6 * Content.Mining.ChunkOreKg * 10, $"the bins hold {capacity:0} kg");
+        Assert.True(capacity >= 6 * Content.Mining.ChunkMaxMassKg, $"the bins hold {capacity:0} kg");
         output.WriteLine($"SHIP ore: {pod.Hoppers.Length} hopper, {pod.Bins.Length} bins, {capacity / 1000:0.0} t of raw ore, {capacity / 1000 / pod.Flight.Mass * 100:0} % of the ship's mass when full");
     }
 

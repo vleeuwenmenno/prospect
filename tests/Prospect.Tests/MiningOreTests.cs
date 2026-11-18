@@ -78,16 +78,40 @@ public sealed class MiningOreTests
         var seen = rig.Snap().OreChunks.AsSpan(0, rig.Snap().OreChunkCount).ToArray().First(c => c.Id == 1);
         Assert.Equal((chunk.Resource, chunk.Mass, chunk.Grade), (seen.Resource, seen.Mass, seen.Grade));
 
-        // Over more cutting, every chunk is of an ore the rock holds and no richer than the interior's richest spot: the
-        // ore a laser frees comes from the rock's interior at the cut and from nowhere else.
+        // Over more cutting, every chunk is of an ore the rock holds and holds just the mark of it: the ore a laser frees
+        // comes from the rock's interior at the cut and from nowhere else, and the rock that rides with it is capped so
+        // the chunk stays small. Its grade is its ore over its mass, so it no longer reads the rock's local share.
         Sweep(rig, () => false, 600);
         var all = rig.Server.OreChunks.Items.ToArray();
         Assert.True(all.Length > 3, "more cutting breaks more chunks");
-        var richest = rig.Content.Galaxy.Interiors!.MaxLocalOre;
         Assert.All(all, c => Assert.Contains(c.Resource, ores));
-        Assert.All(all, c => Assert.True(c.Grade <= richest + 1e-3f, $"a chunk of grade {c.Grade} from a rock whose richest spot is {richest}"));
+        Assert.All(all, c => Assert.Equal(rules.ChunkOreKg, c.OreKg, 2));
+        Assert.All(all, c => Assert.True(c.Mass <= rules.ChunkMaxMassKg + 1e-3f, $"a chunk of {c.Mass} kg against the content's {rules.ChunkMaxMassKg} kg"));
+        Assert.All(all, c => Assert.Equal(c.OreKg / c.Mass, c.Grade, 4));
         Assert.Equal(all.Length, all.Select(c => c.Id).Distinct().Count());
         Assert.Equal(all.OrderBy(c => c.Born).Select(c => c.Id), all.Select(c => c.Id));
+    }
+
+    [Fact]
+    public void NoChunkIsEverBiggerThanTheSmallestHoppersIntakeWhateverTheGradeOfItsRock()
+    {
+        var rules = Content.Mining;
+        var intake = rules.ChunkIntakeMetres - rules.ChunkIntakeMarginMetres;
+        Assert.True(2 * rules.ChunkHalf(rules.ChunkMaxMassKg) <= intake);
+
+        // Every grade from a trace to solid ore: the rock that carries the mark's ore is lean and brings a great deal of
+        // itself, or rich and brings little. A chunk takes the mark and no more rock than the content allows, so its size
+        // does not grow with how lean its rock was.
+        for (var grade = 0.01f; grade <= 1.0001f; grade += 0.01f)
+        {
+            var host = rules.ChunkOreKg / grade;
+            rules.ChunkOf(rules.ChunkOreKg, host, out var mass, out var chunkGrade);
+            Assert.True(mass <= rules.ChunkMaxMassKg, $"{mass} kg from {host:0} kg of {grade:P0} rock");
+            Assert.True(2 * rules.ChunkHalf(mass) <= intake,
+                $"a chunk from {host:0} kg of {grade:P0} rock is {2 * rules.ChunkHalf(mass):0.###} m across and the intake takes {intake:0.###} m");
+            Assert.Equal(rules.ChunkOreKg, mass * chunkGrade, 2);
+            Assert.True(mass - rules.ChunkOreKg <= rules.ChunkRockShare * mass + 1e-3f, "rock is at most the content's share");
+        }
     }
 
     [Fact]
@@ -103,19 +127,23 @@ public sealed class MiningOreTests
             return rig.Server.RockEdits.Log.Count;
         }
 
+        var rules = Content.Mining;
         var small = EditsUntilFirstChunk(Content, out var first);
-        var large = EditsUntilFirstChunk(MiningFixtures.Make(other: copy => copy.Replace("rules/mining.json", "\"oreKg\": 300", "\"oreKg\": 600")), out var second);
-        Assert.True(first.OreKg >= 40 * 0.999f);
-        Assert.True(second.OreKg >= 600 * 0.999f, $"{second.OreKg} kg in a chunk of a mark of 600");
-        Assert.True(large > small, $"{large} scrapes for a mark of 600 and {small} for one of 40");
+        var large = EditsUntilFirstChunk(MiningFixtures.Make(other: copy => copy.Replace("rules/mining.json", "\"oreKg\": 400", "\"oreKg\": 800")), out var second);
+        Assert.True(first.OreKg >= rules.ChunkOreKg * 0.999f, $"{first.OreKg} kg of ore in a chunk of a mark of {rules.ChunkOreKg}");
+        Assert.True(second.OreKg >= 800 * 0.999f, $"{second.OreKg} kg in a chunk of a mark of 800");
+        Assert.True(large > small, $"{large} scrapes for a mark of 800 and {small} for one of {rules.ChunkOreKg}");
         Assert.True(second.Mass > first.Mass);
     }
 
     [Fact]
     public void AMarkNoLaserReachesMakesScrapesAndNoChunks()
     {
-        // A mark no laser reaches within the test makes scrapes and no chunk: the scrape count is the laser's, the chunks the ore's.
-        using var rig = new MiningRig(MiningFixtures.Make(other: copy => copy.Replace("rules/mining.json", "\"oreKg\": 300", "\"oreKg\": 1000000")));
+        // A mark no laser reaches within the test makes scrapes and no chunk: the scrape count is the laser's, the chunks
+        // the ore's. The intake is widened with it, since a mark that big makes a lump no real hopper takes.
+        using var rig = new MiningRig(MiningFixtures.Make(other: copy => copy
+            .Replace("rules/mining.json", "\"oreKg\": 400", "\"oreKg\": 1000000")
+            .Replace("rules/mining.json", "\"intakeMetres\": 1.0", "\"intakeMetres\": 100")));
         var (rock, _) = MiningFixtures.FindRock(rig.Rocks);
         rig.Place(0, rock, Up, 25);
         Assert.False(Sweep(rig, () => rig.Server.OreChunks.Items.Length > 0, 1500));

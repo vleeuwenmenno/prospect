@@ -102,12 +102,12 @@ public sealed class ContentIdentityTests
     {
         // A changed figure is another identity, for a game and for a save.
         using var figure = new ContentCopy();
-        figure.Replace("rules/mining.json", "\"oreKg\": 300", "\"oreKg\": 41");
+        figure.Replace("rules/mining.json", "\"oreKg\": 400", "\"oreKg\": 41");
         var changed = figure.Load();
         Assert.NotEqual(Content.Identity, changed.Identity);
         Assert.NotEqual(Content.SaveIdentity, changed.SaveIdentity);
         Assert.Equal(41f, changed.Mining.ChunkOreKg);
-        Assert.Equal(300f, Content.Mining.ChunkOreKg);
+        Assert.Equal(400f, Content.Mining.ChunkOreKg);
 
         using var spaced = new ContentCopy();
         // JSON is hashed in its canonical form, so spacing is not a change.

@@ -193,7 +193,12 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   step bills `PowerFlow.Laser` all or nothing after the tractors, `FireLasers` after the round fires from the hull's
   new pose toward the aim found before (`LaserAim`, `RockRay.First`) and cuts through `ScrapeRock` only, strokes
   chained so the wire sends 9 B a scrape. Ore: `MiningRules.ScrapeKg` shared out by `RockInterior.Sample` at the
-  cut's deepest point, per laser and ore, a chunk at `chunks.oreKg`. Figures: `content/rules/mining.json` (shared,
+  cut's deepest point, per laser and ore, times `chunks.yieldShare` (0.5: half the ore a scrape's rock holds comes
+  free, the rest is lost). A chunk carries exactly `chunks.oreKg` of one ore (400 kg) and only the rock that keeps it
+  within `MiningRules.ChunkMaxMassKg` (`chunks.oreKg / (1 - chunks.rockShare)` = 533 kg): the rock above that is left
+  in space, its grade is its ore over its mass, and `mining.json` is refused unless that heaviest chunk goes through
+  `chunks.intakeMetres` less `chunks.intakeMarginMetres`. Never spawn a chunk of the whole rock again, and never work
+  its size out anywhere but `MiningRules.ChunkHalf`. Figures: `content/rules/mining.json` (shared,
   identity). Chunks are `OreChunks` (fixed 256, their own pool; how they are taken in is "Ore collection (R4)") and
   `OreChunkSimulation` (bounded contacts, no damage); `OreChunkMessage` 47 every 6 ticks by `Covered`; beams
   `LaserBeamsMessage` 46 unreliable each tick by `MaySeeHull`, held 6 ticks on the client, which predicts its own
@@ -300,6 +305,10 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
     glide in; the deposit is `AddOre` then `Refit`. Budgets: 256 containers and 256 chunks a tick, each scan reserved
     whole before a mount starts. `OreChunkSimulation` skips a powered held chunk against its own hull. Claim fields
     on `OreChunk` are transient; `RetryTick`, `TractorBest`, `TractorIdle`, `FetchHull`, `FetchMount` are server only.
+    A chunk is 533 kg and 0.56 m across at most ("Mining lasers, action groups and ore chunks"), so it fits the
+    one-metre hopper face `TractorReach.Intake` takes it through; the content's own words are `chunks.intakeMetres`
+    less its margin. A design with a smaller hopper than that figure still takes chunks: the figure is the smallest
+    intake the game supports, and the rim the hopper model draws is not counted in it.
   - Prediction: the client adds `spec.Power(mass)` for each chunk its own beams hold (`ClientWorld.OwnChunkDemand`),
     as the server's `Plan` does, and weighs the bins it was told (`ClientWorld.Ore.cs`, `ApplyOre`).
   - Drones: `OrderTask.FetchOre`, in the one executor. `StartOreFetch` (`ServerOre.cs`) and the container fetch share
@@ -1437,7 +1446,8 @@ How to apply it:
   by id; richer chunks add ore crystals on the biggest faces, so the mesh is chosen by id and grade band
   (`PartModels.TryGetOreChunk(variant, band)`, `OreChunkModelLook.Band`). Crystal facets carry a normal of length 1.25
   (`OreChunkModels.CrystalTag`). Figures (cuts, box, crystal counts per grade band, vein scale and cover, glint) are
-  `content/visuals/ore_chunk_models.json` (`OreChunkModelLook`, validated). The instance is material `OreChunkVisuals.Material(grade)`
+  `content/visuals/ore_chunk_models.json` (`OreChunkModelLook`, validated). A chunk's grade is its ore over its mass, so
+  it is 0.75 at least and the grade bands sit above that (0.7 and 0.9): most chunks show the middle band. The instance is material `OreChunkVisuals.Material(grade)`
   (0.03 to 0.12), tint = the ore's own colour, `RockMarks` = (vein scale, cover at grade 0, cover at grade 1, glint) instead of rock
   marks; `mesh.vert`/`mesh.frag` draw bare rock with ore veins (more cover the higher the grade), crystals, a sheen, a sharp flash
   as a facet lines up with the star and a faint twinkling glow. Capture a sheet of every ore at three grades with `--ore-sheet`

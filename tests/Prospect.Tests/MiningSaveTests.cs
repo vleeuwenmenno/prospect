@@ -211,7 +211,7 @@ public sealed class MiningSaveTests
     public void AWorldSavedUnderOtherMiningFiguresIsNotOfThisContent()
     {
         var (folder, _, _, _) = Saved();
-        var other = MiningFixtures.Make(other: copy => copy.Replace("rules/mining.json", "\"oreKg\": 300", "\"oreKg\": 41"));
+        var other = MiningFixtures.Make(other: copy => copy.Replace("rules/mining.json", "\"oreKg\": 400", "\"oreKg\": 41"));
         Assert.NotEqual(Content.SaveIdentity, other.SaveIdentity);
         var opened = MemoryWorldStore.Open(folder, SaveCompatibility.Of(other));
         Assert.Equal(OpenOutcome.Incompatible, opened.Outcome);
