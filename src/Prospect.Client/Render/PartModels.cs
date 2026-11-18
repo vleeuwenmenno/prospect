@@ -58,14 +58,16 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
     }
 
     /// <summary>
-    /// The clamp jaws of a container of <paramref name="size"/> held in a rack whose deck is on <paramref name="deck"/>;
+    /// The mag-lock jaws of a container of <paramref name="size"/> held in a rack whose back (the face opposite its
+    /// opening) is <paramref name="back"/>, and their lights, drawn apart in the colour of the container's stage;
     /// false while the worker has not finished. Allocates nothing.
     /// </summary>
-    public bool TryGetClamp(int size, BlockFacing deck, out ReadOnlySpan<MeshVertex> vertices)
+    public bool TryGetClamp(int size, BlockFacing back, out ReadOnlySpan<MeshVertex> vertices, out ReadOnlySpan<MeshVertex> lights)
     {
-        vertices = default;
-        if ((uint)size >= 8 || (uint)deck >= 6 || !_containersReady) return false;
-        vertices = _containers.Clamps[size * 6 + (int)deck];
+        vertices = lights = default;
+        if ((uint)size >= 8 || (uint)back >= 6 || !_containersReady) return false;
+        vertices = _containers.Clamps[size * 6 + (int)back];
+        lights = _containers.ClampLights[size * 6 + (int)back];
         return vertices.Length > 0;
     }
 
@@ -198,12 +200,15 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
     private sealed class ContainerBuild(PropulsionLook look) : IJob
     {
         public readonly MeshVertex[][] Clamps = new MeshVertex[8 * 6][];
+        public readonly MeshVertex[][] ClampLights = new MeshVertex[8 * 6][];
         public readonly int ResourceSlots = 1 + (look.Rack?.Galaxy.Length ?? 0);
         public readonly MeshVertex[][] Results = new MeshVertex[8 * (1 + (look.Rack?.Galaxy.Length ?? 0))][];
         public void Run()
         {
             var vertices = new List<MeshVertex>();
             var indices = new List<uint>();
+            var lightVertices = new List<MeshVertex>();
+            var lightIndices = new List<uint>();
             for (var i = 0; i < 8; i++)
             {
                 var shape = look.Cargo.Sizes[i].Shape;
@@ -220,12 +225,11 @@ internal sealed class PartModels(JobSystem jobs, PropulsionLook look)
                 }
                 for (var face = 0; face < 6; face++)
                 {
-                    vertices.Clear(); indices.Clear();
+                    vertices.Clear(); indices.Clear(); lightVertices.Clear(); lightIndices.Clear();
                     if (look.Rack is { } clampLook)
-                        PropulsionModels.ClampModel(shape, (BlockFacing)face, clampLook, look.Cargo, vertices, indices);
-                    var clamp = new MeshVertex[indices.Count];
-                    for (var k = 0; k < clamp.Length; k++) clamp[k] = vertices[(int)indices[k]];
-                    Clamps[i * 6 + face] = clamp;
+                        PropulsionModels.ClampModel(shape, (BlockFacing)face, clampLook, look.Cargo, vertices, indices, lightVertices, lightIndices);
+                    Clamps[i * 6 + face] = Soup(vertices, indices);
+                    ClampLights[i * 6 + face] = Soup(lightVertices, lightIndices);
                 }
             }
         }

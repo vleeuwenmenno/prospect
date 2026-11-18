@@ -7,9 +7,10 @@ namespace Prospect.Tests;
 public sealed class TractorSimulationTests
 {
     private static readonly GameContent Content = GameContent.Load();
-    private static DesignBox Box(string type, int x, int y, int z) => new(new(x, y, z), new(1, 1, 1), Content.Blocks.Get(type));
+    private static DesignBox Box(string type, int x, int y, int z, BlockFacing facing = BlockFacing.Back) =>
+        new(new(x, y, z), new(1, 1, 1), Content.Blocks.Get(type), BlockShape.Box, facing);
     private static HullDesign Design() => TestDesigns.Mounted(
-        [Box("core", 0, 0, 0), Box("cargo", 2, 1, 0), Box("generator", 0, -1, 0), Box("battery", 0, -2, 0)],
+        [Box("core", 0, 0, 0), Box("cargo", 2, 1, 0, BlockFacing.Left), Box("generator", 0, -1, 0), Box("battery", 0, -2, 0)],
         [new(0, BlockFacing.Up, 2, 2, Content.Blocks.Get("tractorBeam"))]);
     private static FreeContainer Item(HullDesign design, Double3 origin) => new()
     {

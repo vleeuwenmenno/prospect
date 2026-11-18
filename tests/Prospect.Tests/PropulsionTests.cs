@@ -1124,12 +1124,12 @@ public sealed class PropulsionTests
             design.Write(stream);
             var again = Parse(System.Text.Encoding.UTF8.GetString(stream.ToArray()));
             Assert.Equal(design.Blocks.ToArray(), again.Blocks.ToArray());
-            Assert.Contains("\"version\":9", System.Text.Encoding.UTF8.GetString(stream.ToArray()));
+            Assert.Contains("\"version\":10", System.Text.Encoding.UTF8.GetString(stream.ToArray()));
         }
 
         Assert.Contains("Unknown block facing", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 4, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\", \"facing\": \"forward\" }] }")).Message);
-        Assert.Contains("unsupported design version 10", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 10, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\" }] }")).Message);
-        Assert.Equal(9, BoxDesign.FormatVersion);
+        Assert.Contains("unsupported design version 11", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 11, " + head + "{ \"at\": [0, 0, 1], \"type\": \"engine\" }] }")).Message);
+        Assert.Equal(10, BoxDesign.FormatVersion);
     }
 
     [Fact]

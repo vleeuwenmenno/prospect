@@ -50,6 +50,8 @@ internal static class StrokeFont
         ['8'] = "00 04 24 20 00|02 22",
         ['9'] = "20 24 04 02 22",
         ['-'] = "02 22",
+        // A small u, for container sizes in cargo units ("16u"): a cup in the lower half.
+        ['u'] = "02 00 20 22",
     };
 
     /// <summary>True when the font has a glyph for <paramref name="c"/>.</summary>

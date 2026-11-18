@@ -8,12 +8,13 @@ namespace Prospect.Tests;
 public sealed class TractorPreviewTests
 {
     private static readonly GameContent Content = GameContent.Load();
-    private static DesignBox Box(string type, int x, int y) => new(new(x, y, 0), new(1, 1, 1), Content.Blocks.Get(type));
+    private static DesignBox Box(string type, int x, int y, BlockFacing facing = BlockFacing.Back) =>
+        new(new(x, y, 0), new(1, 1, 1), Content.Blocks.Get(type), BlockShape.Box, facing);
 
     [Fact]
     public void PreviewUsesSharedReachAndRefreshesAfterAnEditWithoutAllocating()
     {
-        var design = TestDesigns.Mounted([Box("core", 0, 0), Box("cargo", 2, 1), Box("cargo", 0, -2)],
+        var design = TestDesigns.Mounted([Box("core", 0, 0), Box("cargo", 2, 1, BlockFacing.Left), Box("cargo", 0, -2, BlockFacing.Up)],
             [new(0, BlockFacing.Up, 2, 2, Content.Blocks.Get("tractorBeam"))]);
         var draft = BuildDraft.From(design, design.FullSet, Content);
         var preview = new TractorPreview(Content.Blocks.Limits.MaxMounts);
@@ -98,7 +99,7 @@ public sealed class TractorPreviewTests
     [Fact]
     public void PreviewAndServerFitAgreeOnARackThatStraddlesTheFacePlane()
     {
-        var design = TestDesigns.Mounted([Box("core", 0, 0), new(new(1, -1, 0), new(1, 3, 1), Content.Blocks.Get("cargo"))],
+        var design = TestDesigns.Mounted([Box("core", 0, 0), new(new(1, -1, 0), new(1, 3, 1), Content.Blocks.Get("cargo"), BlockShape.Box, BlockFacing.Left)],
             [new(0, BlockFacing.Up, 2, 2, Content.Blocks.Get("tractorBeam"))]);
         var draft = BuildDraft.From(design, design.FullSet, Content);
         var preview = new TractorPreview(Content.Blocks.Limits.MaxMounts);

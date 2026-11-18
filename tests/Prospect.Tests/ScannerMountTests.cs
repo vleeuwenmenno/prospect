@@ -118,7 +118,7 @@ public sealed class ScannerMountTests
         var again = BoxDesign.Read(stream.ToArray(), Content.Blocks, "again.json");
         Assert.Equal(old.Blocks.ToArray(), again.Blocks.ToArray());
         Assert.Equal(old.Mounts.ToArray(), again.Mounts.ToArray());
-        Assert.Contains("\"version\":9", System.Text.Encoding.UTF8.GetString(stream.ToArray()));
+        Assert.Contains("\"version\":10", System.Text.Encoding.UTF8.GetString(stream.ToArray()));
     }
 
     [Fact]

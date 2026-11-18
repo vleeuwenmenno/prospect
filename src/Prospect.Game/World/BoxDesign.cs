@@ -255,9 +255,14 @@ public sealed class BoxDesign
     /// 8 a mount's size (<c>"size"</c>, written for a part made in several sizes; a mount that names none, in a
     /// file of any version, has its type's <see cref="MountSpec.DefaultSize"/>) and 9 places between cells: a block's
     /// <c>"at"</c> is in cells as before and may now be a number of quarters (<c>0.5</c>, <c>1.25</c>). An older
-    /// file's whole numbers mean what they did, so it needs no conversion.
+    /// file's whole numbers mean what they did, so it needs no conversion. 10 gives a cargo rack its one open face, the
+    /// block's <c>"facing"</c>; an older file's racks named none that meant anything, so each takes the face
+    /// <see cref="OpenFaces.Choose"/> gives it from what it touches, as the editor would have placed it.
     /// </summary>
-    public const int FormatVersion = 9;
+    public const int FormatVersion = 10;
+
+    /// <summary>The first version whose cargo racks name their open face.</summary>
+    private const int RackFaceVersion = 10;
 
     /// <summary>The first version whose blocks may sit between cells.</summary>
     private const int SubCellVersion = 9;
@@ -380,6 +385,8 @@ public sealed class BoxDesign
                 }
             }
             ConvertLegacy(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list), legacy, mounts, catalog.Limits, source);
+            if (version < RackFaceVersion)
+                OpenRacks(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list), System.Runtime.InteropServices.CollectionsMarshal.AsSpan(mounts));
             RequireOneDriveKind(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list), source);
             var c = root.GetProperty("color"u8);
             var kind = root.GetProperty("class"u8).GetString() switch { "ship" => HullClass.Ship, "fighter" => HullClass.Fighter, "station" => HullClass.Station, _ => throw new InvalidDataException($"{source}: unknown class") };
@@ -387,6 +394,35 @@ public sealed class BoxDesign
         }
         catch (Exception e) when (e is InvalidOperationException or KeyNotFoundException or FormatException or OverflowException or IndexOutOfRangeException)
         { throw new InvalidDataException($"{source}: block {index}: invalid design: {e.Message}", e); }
+    }
+
+    /// <summary>
+    /// Gives each rack of a file older than <see cref="RackFaceVersion"/> its one open face: the face
+    /// <see cref="OpenFaces.Choose"/> gives it from what it touches, as the editor would have placed it. When that face is
+    /// against a box or carries a mount, the first face that is neither, in face order (+X, -X, +Y, -Y, +Z, -Z), which
+    /// is the face such a rack released its containers through before; with none, the rule's face, and the rack stays
+    /// closed until it is edited.
+    /// </summary>
+    private static void OpenRacks(Span<DesignBox> boxes, ReadOnlySpan<DesignMount> mounts)
+    {
+        for (var i = 0; i < boxes.Length; i++)
+        {
+            if (boxes[i].Type.Cargo <= 0) continue;
+            var touched = OpenFaces.Touched(boxes, i, boxes[i].At, boxes[i].Size);
+            var closed = touched | MountedFaces(mounts, i);
+            var face = OpenFaces.Choose(touched);
+            if ((closed & 1 << (int)face) != 0)
+                for (var f = 0; f < 6; f++)
+                    if ((closed & 1 << f) == 0) { face = (BlockFacing)f; break; }
+            boxes[i] = boxes[i] with { Facing = face };
+        }
+    }
+
+    private static int MountedFaces(ReadOnlySpan<DesignMount> mounts, int block)
+    {
+        var faces = 0;
+        foreach (var mount in mounts) if (mount.Parent == block) faces |= 1 << (int)mount.Face;
+        return faces;
     }
 
     /// <summary>

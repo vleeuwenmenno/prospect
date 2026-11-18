@@ -720,9 +720,9 @@ public sealed class EditorSessionTests
             }
             _files.Replace("rules/exploration.json", "5e3", "5");
             if (tractorFixture) _files.Write("ships/command_pod.json", """
-                { "version":5, "name":"Tractor pod", "class":"ship", "blockSize":1, "color":[0.34,0.37,0.42],
+                { "version":10, "name":"Tractor pod", "class":"ship", "blockSize":1, "color":[0.34,0.37,0.42],
                   "blocks":[
-                    {"at":[0,0,0],"type":"core"}, {"at":[2,1,0],"type":"cargo"},
+                    {"at":[0,0,0],"type":"core"}, {"at":[2,1,0],"type":"cargo","facing":"left"},
                     {"at":[0,-1,0],"type":"generator"}, {"at":[0,-2,0],"type":"battery"},
                     {"at":[-1,0,0],"type":"gyro"}, {"at":[0,0,1],"type":"ionDrive"},
                     {"at":[0,0,-1],"type":"sensor"}, {"at":[1,0,0],"type":"hull"},

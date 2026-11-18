@@ -82,6 +82,8 @@ internal sealed partial class WorldView
         DrawnFreeContainers = 0;
         foreach (var item in _freeVisuals.Items)
         {
+            // A body a container in or out of the hold shows is not drawn twice.
+            if (_cargoMotion.Hides(item.Id)) continue;
             var pose = ContainerPose(item);
             var position = pose.Position.RelativeTo(camera);
             if (!Visible(position, FreeContainers.Half(snapshot.Content.Cargo, item.Size).Length(), _viewport.X / _viewport.Y, out _)

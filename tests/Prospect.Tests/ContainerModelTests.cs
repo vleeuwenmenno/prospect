@@ -14,7 +14,8 @@ public sealed class ContainerModelTests
     [Fact]
     public void EveryCharacterThePlatesWriteHasInBoundsStrokes()
     {
-        var text = string.Concat(Look.Rack!.Galaxy.Select(r => r.Code)) + "EMPTY" + string.Concat(Look.Cargo.Sizes.ToArray().Select(s => s.Name));
+        var text = string.Concat(Look.Rack!.Galaxy.Select(r => r.Code + r.Name.ToUpperInvariant())) + "EMPTY"
+            + string.Concat(Look.Cargo.Sizes.ToArray().Select(s => s.Units + "u"));
         foreach (var c in text)
         {
             Assert.True(StrokeFont.Has(c), $"no glyph for {c}");
@@ -39,19 +40,21 @@ public sealed class ContainerModelTests
     }
 
     [Fact]
-    public void EveryContainerVariantStaysInsideItsSlotAndBoundsItsVertices()
+    public void EveryContainerVariantStaysInItsShareOfTheClearanceAndBoundsItsVertices()
     {
         var resources = Look.Rack!.Galaxy.Length;
         for (var size = 0; size < 8; size++)
         {
             var shape = Look.Cargo.Sizes[size].Shape;
-            var half = new Vector3(shape.X, shape.Y, shape.Z) * (Look.Cargo.UnitSize * .5f);
+            var slot = new Vector3(shape.X, shape.Y, shape.Z) * (Look.Cargo.UnitSize * .5f);
+            // Details stand off the body by at most the container's half of its clearance: the rack has the other half.
+            var half = slot - new Vector3(MathF.Min(slot.X, MathF.Min(slot.Y, slot.Z)) * Look.Rack.Gap * (1 - RackLook.DetailShare));
             for (var resource = -1; resource < resources; resource++)
             {
                 var vertices = new List<MeshVertex>();
                 var indices = new List<uint>();
-                PropulsionModels.ContainerModel(new PartBox(Vector3.Zero, half, BlockFacing.Front, 1), size, resource, Look.Rack, vertices, indices);
-                Assert.InRange(vertices.Count, 500, 12000);
+                PropulsionModels.ContainerModel(new PartBox(Vector3.Zero, slot, BlockFacing.Front, 1), size, resource, Look.Rack, vertices, indices);
+                Assert.InRange(vertices.Count, 500, 16000);
                 foreach (var v in vertices)
                 {
                     Assert.InRange(v.Position.X, -half.X - .0005f, half.X + .0005f);
@@ -70,8 +73,10 @@ public sealed class ContainerModelTests
         {
             var path = Path.Combine(folder.FullName, "propulsion.json");
             var text = File.ReadAllText(AppPaths.Content("visuals", "propulsion.json"));
-            Assert.Contains("\"corner\": 0.18", text);
-            File.WriteAllText(path, text.Replace("\"corner\": 0.18", "\"corner\": 0.9"));
+            Assert.Contains("\"corner\": 0.2", text);
+            File.WriteAllText(path, text.Replace("\"corner\": 0.2", "\"corner\": 0.9"));
+            Assert.Throws<InvalidDataException>(() => PropulsionLook.Load(path));
+            File.WriteAllText(path, text.Replace("\"plateDepth\": 0.2", "\"plateDepth\": 0.4"));
             Assert.Throws<InvalidDataException>(() => PropulsionLook.Load(path));
             File.WriteAllText(path, text.Replace("\"stroke\": 0.16", "\"stroke\": 0"));
             Assert.Throws<InvalidDataException>(() => PropulsionLook.Load(path));

@@ -82,10 +82,11 @@ public sealed class BlockType
     public bool Hopper { get; init; }
 
     /// <summary>
-    /// True for a block with one open face that must look away from what it is set against: a drone bay's hatch and an
-    /// ore hopper's intake. The face is the block's facing, chosen when it is placed and mirrored with it.
+    /// True for a block with one open face that must look away from what it is set against: a cargo rack's opening, a
+    /// drone bay's hatch and an ore hopper's intake. The face is the block's facing, chosen when it is placed by
+    /// <see cref="OpenFaces.Choose"/> and mirrored with it.
     /// </summary>
-    public bool FacesOut => Bay is not null || Hopper;
+    public bool FacesOut => Bay is not null || Hopper || Cargo > 0;
 
     /// <summary>
     /// True for a block that is always a box and never a wedge (<c>"boxOnly"</c> in <c>blocks.json</c>): tanks, whose

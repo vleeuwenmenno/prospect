@@ -48,9 +48,9 @@ public sealed class DesignStoreTests : IDisposable
         Assert.Equal(draft.Boxes.ToArray(), read.Design!.Blocks.ToArray());
         Assert.Equal(draft.Mounts.ToArray().OrderBy(m => (m.Parent, m.Face, m.U, m.V)), read.Design.Mounts.ToArray().OrderBy(m => (m.Parent, m.Face, m.U, m.V)));
 
-        // The current format: version 9, with blocks and mounts.
+        // The current format: version 10, with blocks and mounts.
         using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllBytes(_store.PathOf("Scout Mk II")));
-        Assert.Equal(9, json.RootElement.GetProperty("version"u8).GetInt32());
+        Assert.Equal(10, json.RootElement.GetProperty("version"u8).GetInt32());
         Assert.True(json.RootElement.TryGetProperty("blocks"u8, out _));
         Assert.True(json.RootElement.TryGetProperty("mounts"u8, out _));
     }

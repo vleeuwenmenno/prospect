@@ -221,7 +221,7 @@ public static class ProtocolInfo
     /// index in a list both ends generate for themselves, so two builds that generate differently would mean
     /// different rocks by the same number. Client and server must match exactly.
     /// </summary>
-    public const uint Version = 77;
+    public const uint Version = 78;
 
     public const ushort DefaultPort = 27420;
     public const int MaxNameBytes = 48;
