@@ -441,7 +441,11 @@ public sealed class MiningLaserTests
     [Fact]
     public void ARockThatIsFullOfEditsTakesNoMoreAndTheBeamKeepsShowingWithNothingComingOff()
     {
-        using var rig = new MiningRig(MiningFixtures.Make(other: copy => copy.Replace("rules/rock_edits.json", "\"maxEditsPerRock\": 2048", "\"maxEditsPerRock\": 6")));
+        using var rig = new MiningRig(MiningFixtures.Make(other: copy => copy
+            .Replace("rules/rock_edits.json", "\"maxEditsPerRock\": 2048", "\"maxEditsPerRock\": 6")
+            // A mark small enough that the six scrapes the rock allows break ore off it, so the rock, not the ore, is
+            // what stops the beam.
+            .Replace("rules/mining.json", "\"oreKg\": 400", "\"oreKg\": 20")));
         var (rock, _) = MiningFixtures.FindRock(rig.Rocks);
         rig.Place(0, rock, Up, 25);
         for (var t = 0; t < 600; t++)

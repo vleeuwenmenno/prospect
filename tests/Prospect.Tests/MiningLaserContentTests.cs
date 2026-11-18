@@ -132,7 +132,12 @@ public sealed class MiningLaserContentTests
         Assert.Equal(1f, rules.MoveRadii);
         Assert.Equal(16, rules.MaxLasersPerHull);
         Assert.Equal(400f, rules.MaxAimOffsetMetres);
-        Assert.Equal(300f, rules.ChunkOreKg);
+        Assert.Equal(400f, rules.ChunkOreKg);
+        Assert.Equal(0.5f, rules.OreYieldShare);
+        Assert.Equal(0.25f, rules.ChunkRockShare);
+        Assert.Equal(400f / 0.75f, rules.ChunkMaxMassKg, 3);
+        Assert.Equal(1f, rules.ChunkIntakeMetres);
+        Assert.Equal(0.15f, rules.ChunkIntakeMarginMetres);
         Assert.Equal(3000f, rules.ChunkDensity);
         Assert.Equal(2f, rules.ChunkSpeed);
         Assert.Equal(1.2f, rules.ChunkSpin);
@@ -141,6 +146,11 @@ public sealed class MiningLaserContentTests
         Assert.Equal(0.3f, rules.ChunkRestitution);
         Assert.Equal(512, rules.ChunkContactBudget);
         Assert.Equal(Shipped.Mining.ChunkOreKg, Parse(MiningJson).ChunkOreKg);
+
+        // The heaviest chunk goes through the smallest hopper's intake with its margin to spare.
+        var edge = 2 * rules.ChunkHalf(rules.ChunkMaxMassKg);
+        Assert.True(edge <= rules.ChunkIntakeMetres - rules.ChunkIntakeMarginMetres,
+            $"the heaviest chunk is {edge:0.###} m across and the intake takes {rules.ChunkIntakeMetres - rules.ChunkIntakeMarginMetres:0.###} m");
 
         // A lifetime of zero is allowed: such chunks never end.
         Assert.Equal(0L, Parse(MiningJson.Replace("\"lifetimeMinutes\": 30", "\"lifetimeMinutes\": 0")).ChunkLifetimeTicks);
@@ -161,8 +171,16 @@ public sealed class MiningLaserContentTests
     [InlineData("\"maxPerHull\": 16", "\"maxPerHull\": 65")]
     [InlineData("\"maxAimOffsetMetres\": 400", "\"maxAimOffsetMetres\": 0")]
     [InlineData("\"maxAimOffsetMetres\": 400", "\"maxAimOffsetMetres\": 10001")]
-    [InlineData("\"oreKg\": 300", "\"oreKg\": 0.5")]
-    [InlineData("\"oreKg\": 300", "\"oreKg\": 2000000")]
+    [InlineData("\"oreKg\": 400", "\"oreKg\": 0.5")]
+    [InlineData("\"oreKg\": 400", "\"oreKg\": 2000000")]
+    [InlineData("\"yieldShare\": 0.5", "\"yieldShare\": 0")]
+    [InlineData("\"yieldShare\": 0.5", "\"yieldShare\": 1.5")]
+    [InlineData("\"rockShare\": 0.25", "\"rockShare\": -0.1")]
+    [InlineData("\"rockShare\": 0.25", "\"rockShare\": 1")]
+    [InlineData("\"intakeMetres\": 1.0", "\"intakeMetres\": 0")]
+    [InlineData("\"intakeMetres\": 1.0", "\"intakeMetres\": 101")]
+    [InlineData("\"intakeMarginMetres\": 0.15", "\"intakeMarginMetres\": 0")]
+    [InlineData("\"intakeMarginMetres\": 0.15", "\"intakeMarginMetres\": 11")]
     [InlineData("\"densityKgPerCubicMetre\": 3000", "\"densityKgPerCubicMetre\": 99")]
     [InlineData("\"densityKgPerCubicMetre\": 3000", "\"densityKgPerCubicMetre\": 30001")]
     [InlineData("\"speed\": 2", "\"speed\": -1")]
@@ -186,8 +204,44 @@ public sealed class MiningLaserContentTests
     public void AMiningFileMissingAFigureOrHoldingNoNumberIsNotAccepted()
     {
         Assert.ThrowsAny<Exception>(() => Parse(MiningJson.Replace("\"restitution\": 0.3,", "")));
-        Assert.ThrowsAny<Exception>(() => Parse(MiningJson.Replace("\"oreKg\": 300", "\"oreKg\": \"forty\"")));
+        Assert.ThrowsAny<Exception>(() => Parse(MiningJson.Replace("\"oreKg\": 400", "\"oreKg\": \"forty\"")));
         Assert.ThrowsAny<Exception>(() => Parse("{}"));
+    }
+
+    [Fact]
+    public void AChunkThatWouldNotGoThroughTheSmallestHoppersIntakeIsRefusedWhereItIsSet()
+    {        // The ore mark, the rock that may ride with it and the density set a chunk's size together, so a mark that makes
+        // a lump larger than the intake less its margin is refused when the file is read, not found out when one breaks
+        // off. This mark is 2,000 kg: 2,667 kg with its rock, 0.96 m across, and the intake takes no such lump.
+        var rules = Shipped.Mining;
+        Assert.True(2 * rules.ChunkHalf(2_667f) > rules.ChunkIntakeMetres - rules.ChunkIntakeMarginMetres);
+        Assert.Contains("mining.json", Refused(() => Parse(MiningJson.Replace("\"oreKg\": 400", "\"oreKg\": 2000"))));
+
+        // The margin has to leave an opening to go through, and the figures of the shipped file fit theirs.
+        Assert.Contains("mining.json", Refused(() => Parse(MiningJson.Replace("\"intakeMarginMetres\": 0.15", "\"intakeMarginMetres\": 1.0"))));
+        Assert.True(2 * rules.ChunkHalf(rules.ChunkMaxMassKg) <= rules.ChunkIntakeMetres - rules.ChunkIntakeMarginMetres);
+    }
+
+    [Fact]
+    public void AtEveryDensityTheLargestMarkThatFitsTheIntakeIsTakenAndTheNextLumpIsNot()
+    {
+        // Density is what turns a mass into a size, so the size rule is swept over every density the file may hold: the
+        // mark whose chunk just fits the intake less its margin parses, and a fifth more of it does not.
+        var rules = Shipped.Mining;
+        var edge = rules.ChunkIntakeMetres - rules.ChunkIntakeMarginMetres;
+        for (var density = 100f; density <= 30_000f; density *= 1.5f)
+        {
+            var most = edge * edge * edge * density;
+            var mark = most * (1 - rules.ChunkRockShare);
+            string At(float share) => MiningJson
+                .Replace("\"densityKgPerCubicMetre\": 3000", $"\"densityKgPerCubicMetre\": {density.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}")
+                .Replace("\"oreKg\": 400", $"\"oreKg\": {(mark * share).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)}");
+
+            var fits = Parse(At(0.95f));
+            Assert.True(2 * fits.ChunkHalf(fits.ChunkMaxMassKg) <= fits.ChunkIntakeMetres - fits.ChunkIntakeMarginMetres);
+            Assert.True(fits.ChunkMaxMassKg > 0.9f * most, $"{fits.ChunkMaxMassKg} kg at {density} kg a cubic metre");
+            Assert.Contains("mining.json", Refused(() => Parse(At(1.2f))));
+        }
     }
 
     // ---------------------------------------------------------------- design files and bytes

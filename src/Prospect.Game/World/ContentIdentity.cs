@@ -25,11 +25,11 @@ public readonly struct ContentIdentity : IEquatable<ContentIdentity>
 
     /// <summary>
     /// The version of shared simulation arithmetic, including gas sensor coverage and block figures: <see cref="BoxHullSums"/>, the size rules,
-    /// <see cref="FlightRules.Under"/>, the speed limit in <see cref="FlightModel.Step"/> and what a design derives from them. Bump it when that arithmetic changes
+    /// <see cref="FlightRules.Under"/>, the speed limit in <see cref="FlightModel.Step"/>, what a chunk carries (<see cref="MiningRules"/>) and what a design derives from them. Bump it when that arithmetic changes
     /// what comes out while the content files stay as they are, so that two builds which would evaluate the same
     /// files differently do not pass for the same content.
     /// </summary>
-    public const uint EvaluatorVersion = 26;
+    public const uint EvaluatorVersion = 27;
 
     private readonly ulong _low;
     private readonly ulong _high;

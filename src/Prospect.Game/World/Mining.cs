@@ -29,6 +29,30 @@ public sealed class MiningRules
     /// <summary>Kilograms of one ore a laser frees before a chunk of it breaks off.</summary>
     public float ChunkOreKg { get; private init; }
 
+    /// <summary>
+    /// The share of the ore a scrape's rock holds that comes free; the rest goes with the rock. Below one, a scrape
+    /// yields less ore than the rock it took out carries.
+    /// </summary>
+    public float OreYieldShare { get; private init; }
+
+    /// <summary>
+    /// The most of a chunk that may be rock, as a share of the chunk. Rock above that is lost to space, as rock that
+    /// holds no ore already is, so a chunk cut from lean rock is not a boulder no hopper can take.
+    /// </summary>
+    public float ChunkRockShare { get; private init; }
+
+    /// <summary>
+    /// The heaviest a chunk can be: its ore mark with the rock that may ride along. No chunk is heavier, whatever rock
+    /// it was cut from, so a chunk's size has a ceiling the content can be checked against.
+    /// </summary>
+    public float ChunkMaxMassKg { get; private init; }
+
+    /// <summary>The intake of the smallest ore hopper the game supports, in metres.</summary>
+    public float ChunkIntakeMetres { get; private init; }
+
+    /// <summary>The clearance the heaviest chunk must still leave in that intake.</summary>
+    public float ChunkIntakeMarginMetres { get; private init; }
+
     /// <summary>Density a chunk's size is worked out from, in kg a cubic metre.</summary>
     public float ChunkDensity { get; private init; }
 
@@ -73,6 +97,19 @@ public sealed class MiningRules
         var perSector = (int)Figure(chunks, "perSector"u8, 1, OreChunks.Capacity);
         var budget = (int)Figure(chunks, "contactBudget"u8, 1, 4096);
         var lifetime = Figure(chunks, "lifetimeMinutes"u8, 0, 24 * 60);
+        var oreKg = Figure(chunks, "oreKg"u8, 1, 1_000_000);
+        var rockShare = Figure(chunks, "rockShare"u8, 0, 0.9f);
+        var density = Figure(chunks, "densityKgPerCubicMetre"u8, 100, 30_000);
+        var intake = Figure(chunks, "intakeMetres"u8, 0.1f, 100);
+        var margin = Figure(chunks, "intakeMarginMetres"u8, 0.001f, 10);
+
+        // The heaviest chunk must go through the smallest hopper's intake with the margin to spare. A chunk that cannot
+        // is one the beam can never deliver, so the figures are refused together here rather than found out in play.
+        var maxMass = oreKg / (1f - rockShare);
+        var edge = 2f * Half(density, maxMass);
+        if (!(margin < intake) || edge > intake - margin)
+            throw new InvalidDataException(
+                $"mining.json: a chunk of {oreKg} kg at {rockShare} rock is {edge:0.###} m across, and the intake of {intake} m less {margin} m takes no such lump");
         return new MiningRules
         {
             BiteMetres = Figure(laser, "biteMetres"u8, 0.05f, 4),
@@ -81,8 +118,13 @@ public sealed class MiningRules
             MoveRadii = Figure(laser, "moveRadii"u8, 0.1f, 8),
             MaxLasersPerHull = perHull,
             MaxAimOffsetMetres = Figure(laser, "maxAimOffsetMetres"u8, 1, 10_000),
-            ChunkOreKg = Figure(chunks, "oreKg"u8, 1, 1_000_000),
-            ChunkDensity = Figure(chunks, "densityKgPerCubicMetre"u8, 100, 30_000),
+            ChunkOreKg = oreKg,
+            OreYieldShare = Figure(chunks, "yieldShare"u8, 0.01f, 1),
+            ChunkRockShare = rockShare,
+            ChunkMaxMassKg = maxMass,
+            ChunkIntakeMetres = intake,
+            ChunkIntakeMarginMetres = margin,
+            ChunkDensity = density,
             ChunkSpeed = Figure(chunks, "speed"u8, 0, 50),
             ChunkSpin = Figure(chunks, "spin"u8, 0, 20),
             ChunksPerSector = perSector,
@@ -99,6 +141,26 @@ public sealed class MiningRules
     /// </summary>
     public double ScrapeKg(float radius, float length, float rockDensityTonnes) =>
         (Math.PI * radius * radius + 2.0 * radius * length) * BiteMetres * rockDensityTonnes * 1000.0;
+
+    /// <summary>Half the edge of a chunk of <paramref name="massKg"/>, from the content's density.</summary>
+    public float ChunkHalf(float massKg) => Half(ChunkDensity, massKg);
+
+    /// <summary>
+    /// What a chunk that breaks off weighs and what its grade is, from the ore it carries and the rock it was cut
+    /// from: its ore plus the rock that keeps it within <see cref="ChunkMaxMassKg"/>, the rock above that staying
+    /// behind in space, and its grade its ore over that mass. The one rule the server spawns by and the check above
+    /// reads, so a chunk's size cannot be worked out twice.
+    /// </summary>
+    public void ChunkOf(float oreKg, float hostKg, out float mass, out float grade)
+    {
+        var rock = Math.Clamp(ChunkMaxMassKg - oreKg, 0, hostKg);
+        mass = Math.Min(oreKg + rock, ChunkMaxMassKg);
+        grade = Math.Clamp(oreKg / mass, 1e-4f, 1);
+    }
+
+    /// <summary>The one rule a chunk's size is worked out by, for the figures read here and the ones checked above.</summary>
+    private static float Half(float densityKgPerCubicMetre, float massKg) =>
+        0.5f * MathF.Cbrt(Math.Max(massKg, 0.001f) / densityKgPerCubicMetre);
 }
 
 /// <summary>
@@ -187,7 +249,7 @@ public sealed class OreChunks
     public ref OreChunk At(int index) => ref _items.AsSpan(0, _count)[index];
 
     /// <summary>Half the edge of a chunk's cube, from its mass and the content's density.</summary>
-    public static float Half(MiningRules rules, float mass) => 0.5f * MathF.Cbrt(Math.Max(mass, 0.001f) / rules.ChunkDensity);
+    public static float Half(MiningRules rules, float mass) => rules.ChunkHalf(mass);
 
     /// <summary>Validates, then evicts the oldest chunk of a full sector or a full pool, then adds.</summary>
     public bool Add(GameContent content, in OreChunk item, out uint id)

@@ -327,6 +327,7 @@ public sealed partial class ServerHost
     private void Yield(ref ServerBeam beam, RockRef rock, in Asteroid asteroid, Vector3 deepest, double kilograms, Double3 hit, Vector3 direction, Vector3 rockVelocity)
     {
         if (Galaxy.Interiors is null || !(kilograms > 0)) return;
+        var rules = _content.Mining;
         ref readonly var interior = ref Interior(rock, asteroid);
         interior.Sample(deepest, out var sample);
         if (beam.OreRock != rock)
@@ -342,11 +343,15 @@ public sealed partial class ServerHost
         void Add(ref double ore, ref double host, int resource, float share)
         {
             if (resource < 0 || !(share > 0)) return;
-            ore += kilograms * share;
+            // The rock the scrape took out always comes along, and the ore freed from it is the content's share of what
+            // that rock holds. Lowering that share is what lowers the yield, and with it how often a chunk breaks off.
+            ore += kilograms * share * rules.OreYieldShare;
             host += kilograms;
-            if (ore < _content.Mining.ChunkOreKg) return;
-            SpawnChunk(resource, (float)Math.Clamp(ore / host, 1e-4, 1), (float)host, hit, direction, rockVelocity);
-            ore = 0;
+            if (ore < rules.ChunkOreKg) return;
+            SpawnChunk(resource, rules.ChunkOreKg, (float)host, hit, direction, rockVelocity);
+            // The mark's ore goes with the chunk and what is over it stays on the tally, so every chunk carries exactly
+            // the mark and none is heavier than the content's heaviest: its size is known before the beam ever fires.
+            ore -= rules.ChunkOreKg;
             host = 0;
         }
     }
@@ -363,11 +368,12 @@ public sealed partial class ServerHost
 
     // A chunk breaks off where the beam meets the rock, thrown out along -direction (the rock's outward direction at
     // the cut) with the rock's own motion and a turn
-    // that comes from its identity, so no randomness is needed.
-    private void SpawnChunk(int resource, float grade, float mass, Double3 hit, Vector3 direction, Vector3 rockVelocity)
+    // that comes from its identity, so no randomness is needed. It carries the ore it broke off with and only the rock
+    // that keeps it within the content's heaviest chunk: the rest of the rock is left behind, as rock with no ore is.
+    private void SpawnChunk(int resource, float oreKg, float hostKg, Double3 hit, Vector3 direction, Vector3 rockVelocity)
     {
         var rules = _content.Mining;
-        mass = Math.Min(mass, 1e6f);
+        rules.ChunkOf(oreKg, hostKg, out var mass, out var grade);
         var half = OreChunks.Half(rules, mass);
         var seed = _chunks.NextId * 2654435761u;
         var axis = Vector3.Normalize(new Vector3((seed & 255) - 127.5f, (seed >> 8 & 255) - 127.5f, (seed >> 16 & 255) - 127.5f) + new Vector3(0.1f));

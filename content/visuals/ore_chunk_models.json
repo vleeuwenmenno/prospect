@@ -7,7 +7,7 @@
   "facetRelief": 0.09,
   "cutDepthMin": 0.62,
   "cutDepthMax": 0.85,
-  "crystalGrades": [0.3, 0.65],
+  "crystalGrades": [0.7, 0.9],
   "crystalCounts": [0, 4, 8],
   "crystalLengthMin": 0.45,
   "crystalLengthMax": 0.85,

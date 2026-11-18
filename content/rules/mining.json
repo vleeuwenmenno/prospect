@@ -8,8 +8,12 @@
     "maxAimOffsetMetres": 400
   },
   "chunks": {
-    "oreKg": 300,
+    "oreKg": 400,
+    "yieldShare": 0.5,
+    "rockShare": 0.25,
     "densityKgPerCubicMetre": 3000,
+    "intakeMetres": 1.0,
+    "intakeMarginMetres": 0.15,
     "speed": 2,
     "spin": 1.2,
     "perSector": 64,

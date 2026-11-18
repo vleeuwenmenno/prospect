@@ -484,12 +484,32 @@ How to work on it is in `AGENTS.md`, "Mining lasers, action groups and ore chunk
 - Firing: the client sends the groups that fire and the aim ray when they change. The server plans the lasers
   before the hull round (group, block there, gimbal, own hull clear, power asked), fires after it and cuts through
   `ScrapeRock`.
-- Ore: each scrape's volume times the rock's density, shared out by the interior sample at the cut's deepest point.
-  Each ore adds up per laser; at the mark it breaks off as a chunk.
+- Ore: each scrape's volume times the rock's density, shared out by the interior sample at the cut's deepest point,
+  times the content's yield share. Each ore adds up per laser; at the mark it breaks off as a chunk.
+- A chunk carries the ore it broke off with and only the rock that keeps it small: the rest of the rock is lost to
+  space. Its grade is its ore over its mass, so it is the chunk's composition and no longer the rock's local richness.
 - Chunks: a fixed pool of 256 apart from loose containers, drifting, bouncing off rocks and hull blocks, replicated
   by sensor cover and saved.
 - Wire: protocol 68, messages 44 to 48. Save: codec 20.
 - Laser heat (added after R4, protocol 72): see "Laser heat and cold clouds" below.
+
+### Figures
+
+| Figure | Value | Where |
+| --- | --- | --- |
+| Scrape's yield | 0.5 of the ore the rock it cuts holds | `chunks.yieldShare` |
+| Ore one chunk carries | 400 kg | `chunks.oreKg` |
+| Rock a chunk may hold | 0.25 of the chunk, at most | `chunks.rockShare` |
+| Heaviest chunk | 533 kg, 0.56 m a side | worked out from the two above |
+| Chunk density | 3,000 kg a cubic metre | `chunks.densityKgPerCubicMetre` |
+| Smallest hopper intake | 1 m (one cell of the Prospector's hopper, the face `TractorReach.Intake` aims at and a chunk is taken through) | `chunks.intakeMetres` |
+| Clearance a chunk leaves in it | 0.15 m | `chunks.intakeMarginMetres` |
+
+The figures are checked together when `mining.json` is read: the heaviest the ore mark and its rock can make a chunk
+must go through the smallest intake less its margin, or the file is refused. A chunk is never a lump no hopper takes.
+At a 5 % grade a chunk used to be 6 t; it is 533 kg now, every time. The rim the hopper's model draws round its opening
+narrows the drawn mouth to 0.60 m on a one-metre block, and a 0.56 m chunk still goes through it; the figures above
+measure the intake face the rule takes a chunk through, not that rim.
 
 ### Laser heat and cold clouds
 
@@ -559,8 +579,9 @@ Limits:
 
 - Beams pass through other ships; only the firing hull's own blocks block them.
 - A beam is drawn from the server's end point, sent every tick it fires (unreliable); a lost packet holds the beam.
-- Ore is an estimate from the scrape's volume, not the volume the bricks really lost. Rock that holds no ore is lost.
-- Each ore of a cut makes its own chunk with the rock it came in, so two ores of one cut count that rock twice.
+- Ore is an estimate from the scrape's volume, not the volume the bricks really lost. Rock that holds no ore is lost,
+  and so is the rock above the share a chunk may carry.
+- Each ore of a cut makes its own chunk, each with its own capped rock, so two ores of one cut make two small chunks.
 - Partial ore is forgotten when the laser moves to another rock or stops for good.
 - A rock fills up: 2,048 scrapes a rock, 65,536 a world. A full rock still shows the beam and yields nothing.
 - No rock heat or cracking (I2), no weapons in groups yet. The laser is drawn as a turret whose head lies along the
@@ -620,9 +641,13 @@ allocation.
 - No key or button sends drones for one chunk by hand; only "Pick up ores" does.
 - Drone answers for a chunk use the container's words ("fetching", "delivered", "no rack room").
 - A chunk is taken whole or not at all. A chunk heavier than the bins' room, or than a beam's limit (100 t), is
-  never taken. A lean chunk is large: 300 kg of ore at a 5 % grade is 6 t.
-- The bins fill in bursts on the Prospector: two lasers free about 15 t in the first minute on a lean rock. Heat
-  stops a burn after 20 s and the battery is empty after about 35 s of cutting; the lasers then wait for it.
+  never taken. Every chunk is 533 kg at most and 0.56 m across, which goes through a one-metre hopper's intake with
+  0.44 m to spare: it cannot outgrow a hopper.
+- A design whose hopper is smaller than `chunks.intakeMetres` still takes chunks the content allows; the figure is
+  the smallest intake the game supports, not a limit on a design.
+- The bins fill in bursts on the Prospector: two lasers put about 8 t in the bins in the first minute on a lean rock,
+  half of what they did before the yield cut. Heat stops a burn after 20 s and the battery is empty after about 35 s
+  of cutting; the lasers then wait for it.
 - The room check counts every chunk the ship's beams hold against the ore asked for, whatever ore they are. It can
   refuse a chunk that would have fitted. A beam can also take a chunk and let it go again, when a chunk of another
   ore reached the last empty bin first.
