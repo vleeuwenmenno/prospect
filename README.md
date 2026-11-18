@@ -119,8 +119,8 @@ container: it leads a chunk to a point outside the intake and then in, and the c
 that ore, else an empty one. A chunk is taken only when the bins have room for all of it, so a full ship stops
 pulling. Ore in the bins weighs the ship down. The Ship window (`I`) lists each bin's ore, grade and kilograms
 under ORE, and the Cargo window's ORE tab (`U`) shows a totals row per ore (kilograms, grade weighted by mass, bins used of all
-bins) and a tile per bin in the ore's colour with a fill bar; an empty bin reads EMPTY. Bins and the "Pick up ores" setting are saved with the world, and an edit or repair keeps the ore where
-its bins remain. Not there: selling, moving or dumping ore and a preview in the editor of ore an
+bins) and a tile per bin in the ore's colour with a fill bar; an empty bin reads EMPTY. Bins are saved with the world, and an edit or repair keeps the ore where
+its bins remain. Drones do not haul ore chunks (switched off, `oreFetch` in `content/blocks/drones.json`); tractor beams take them into the hopper. Not there: selling, moving or dumping ore and a preview in the editor of ore an
 edit would dump. A rock holds at most 2,048 scrapes and a world 65,536
 (`content/rules/rock_edits.json`); laser and chunk figures are in `content/rules/mining.json` and `blocks.json`. See
 [drones and mining](docs/roadmap/drones-mining.md).

@@ -405,7 +405,7 @@ internal sealed partial class ScreenHost
         }
         else if (bays.Fetching > 0)
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Info, Kit.F($"{bays.Fetching} FETCHING  {stocked} IN"), inner);
-        else if (rebuild <= 0 && _app.World.OreChunksNear is > 0 and var chunks)
+        else if (rebuild <= 0 && snapshot.Content?.Drones.OreFetch == true && _app.World.OreChunksNear is > 0 and var chunks)
         {
             // Loose ore close to the ship: the one line that says there is something to collect (see
             // OreChunkLook.NearMetres). Chunks the bins cannot take say why here too, in the blocked colour; the words
@@ -468,7 +468,8 @@ internal sealed partial class ScreenHost
         var gap = Kit.Px(Theme.Space2);
         var line = Kit.Px(16);
         var width = Kit.Px(244);
-        var height = pad * 2 + line + gap + Kit.Px(Theme.ControlHeight) + gap + Kit.Px(24) + Kit.Px(24) + gap + line * DronePopupStatusLines
+        var oreFetch = snapshot.Content?.Drones.OreFetch ?? false;
+        var height = pad * 2 + line + gap + Kit.Px(Theme.ControlHeight) + gap + Kit.Px(24) + (oreFetch ? Kit.Px(24) : 0) + gap + line * DronePopupStatusLines
             + gap + line + gap + Kit.Px(Theme.ControlHeight);
         var display = _ui.DisplaySize;
         var edge = Kit.Px(Theme.Space2);
@@ -509,10 +510,14 @@ internal sealed partial class ScreenHost
         at.Y += Kit.Px(24);
 
         // Ore pickup: the second flag beside auto pickup, read back from the server like it.
-        ImGui.SetCursorScreenPos(at);
-        if (EditorCheckbox("##pickupores"u8, "Pick up ores"u8, new float2(inner, Kit.Px(24)), true, bays.PickUpOres) && Bridge is { } oreSettings)
-            DronePopup.ToggleOres(bays, own, oreSettings);
-        at.Y += Kit.Px(24) + gap;
+        if (oreFetch)
+        {
+            ImGui.SetCursorScreenPos(at);
+            if (EditorCheckbox("##pickupores"u8, "Pick up ores"u8, new float2(inner, Kit.Px(24)), true, bays.PickUpOres) && Bridge is { } oreSettings)
+                DronePopup.ToggleOres(bays, own, oreSettings);
+            at.Y += Kit.Px(24);
+        }
+        at.Y += gap;
 
         Kit.Text(draw, _ui.Mono, Theme.FontCaption, at, Theme.Info, Kit.F($"{stocked} IN  {outside} OUT  {bays.Fetching} FETCHING"));
         at.Y += line;

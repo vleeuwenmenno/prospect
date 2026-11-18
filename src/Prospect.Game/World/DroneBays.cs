@@ -172,6 +172,13 @@ public sealed record DroneRules
     /// <summary>Seconds auto pickup waits after its owner recalls the drones by hand, so a recall means something.</summary>
     public required float AutoPickupPauseSeconds { get; init; }
 
+    /// <summary>
+    /// Whether work drones may haul loose ore chunks (<see cref="OrderTask.FetchOre"/>). Off in the shipped content: drones
+    /// on an ore fetch rammed their own ship and made it jitter (docs/roadmap/mining-rework.md). Tractor beams still take
+    /// chunks; a saved or sent "pick up ores" flag stays valid and is ignored while this is off.
+    /// </summary>
+    public required bool OreFetch { get; init; }
+
     /// <summary>How drones scan rocks: range, standoff, travel and the two scan levels.</summary>
     public required DroneScanRules Scans { get; init; }
 
@@ -246,6 +253,12 @@ public sealed record DroneRules
             AutoPickupMaxFetches = Whole("autoPickupMaxFetches", 1, DroneBayRules.MaxFetches),
             AutoPickupRetrySeconds = Number("autoPickupRetrySeconds", 1, 3600),
             AutoPickupPauseSeconds = Number("autoPickupPauseSeconds", 0, 3600),
+            OreFetch = root.GetProperty("oreFetch"u8).ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                _ => throw new InvalidDataException("drones.json: oreFetch must be true or false"),
+            },
             Scans = DroneScanRules.Read(root.GetProperty("scans"u8), root.GetProperty("maxPerPlayer"u8).GetInt32()),
         };
         if (rules.HoldDistanceMetres > rules.MaxHoldDistanceMetres)

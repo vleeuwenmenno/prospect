@@ -19,6 +19,13 @@ public sealed class PredictionCorrectionTests(ITestOutputHelper output)
 {
     private static readonly GameContent Shipped = GameContent.Load();
 
+    /// <summary>The shipped content with drone ore hauling switched on, for the measurement of what that did.</summary>
+    private static readonly Lazy<GameContent> OreFetchOn = new(() =>
+    {
+        using var copy = new ContentCopy().Replace("blocks/drones.json", "\"oreFetch\": false", "\"oreFetch\": true");
+        return copy.Load();
+    });
+
     // What counts as agreement: metres, radians, metres a second and radians a second. Positions are doubles on both
     // sides and velocities floats, so a hull that is predicted exactly differs by rounding in the last place only.
     private const float Metres = 1e-4f, Radians = 1e-4f, MetresPerSecond = 1e-3f, RadiansPerSecond = 1e-4f;
@@ -53,13 +60,14 @@ public sealed class PredictionCorrectionTests(ITestOutputHelper output)
         /// <inheritdoc cref="Jolts" />
         internal float Jolt;
 
-        internal Rig(bool overRock = false)
+        internal Rig(bool overRock = false, GameContent? content = null)
         {
+            content ??= Shipped;
             var config = overRock
                 ? new ServerConfig { MaxPlayers = 1, Clock = _clock, ScriptedRockScrapeRadius = 100, ScriptedRockScrapeStandoff = 25 }
                 : new ServerConfig { MaxPlayers = 1, Clock = _clock };
-            Server = new ServerHost(config, Shipped, [_link.Server]);
-            Client = new ClientSession(_link.Client, Shipped, "Pilot", clock: _clock);
+            Server = new ServerHost(config, content, [_link.Server]);
+            Client = new ClientSession(_link.Client, content, "Pilot", clock: _clock);
             _world = (ClientWorld)typeof(ClientSession).GetField("_world", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Client)!;
             Hulls = MiningFixtures.Field<HullStore>(Server, "_hulls");
             for (var n = 0; n < 4000 && !(Snap().OwnHull >= 0 && Snap().Hulls[Snap().OwnHull].Id != 0); n++)
@@ -280,7 +288,7 @@ public sealed class PredictionCorrectionTests(ITestOutputHelper output)
     [Fact]
     public void MeasuresAShipManoeuvringWhileItsDronesFetchOre()
     {
-        using var rig = new Rig(overRock: true);
+        using var rig = new Rig(overRock: true, OreFetchOn.Value);
         rig.Client.Input.LaunchDrones(rig.Own, 3);
         rig.Step(18);
         rig.Client.Input.SetDroneSettings(rig.Own, true, true);
@@ -302,5 +310,34 @@ public sealed class PredictionCorrectionTests(ITestOutputHelper output)
         Assert.True(rig.Hulls.Count >= 4, $"{rig.Hulls.Count} hulls");
         Assert.True(fetched, "a drone carried a chunk");
         output.WriteLine($"MEASURE 160 s of mining, strafing and climbing with drones fetching: {rig.Contacts} contacts between the ship and a drone; the server moved the ship unevenly in {rig.Jolts} ticks (at most {rig.Jolt:0.000} m in one); {rig.Figures}");
+    }
+
+    /// <summary>
+    /// The shipped content has drone ore hauling off: with "pick up ores" asked for, drones launched and the ship mining
+    /// and strafing, no drone carries a chunk and the server never has to correct the ship's prediction.
+    /// </summary>
+    [Fact]
+    public void WithTheShippedContentMiningWhileStrafingWithDronesOutNeedsNoCorrection()
+    {
+        using var rig = new Rig(overRock: true);
+        rig.Client.Input.LaunchDrones(rig.Own, 3);
+        rig.Step(18);
+        rig.Client.Input.SetDroneSettings(rig.Own, true, true);
+        rig.Fire(true);
+        rig.Reset();
+        for (var leg = 0; leg < 40; leg++)
+        {
+            var way = leg % 2 == 0 ? 1 : -1;
+            rig.Client.Input.Submit(leg % 4 < 2 ? new PlayerControls { Strafe = way } : new PlayerControls { Vertical = way });
+            for (var n = 0; n < 240; n++)
+            {
+                rig.Step();
+                Assert.Equal(0, rig.Snap().DroneCarryCount);
+            }
+        }
+
+        Assert.True(rig.Hulls.Count >= 4, $"{rig.Hulls.Count} hulls");
+        Assert.Equal(0, rig.Contacts);
+        rig.AssertNeverCorrected("mining and strafing with drones out");
     }
 }

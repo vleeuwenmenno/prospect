@@ -33,6 +33,7 @@
   "autoPickupMaxFetches": 4,
   "autoPickupRetrySeconds": 20.0,
   "autoPickupPauseSeconds": 30.0,
+  "oreFetch": false,
   "scans": {
     "rangeMetres": 3000.0,
     "standoffFraction": 0.6,
