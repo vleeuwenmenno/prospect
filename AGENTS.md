@@ -1510,11 +1510,13 @@ shield and the server know the design's blocks.
   or behind its own blocks) is still pulled (powered, so it keeps passing its own hull) toward the emitter's exit
   point, the one place the beam always sees, and the ordinary guide resumes when the line comes back. A body is let
   go only when the beam cannot bring it closer for `stallSeconds`: a tick without the power to pull, or one in which the
-  pull gains nothing on the way the body is taking. It then gets `PickupReadyTick` = now + `retrySeconds`. A longer way
-  (the exit route, or a goal that moved) re-bases the count, so a detour is not mistaken for a stall; the least shrink
-  that counts is `Approach.NeededProgress`, capped by `tractor.progressMetres` but never more than the approach rule
-  closes in a tick, so the final glide's creep is progress too. `FreeContainer.TractorBest` and `TractorIdle` are
-  server-only (not on the wire, not saved). Figures are the `tractor` entry of `blocks/cargo.json`
+  pull gains nothing on the way the body is taking. It then gets `PickupReadyTick` = now + `retrySeconds`. A change of
+  leg (`TractorRoute`: staging, by the exit, final glide) measures from the new leg's length, so a detour is not
+  mistaken for a stall; nothing else may raise `TractorBest`, so a body pushed back and pulled in on one leg (pressed
+  against a rock) still reaches the stall and never holds a beam for ever. The least shrink that counts is
+  `Approach.NeededProgress`, capped by `tractor.progressMetres` but never more than the approach rule closes in a
+  tick, so the final glide's creep is progress too. `TractorBest`, `TractorIdle` and `TractorRoute` (on containers and
+  chunks) are server-only (not on the wire, not saved). Figures are the `tractor` entry of `blocks/cargo.json`
   (`TractorGuidance`, validated). `TractorReach.Rack` skips an aim point lying against another live box (a face
   against a neighbour is a deck, not an entrance). The pull runs after the hulls step and before the bodies drift, so it
   measures a body where it will be at the end of the tick (`Position + Velocity * Dt`) against the hull's new pose;

@@ -16,6 +16,12 @@ public struct FreeContainer
     public float TractorBest;
     public int TractorIdle;
     /// <summary>
+    /// Server-only, never sent or saved: the leg the beam last pulled the body along (0 none yet, 1 to the staging
+    /// point, 2 by way of the emitter's exit, 3 the final glide). A change of leg sets <see cref="TractorBest"/> to the
+    /// new leg's length; nothing else may raise it, so a body that only jitters on one leg still reaches the stall.
+    /// </summary>
+    public byte TractorRoute;
+    /// <summary>
     /// Server-only, never sent or saved: the hull whose drones are fetching this body (packed handle, zero for none)
     /// and the tractor mount they hand it to. While set, no tractor acquires it and no other drones are sent for it.
     /// </summary>
@@ -90,7 +96,7 @@ public sealed class FreeContainers
 
     /// <summary>Drops transient claim state on load or when the pulling hull is not visible to a recipient.</summary>
     public static void ClearTractor(ref FreeContainer item)
-    { item.TractorHull = 0; item.TractorMount = 0; item.TractorRack = 0; item.TractorStage = 0; item.TractorPowered = false; item.TractorBest = 0; item.TractorIdle = 0; }
+    { item.TractorHull = 0; item.TractorMount = 0; item.TractorRack = 0; item.TractorStage = 0; item.TractorPowered = false; item.TractorBest = 0; item.TractorIdle = 0; item.TractorRoute = 0; }
 
     private static bool Older(in FreeContainer a, in FreeContainer b) => a.Born < b.Born || a.Born == b.Born && a.Id < b.Id;
 

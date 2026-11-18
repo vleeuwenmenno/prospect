@@ -376,8 +376,10 @@ across claims, and the ore run's battery is flat from 36 s to 66 s.
 - The stall is "the beam could not bring the body closer for `stallSeconds`", not "the body was out of sight": a tick
   without power to pull, or one in which the pull gains nothing on the way the body is taking. The least shrink that
   counts is `Approach.NeededProgress`, `tractor.progressMetres` (0.02 m), but never more than the approach rule closes
-  in a tick (0.01 m on the final glide at `finalSpeed` 0.6 m/s), so a creeping glide is progress. A longer way, the exit
-  route or a goal that moved, re-bases the count instead of looking like a stall.
+  in a tick (0.01 m on the final glide at `finalSpeed` 0.6 m/s), so a creeping glide is progress. A change of leg (to
+  the staging point, by the exit, the final glide) measures from the new leg's length instead of looking like a
+  stall. Nothing else raises the least path left, so a body that is only pushed back and pulled in on one leg (pressed
+  against a rock) still reaches the stall and lets the beam go.
 - `ContentIdentity.EvaluatorVersion` is 26.
 
 | `TractorGuideTests`, Ridge design | Before | After |

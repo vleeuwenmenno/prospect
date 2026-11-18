@@ -272,7 +272,7 @@ public sealed partial class ServerHost
                     item.TractorHull = hull.Packed;
                     item.TractorMount = mount;
                     item.TractorRack = rack;
-                    item.TractorStage = 0; item.TractorBest = 0; item.TractorIdle = 0;
+                    item.TractorStage = 0; item.TractorBest = 0; item.TractorIdle = 0; item.TractorRoute = 0;
                     item.Velocity = carrier;
                     EndFetch(item.Id, hull);
                     ReplyDrones(info.Owner, DroneReply.Delivered, attached);

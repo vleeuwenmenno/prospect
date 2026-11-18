@@ -97,7 +97,7 @@ public sealed partial class TractorSimulation
                     ref var item = ref containers.At(c);
                     if (!item.MayPickup(hulls.Info(h).Owner, tick) || item.TractorHull != 0 || item.FetchHull != 0 || item.Position.RelativeTo(emitter).LengthSquared() > (spec.Range + design.BlockSize) * (spec.Range + design.BlockSize)) continue;
                     if (!Valid(containers, content, field, h, m, ref item, occupied, needSight: true)) continue;
-                    item.TractorHull = id; item.TractorMount = m; item.TractorStage = 0; item.TractorBest = 0; item.TractorIdle = 0;
+                    item.TractorHull = id; item.TractorMount = m; item.TractorStage = 0; item.TractorBest = 0; item.TractorIdle = 0; item.TractorRoute = 0;
                     taken = true;
                     break;
                 }
@@ -208,9 +208,17 @@ public sealed partial class TractorSimulation
             var gained = false;
             if (powered)
             {
-                // A longer way (the exit route, or a goal that moved) starts the count again: a body sent round the
-                // hull's own blocks is coming in, not stalled.
-                if (item.TractorBest > 0 && left > item.TractorBest) item.TractorBest = left;
+                // A longer way (the exit route instead of the straight one, or the glide given up for the exit) is
+                // measured from its own start: a body sent round the hull's own blocks is coming in, not stalled. Only
+                // a change of leg may do this. Raising the best whenever the path grew let a body pressed against a
+                // rock, pushed back and pulled in again each tick, count as gaining for ever, so it never reached the
+                // stall and the beam never let it go. The idle count is kept: a change of leg is not progress.
+                var route = (byte)(final ? 3 : viaExit ? 2 : 1);
+                if (route != item.TractorRoute)
+                {
+                    if (item.TractorRoute != 0 && item.TractorBest > 0) item.TractorBest = Math.Max(left, 1e-6f);
+                    item.TractorRoute = route;
+                }
                 // The least shrink that counts is the configured distance, but never more than the approach rule lets
                 // the body close in a tick: a body creeping in on the final glide is coming in, not stalled.
                 if (item.TractorBest <= 0 || left < item.TractorBest - Approach.NeededProgress(speed, tuning.ProgressMetres))

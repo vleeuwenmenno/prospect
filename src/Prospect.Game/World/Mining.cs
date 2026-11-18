@@ -141,6 +141,14 @@ public struct OreChunk
     public float TractorBest;
     public int TractorIdle;
 
+    /// <summary>
+    /// Server-only, never sent or saved: the leg the beam last pulled the chunk along (0 none yet, 1 to the point
+    /// outside the intake, 2 by way of the emitter's exit, 3 the glide in). A change of leg sets
+    /// <see cref="TractorBest"/> to the new leg's length; nothing else may raise it, so a chunk that only jitters on one
+    /// leg still reaches the stall.
+    /// </summary>
+    public byte TractorRoute;
+
     /// <summary>Server-only, never sent or saved: the first tick a tractor may take the chunk again after one let it go.</summary>
     public long RetryTick;
 
@@ -225,7 +233,7 @@ public sealed class OreChunks
 
     /// <summary>Drops a chunk's tractor claim: on a load, when the beam lets go, or for a client that cannot see the pulling hull.</summary>
     public static void ClearTractor(ref OreChunk item)
-    { item.TractorHull = 0; item.TractorMount = 0; item.TractorHopper = 0; item.TractorStage = 0; item.TractorPowered = false; item.TractorBest = 0; item.TractorIdle = 0; }
+    { item.TractorHull = 0; item.TractorMount = 0; item.TractorHopper = 0; item.TractorStage = 0; item.TractorPowered = false; item.TractorBest = 0; item.TractorIdle = 0; item.TractorRoute = 0; }
 
     /// <summary>Lets go of a chunk drones were fetching: it stays where it is, with the motion it has.</summary>
     public static void ClearFetch(ref OreChunk item) { item.FetchHull = 0; item.FetchMount = 0; }

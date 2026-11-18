@@ -227,6 +227,41 @@ public sealed class TractorGuideTests
     }
 
     [Fact]
+    public void ABodyPushedBackAndForthOnOneLegStillReachesTheStall()
+    {
+        // A body pressed against something the beam cannot pull it through (a rock: contacts with rocks still count
+        // for a held body) is pushed back and pulled in again, tick after tick, without ever coming closer. Its path
+        // left then grows and shrinks on the same leg. Only a change of leg may raise the least path left, so the
+        // beam must still let it go at the stall; raising it whenever the path grew counted every pull in as a gain,
+        // and the body held the beam for ever.
+        var design = Ridge(); using var hulls = new HullStore();
+        var origin = Content.Galaxy.CenterOf(new(0, 100, 0));
+        var h = hulls.Create(1, 0, design, origin);
+        var field = new HullField(hulls, [design]); var bodies = new FreeContainers();
+        Assert.True(bodies.Add(Content, Body(design, origin, AboveTheRidge), out _));
+        var tractor = new TractorSimulation(); var scratch = new byte[8];
+        field.BeginRound();
+        tractor.Plan(bodies, Content, field, scratch, 0);
+        Assert.Equal(h.Packed, bodies.Items[0].TractorHull);
+        var near = origin + AboveTheRidge - Pivot(design);
+        var far = near + new Vector3(0, .2f, 0);
+        var released = -1;
+        var ticks = Content.Cargo.Tractor.StallTicks;
+        for (var tick = 1; tick < 3 * ticks && released < 0; tick++)
+        {
+            field.BeginRound();
+            tractor.Plan(bodies, Content, field, scratch, tick);
+            field.Step(h.Index, default);
+            // Pushed out 20 cm, then pulled back to where it was: the same two places, over and over.
+            bodies.At(0).Position = (tick & 1) == 0 ? near : far;
+            bodies.At(0).Velocity = Vector3.Zero;
+            tractor.Pull(bodies, Content, field, scratch, tick);
+            if (bodies.Items[0].TractorHull == 0) released = tick;
+        }
+        Assert.InRange(released, ticks / 2, 2 * ticks);
+    }
+
+    [Fact]
     public void ASlowGlideAlwaysShowsProgress()
     {
         // The least shrink that counts as progress must never exceed what the approach rule closes in a tick, or a
