@@ -100,7 +100,8 @@
     "alignRate": 6,
     "progressMetres": 0.02,
     "stallSeconds": 4,
-    "retrySeconds": 10
+    "retrySeconds": 10,
+    "approachBrakeShare": 0.7
   },
   "space": {
     "perSector": 64,

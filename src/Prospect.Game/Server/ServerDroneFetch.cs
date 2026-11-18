@@ -290,7 +290,8 @@ public sealed partial class ServerHost
             var goal = DroneFetch.CarryGoal(next, FreeContainers.Half(_content.Cargo, item.Size), handover,
                 WorldPoint(hull, flight.CenterOfMass), flight.Radius, rules.ClearanceMetres);
             DroneFetch.Pull(ref item, goal.RelativeTo(next), carrier,
-                DroneFetch.CarryAcceleration(rules.CarryAcceleration, holding, mass, rules.CarryFollowShare, push), speed);
+                DroneFetch.CarryAcceleration(rules.CarryAcceleration, holding, mass, rules.CarryFollowShare, push), speed,
+                _content.Cargo.Tractor.ApproachBrakeShare);
         }
     }
 

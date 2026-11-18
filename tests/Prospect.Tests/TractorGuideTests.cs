@@ -175,6 +175,29 @@ public sealed class TractorGuideTests
         Assert.Equal(h.Packed, bodies.Items[0].TractorHull);
     }
 
+    [Fact]
+    public void TheApproachSpeedKeepsBrakingRoomInHand()
+    {
+        // The speed used to be exactly the speed that stops on the goal, so a single tick in which the pull was skipped
+        // (no power, no sight) left the body too fast to stop: it passed the staging point, then the hull, and was lost.
+        // The rule now closes at a share of that speed and has room to spare.
+        var share = Content.Cargo.Tractor.ApproachBrakeShare;
+        Assert.InRange(share, 0.05f, 0.95f);
+        const float acceleration = 4;
+        var ticks = 6 * HullSim.Dt;
+        foreach (var distance in new[] { 2f, 5f, 20f, 60f })
+        {
+            var speed = Approach.Speed(acceleration, distance, share);
+            Assert.InRange(speed, 0, MathF.Sqrt(2 * acceleration * distance));
+            // Still stoppable with the full acceleration in the room left, after six ticks without the pull.
+            Assert.True(Approach.StopsIn(acceleration, speed, distance - speed * ticks, 1f),
+                $"{distance} m: the speed it closes at survives six ticks without the pull");
+            var exact = MathF.Sqrt(2 * acceleration * distance);
+            Assert.False(Approach.StopsIn(acceleration, exact, distance - exact * HullSim.Dt, 1f),
+                $"{distance} m: the exact stopping speed cannot survive even one");
+        }
+    }
+
     [Theory]
     [InlineData("stagingMarginMetres", 0)]
     [InlineData("toleranceMetres", 0)]
@@ -184,6 +207,8 @@ public sealed class TractorGuideTests
     [InlineData("progressMetres", -1)]
     [InlineData("stallSeconds", 0)]
     [InlineData("retrySeconds", -1)]
+    [InlineData("approachBrakeShare", 0)]
+    [InlineData("approachBrakeShare", 1.5)]
     public void InvalidTractorGuidanceIsRefused(string name, float value)
     {
         using var copy = new ContentCopy();

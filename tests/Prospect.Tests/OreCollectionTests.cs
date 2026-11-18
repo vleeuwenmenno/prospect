@@ -382,6 +382,78 @@ public sealed class OreCollectionTests
         Assert.Equal(0u, Planned(miner, Chunk(miner, Double3.Zero, mass: (float)capacity * 2 + 500)).TractorHull);
     }
 
+    [Fact]
+    public void ABeamNeverTakesAChunkItCannotStopBeforeItReachesTheEmitter()
+    {
+        // A chunk thrown off a rock the ship passes is inside the beam's reach but running at 20 m/s. The beam took it
+        // anyway and could only shed 4 m/s2, so it held what it could not stop: the chunk ran out of reach, was let go
+        // after the stall and drifted away, and the drones were never sent for it while the beam held it. The beam now
+        // leaves it to them.
+        var design = Miner();
+        var approach = Content.Cargo.Tractor.ApproachBrakeShare;
+        var spec = design.Mounts[0].Type.Tractor!;
+        // A chunk seven metres above the core's top face has about six metres of room; 20 m/s needs well over forty.
+        Assert.InRange(20f * 20f / (2 * spec.Acceleration * approach), 40, 100);
+        foreach (var direction in new[] { Vector3.UnitY, -Vector3.UnitY, Vector3.UnitX })
+        {
+            var fast = Chunk(design, Double3.Zero);
+            fast.Velocity = direction * 20;
+            Assert.Equal(0u, Planned(design, fast).TractorHull);
+            var slow = Chunk(design, Double3.Zero);
+            slow.Velocity = direction * 2;
+            Assert.NotEqual(0u, Planned(design, slow).TractorHull);
+        }
+
+        // What the drones' ore pickup reads: a chunk the beam cannot take is not one it leaves alone.
+        var runner = Chunk(design, Double3.Zero);
+        runner.Velocity = Vector3.UnitY * 20;
+        Assert.False(Reaches(design, runner));
+        Assert.True(Reaches(design, Chunk(design, Double3.Zero)));
+    }
+
+    /// <summary>Whether a beam of <paramref name="design"/> could take <paramref name="chunk"/> where it is, as ore pickup asks.</summary>
+    private static bool Reaches(HullDesign design, in OreChunk chunk)
+    {
+        using var hulls = new HullStore();
+        hulls.Create(1, 0, design, Double3.Zero);
+        var field = new HullField(hulls, [design]);
+        var chunks = new OreChunks();
+        Assert.True(chunks.Add(Content, chunk, out _));
+        return TractorSimulation.Reaches(Content, field, 0, chunks.Items[0]);
+    }
+
+    [Fact]
+    public void OrePickupBringsAFastChunkInThatTheBeamLeavesAlone()
+    {
+        // The beam used to grab a chunk running at 20 m/s, drag it out of reach, drop it after four seconds and leave
+        // the drones to chase it hundreds of metres; it took well over a minute to stow. A beam takes only what it can
+        // still stop before the body reaches it, so this one is the drones' from the start.
+        var content = Mining();
+        using var rig = Rig(content);
+        Settings(rig, cargo: false, ores: true);
+        var pod = Pod(rig);
+        var design = content.Designs[rig.Hulls.Info(pod.Index).Design];
+        var share = content.Cargo.Tractor.ApproachBrakeShare;
+        Place(rig, content, new Vector3(0, 30, 0), resource: 1, mass: 400, grade: 0.4f, velocity: new Vector3(0, 20, 0));
+        var tooFast = 0f;
+        for (var t = 0; t < 60 * 120 && Chunks(rig).Items.Length > 0; t++)
+        {
+            rig.Tick();
+            if (Chunks(rig).Items.Length == 0) break;
+            ref readonly var item = ref Chunks(rig).Items[0];
+            if (item.TractorHull == 0) continue;
+            var state = rig.Hulls.State(pod.Index);
+            var emitter = state.Position + HullRotation.Rotate(design.MountOffsets[item.TractorMount], state.Orientation);
+            var room = (float)item.Position.RelativeTo(emitter).Length() - OreChunks.Half(content.Mining, item.Mass);
+            var speed = (item.Velocity - state.Velocity).Length();
+            var could = Approach.Speed(design.Mounts[item.TractorMount].Type.Tractor!.Acceleration, room, share);
+            tooFast = Math.Max(tooFast, speed - could);
+        }
+        Assert.True(tooFast <= 0.5f, $"a beam took a chunk faster than it can stop: {tooFast:0.00} m/s over");
+        Assert.True(Chunks(rig).Items.Length == 0, "the drones brought it in");
+        Assert.Equal(400, Bins(rig)[0].Kg);
+    }
+
     /// <summary>One plan for a hull of <paramref name="design"/> whose bins hold <paramref name="held"/> (ore, kilograms), with one chunk loose.</summary>
     private static OreChunk Planned(HullDesign design, OreChunk chunk, params (int Resource, double Kg)[] held)
     {
@@ -599,14 +671,14 @@ public sealed class OreCollectionTests
 
     private static ReadOnlySpan<OreBin> Bins(SaveRig rig) => rig.Hulls.BlockStates.Bins(rig.Hulls.Info(Pod(rig).Index).BlockState);
 
-    /// <summary>A chunk at <paramref name="offset"/> from the pod, at rest with it.</summary>
-    private static uint Place(SaveRig rig, GameContent content, Vector3 offset, int resource = 1, float mass = 400, float grade = 0.25f)
+    /// <summary>A chunk at <paramref name="offset"/> from the pod, moving at <paramref name="velocity"/> relative to it.</summary>
+    private static uint Place(SaveRig rig, GameContent content, Vector3 offset, int resource = 1, float mass = 400, float grade = 0.25f, Vector3 velocity = default)
     {
         var pod = rig.Hulls.State(Pod(rig).Index);
         Assert.True(Chunks(rig).Add(content, new OreChunk
         {
             Position = pod.Position + offset,
-            Velocity = pod.Velocity,
+            Velocity = pod.Velocity + velocity,
             Orientation = Quaternion.Identity,
             Resource = resource,
             Grade = grade,
