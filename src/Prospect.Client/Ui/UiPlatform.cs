@@ -124,8 +124,10 @@ internal sealed unsafe class UiPlatform : IDisposable
         var size = _window.Size;
         var framebuffer = _window.FramebufferSize;
         io.DisplaySize = new float2(size.X, size.Y);
-        if (size.X > 0 && size.Y > 0)
-            io.DisplayFramebufferScale = new float2((float)framebuffer.X / size.X, (float)framebuffer.Y / size.Y);
+        // The window's content scale, never this frame's framebuffer-to-window ratio: while a compositor resizes the
+        // window the two sizes are reported a frame apart, and the ratio then jumps far enough that Dear ImGui
+        // re-bakes its font atlas into a new page inside the frame loop. See InterfaceScale.
+        io.DisplayFramebufferScale = InterfaceScale.Framebuffer(_window.ContentScale, size, framebuffer);
 
         var now = Stopwatch.GetTimestamp();
         io.DeltaTime = _lastFrame == 0 ? 1f / 60f : Math.Max(1e-5f, (float)((now - _lastFrame) / (double)Stopwatch.Frequency));
