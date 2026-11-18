@@ -155,7 +155,8 @@ public sealed partial class ServerHost
             var goal = DroneFetch.CarryGoal(next, new Vector3(OreChunks.Half(_content.Mining, item.Mass)), handover,
                 WorldPoint(hull, flight.CenterOfMass), flight.Radius, rules.ClearanceMetres);
             DroneFetch.Pull(ref item.Velocity, goal.RelativeTo(next), carrier,
-                DroneFetch.CarryAcceleration(rules.CarryAcceleration, holding, item.Mass, rules.CarryFollowShare, push), speed);
+                DroneFetch.CarryAcceleration(rules.CarryAcceleration, holding, item.Mass, rules.CarryFollowShare, push), speed,
+                _content.Cargo.Tractor.ApproachBrakeShare);
         }
     }
 
@@ -205,7 +206,7 @@ public sealed partial class ServerHost
             if (item.Position.RelativeTo(origin).LengthSquared() > range * range) continue;
             if (OreSkipped(ref page, item.Id) || !Covered(info.Owner, item.Position)) continue;
             if (_hulls.BlockStates.OreRoom(info.BlockState, item.Resource) < item.Mass) continue;
-            if (TractorSimulation.Reaches(_field, hull.Index, item)) continue;
+            if (TractorSimulation.Reaches(_content, _field, hull.Index, item)) continue;
 
             page.OreCursor = c + 1;
             var id = item.Id;

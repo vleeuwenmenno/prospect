@@ -105,7 +105,7 @@ public sealed partial class TractorSimulation
                 // A loose container always comes first: the beam looks at chunks only when it took none.
                 if (taken || !ore) continue;
                 chunkBudget -= loose;
-                AcquireChunk(chunks!, field, h, m, emitter, spec.Range + design.BlockSize, tick);
+                AcquireChunk(chunks!, content, field, h, m, emitter, spec.Range + design.BlockSize, tick);
             }
         }
         _acquireHull = _acquireMount = 0;
@@ -235,18 +235,19 @@ public sealed partial class TractorSimulation
                 && hulls.BlockStates.TryAddCargo(info.BlockState, content, Held(item), occupied))
             { containers.Remove(c); field.Refit(h); continue; }
 
-            Steer(ref item.Velocity, delta, distance, relative, state.Orientation, spec.Acceleration, final ? tuning.FinalSpeed : float.PositiveInfinity);
+            Steer(ref item.Velocity, delta, distance, relative, state.Orientation, spec.Acceleration, final ? tuning.FinalSpeed : float.PositiveInfinity, tuning.ApproachBrakeShare);
         }
     }
 
     /// <summary>
     /// One tick of a beam's pull on a body it holds: its velocity relative to the hull at the target is steered along
-    /// <paramref name="delta"/> (the way left, in the hull's frame) at the speed it can still stop from, at most
-    /// <paramref name="most"/>, changing by no more than the beam's acceleration allows in a tick.
+    /// <paramref name="delta"/> (the way left, in the hull's frame) at the speed it can still stop from with
+    /// <paramref name="approach"/> of its braking in hand (<see cref="Approach"/>), at most <paramref name="most"/>,
+    /// changing by no more than the beam's acceleration allows in a tick.
     /// </summary>
-    private static void Steer(ref Vector3 velocity, Vector3 delta, float distance, Vector3 relative, Quaternion orientation, float acceleration, float most)
+    private static void Steer(ref Vector3 velocity, Vector3 delta, float distance, Vector3 relative, Quaternion orientation, float acceleration, float most, float approach)
     {
-        var speed = Math.Min(MathF.Sqrt(2 * acceleration * distance), most);
+        var speed = Math.Min(Approach.Speed(acceleration, distance, approach), most);
         var desired = distance > 1e-6f ? HullRotation.Rotate(delta / distance, orientation) * speed : Vector3.Zero;
         var change = desired - relative;
         var length = change.Length();

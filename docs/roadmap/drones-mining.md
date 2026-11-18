@@ -323,6 +323,34 @@ Fixed 2026-11-17 after play showed drones wandering, losing loads and slow. Each
   (never on the hatch's line) and one at a time lines up (`LaneTaken`).
 - Slow: the work drone had two ion thrusters a side (3 m/s²). It now has four (5.3 m/s²).
 
+### A body a beam cannot stop
+
+Fixed 2026-11-19 after a chunk a drone brought in flew off and never reached the hopper. The trace (`--open ore`,
+headless, at 60 Hz):
+
+- A chunk thrown off a rock at 20 m/s sat inside the beam's 40 m reach. The beam took it anyway. At 4 m/s² it needs
+  50 m to stop and the guide's staging point was 11 m away, so it could not: it held on while the chunk ran 100 m out
+  of reach, let go after the 4 s stall, and the chunk kept 17 m/s. Nobody took it again — a new claim needs the beam's
+  line of sight, and the drones' "Pick up ores" had skipped it as "the beam will take it" (`Reaches`).
+- The same happened to the drone carry's hand-over: it only checks that the body is within 1.5 m of the point and 1 m/s
+  of the hull, and the beam's first pull starts from there. When the pull was skipped for a tick (no power, no sight)
+  the body was already at exactly the speed that stops on its goal (`sqrt(2 a d)`), so it could not stop and passed the
+  staging point, then the hull.
+
+The fix, one rule in `Prospect.Game/World/Approach.cs`:
+
+- `Approach.Speed` closes at `approachBrakeShare` (0.7, `blocks/cargo.json`, `tractor.approachBrakeShare`) of that
+  speed, so the braking has 30 % in hand and a skipped tick costs room to spare. The beam's `Steer` and the drone
+  carry's `DroneFetch.Pull` both brake by it; the body still creeps the last metres in.
+- `Approach.StopsIn` is whether the room left is enough. `TractorSimulation.AcquireChunk` and `Reaches` ask it before a
+  beam takes a body: a beam never takes what it cannot stop before the body reaches the emitter, so "the beam will take
+  it" means it really will. A body it cannot stop is the drones' work.
+
+| Headless, shipped ship | Before | After |
+| --- | --- | --- |
+| 400 kg chunk 30 m above the ship, running at 20 m/s | beam held it at 20 m/s, drifted out of reach, stowed at 77.8 s after a 620 m chase | beam leaves it, drones bring it in and hand it over, stowed at 39.3 s |
+| Same, `Reaches` for "Pick up ores" | true (drones never sent) | false while it is too fast, true once it is slow |
+
 ### Numbers (headless, shipped ship, command to delivered)
 
 - Container 150 m out: 32–33 s before, 26–27 s after.

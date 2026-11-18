@@ -67,17 +67,17 @@ public static class DroneFetch
     /// <summary>
     /// One tick of the carriers' pull: the container's velocity relative to <paramref name="carrier"/> (the hull's
     /// motion at the hand-over point) is steered toward <paramref name="delta"/> (the way left, in the world) at the
-    /// speed it can still stop from at <paramref name="acceleration"/>, at most <paramref name="maxSpeed"/>, changing by no
-    /// more than the acceleration allows in a tick.
+    /// speed it can still stop from with <paramref name="approach"/> of its braking in hand (<see cref="Approach"/>),
+    /// at most <paramref name="maxSpeed"/>, changing by no more than the acceleration allows in a tick.
     /// </summary>
-    public static void Pull(ref FreeContainer container, Vector3 delta, Vector3 carrier, float acceleration, float maxSpeed) =>
-        Pull(ref container.Velocity, delta, carrier, acceleration, maxSpeed);
+    public static void Pull(ref FreeContainer container, Vector3 delta, Vector3 carrier, float acceleration, float maxSpeed, float approach) =>
+        Pull(ref container.Velocity, delta, carrier, acceleration, maxSpeed, approach);
 
     /// <summary>The same pull on any carried body's velocity: an ore chunk is carried by the rule a container is.</summary>
-    public static void Pull(ref Vector3 velocity, Vector3 delta, Vector3 carrier, float acceleration, float maxSpeed)
+    public static void Pull(ref Vector3 velocity, Vector3 delta, Vector3 carrier, float acceleration, float maxSpeed, float approach)
     {
         var distance = delta.Length();
-        var speed = Math.Min(maxSpeed, MathF.Sqrt(2 * acceleration * distance));
+        var speed = Math.Min(maxSpeed, Approach.Speed(acceleration, distance, approach));
         var desired = distance > 1e-6f ? delta / distance * speed : Vector3.Zero;
         var change = desired - (velocity - carrier);
         var length = change.Length();

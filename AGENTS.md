@@ -294,10 +294,19 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
     ore pickup only on a hull with bays. A chunk's claim is not kept: `OreChunks.Restore` clears it.
   - Edit or repair: `ServerHost.CarryOre` before `RestoreFigures` (`OreBins.Transfer`: overlap first, then `Add`);
     what finds no room is dumped and logged. The editor does not preview it.
+  - A beam takes a body only if it can still stop it. `Approach` (shared) is the one approach rule: `Speed` closes at
+    `approachBrakeShare` of the speed that stops on the goal (`blocks/cargo.json`, `tractor.approachBrakeShare` 0.7),
+    and `StopsIn` is whether the room left is enough. `TractorSimulation.Steer` and `DroneFetch.Pull` both brake by
+    `Speed`, so a tick in which the pull is skipped costs room they have to spare instead of leaving the body too fast
+    to stop. `AcquireChunk` and `TractorSimulation.Reaches` refuse a body whose closing speed cannot be stopped before
+    it reaches the emitter, less the body's own half edge: a beam that took one dragged it out of its reach,
+    dropped it after the stall and never saw it again, and the drones were never sent while it held it.
+    Never work out a stopping distance a second way.
   - Client: Ship window ORE section (`ShipSheet.Section.Ore`, `HullView.Ore`), cards and roles `PartRole.Bin` /
     `Hopper`, models `PropulsionModels.BuildHopper` / `BuildBin` (`hopper` and `bin` in `visuals/propulsion.json`),
     beams to held chunks in `WorldView.DrawTractorBeams`; the Cargo window's ORE tab shows the same bins as tiles (see "Cargo holds").
-  - Tests: `OreCollectionTests`, `OreModelTests`, the ore test in `EditorSessionTests`, `DefaultShipTests`.
+  - Tests: `OreCollectionTests`, `OreModelTests`, the ore test in `EditorSessionTests`, `DefaultShipTests`,
+    `TractorGuideTests` (the approach rule).
   - Capture: `--open ore` on the shipped build (the laser view; each capture prints chunks, chunks in a beam and what
     the bins hold; about 8.5 t at 40 s and 14.7 t at 60 s. The capture holds fire, so heat stops the lasers from
     23 s to 34 s and the battery is empty from about 36 s: the lasers wait for power until about 66 s, cut for about

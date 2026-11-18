@@ -36,19 +36,38 @@ public sealed partial class TractorSimulation
         }
     }
 
-    // The first chunk in the pool's order the mount may take: nobody has it, it is in range and sight, and it fits.
-    private static void AcquireChunk(OreChunks chunks, HullField field, int h, int mount, Double3 emitter, float reach, long tick)
+    // The first chunk in the pool's order the mount may take: nobody has it, it is in range and sight, it can still be
+    // stopped before it reaches the emitter, and it fits.
+    private static void AcquireChunk(OreChunks chunks, GameContent content, HullField field, int h, int mount, Double3 emitter, float reach, long tick)
     {
         var id = field.Hulls.HandleAt(h).Packed;
+        var approach = content.Cargo.Tractor.ApproachBrakeShare;
+        var hullVelocity = field.Hulls.State(h).Velocity;
         for (var c = 0; c < chunks.Items.Length; c++)
         {
             ref var item = ref chunks.At(c);
             if (item.TractorHull != 0 || item.FetchHull != 0 || tick < item.RetryTick
                 || item.Position.RelativeTo(emitter).LengthSquared() > reach * reach) continue;
+            if (!StopsBefore(content, field, h, mount, item.Position, item.Velocity - hullVelocity, item.Mass, approach)) continue;
             if (!ValidChunk(chunks, field, h, mount, ref item, needSight: true)) continue;
             item.TractorHull = id; item.TractorMount = mount; item.TractorStage = 0; item.TractorBest = 0; item.TractorIdle = 0;
             return;
         }
+    }
+
+    /// <summary>
+    /// Whether a beam of mount <paramref name="mount"/> can still bring a body of <paramref name="mass"/> kilograms,
+    /// closing at <paramref name="relative"/>, to rest before it reaches the emitter: the room is what is left between
+    /// the two, less the body's own half edge. A beam that took a body it could not stop dragged it out of its reach
+    /// and lost it; one that leaves it alone lets the drones bring it in (<see cref="Approach.StopsIn"/>).
+    /// </summary>
+    private static bool StopsBefore(GameContent content, HullField field, int h, int mount, Double3 position, Vector3 relative, double mass, float approach)
+    {
+        var hulls = field.Hulls; var design = field.Designs[hulls.Info(h).Design];
+        if ((uint)mount >= (uint)design.Mounts.Length || design.Mounts[mount].Type.Tractor is not { } spec) return false;
+        var emitter = hulls.State(h).Position + HullRotation.Rotate(design.MountOffsets[mount], hulls.State(h).Orientation);
+        var room = (float)position.RelativeTo(emitter).Length() - OreChunks.Half(content.Mining, (float)mass);
+        return Approach.StopsIn(spec.Acceleration, relative.Length(), room, approach);
     }
 
     /// <summary>
@@ -149,7 +168,7 @@ public sealed partial class TractorSimulation
                 continue;
             }
 
-            Steer(ref item.Velocity, delta, distance, relative, state.Orientation, spec.Acceleration, final ? tuning.FinalSpeed : float.PositiveInfinity);
+            Steer(ref item.Velocity, delta, distance, relative, state.Orientation, spec.Acceleration, final ? tuning.FinalSpeed : float.PositiveInfinity, tuning.ApproachBrakeShare);
         }
     }
 
@@ -184,13 +203,15 @@ public sealed partial class TractorSimulation
 
     /// <summary>
     /// Whether one of hull <paramref name="h"/>'s live beams could take the chunk by itself where it is: the mass is
-    /// within its limit, it is in range and line of sight, and the beam sees a hopper's intake. Room in the bins is
-    /// not asked here; the drones' ore pickup uses it to leave alone what the tractor will take without them.
+    /// within its limit, it is in range and line of sight, the beam can still stop it before it reaches the emitter,
+    /// and the beam sees a hopper's intake. Room in the bins is not asked here; the drones' ore pickup uses it to
+    /// leave alone what the tractor will take without them.
     /// </summary>
-    public static bool Reaches(HullField field, int h, in OreChunk item)
+    public static bool Reaches(GameContent content, HullField field, int h, in OreChunk item)
     {
         var hulls = field.Hulls; var design = field.Designs[hulls.Info(h).Design];
         var alive = hulls.Blocks(h);
+        var approach = content.Cargo.Tractor.ApproachBrakeShare;
         foreach (var m in design.Tractors)
         {
             var mount = design.Mounts[m];
@@ -198,6 +219,7 @@ public sealed partial class TractorSimulation
             var emitter = hulls.State(h).Position + HullRotation.Rotate(design.MountOffsets[m], hulls.State(h).Orientation);
             var reach = spec.Range + design.BlockSize;
             if (item.Position.RelativeTo(emitter).LengthSquared() > reach * reach) continue;
+            if (!StopsBefore(content, field, h, m, item.Position, item.Velocity - hulls.State(h).Velocity, item.Mass, approach)) continue;
             if (TractorReach.Container(design.Boxes, alive, design.BlockSize, mount, Local(design, hulls.State(h), item.Position))
                 && TractorReach.ChooseHopper(design.Boxes, design.Mounts, alive, design.BlockSize, m, design.Hoppers) >= 0) return true;
         }
