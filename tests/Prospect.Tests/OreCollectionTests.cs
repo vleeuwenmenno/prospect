@@ -629,7 +629,7 @@ public sealed class OreCollectionTests
         flag[1 + 4 + 8 + 4 + 4] = 2;
         reader = new NetReader(flag.AsSpan(1));
         Assert.False(BayMessage.TryRead(ref reader, out _));
-        Assert.Equal(76u, ProtocolInfo.Version);
+        Assert.Equal(77u, ProtocolInfo.Version);
     }
 
     // From here on: a real server, its host on an in-process link.

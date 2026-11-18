@@ -226,6 +226,17 @@ internal static partial class PropulsionModels
     }
 
     /// <summary>
+    /// The middle of a work drone's tractor array, in the hull's frame: the tray hangs under the body and its glowing
+    /// segments lie on it, so a beam from the array starts where that light is. A pure function of the design and the
+    /// look, as the model is.
+    /// </summary>
+    public static Vector3 WorkDroneArrayPoint(HullDesign design, WorkDroneLook look)
+    {
+        var f = new DroneFrame(design, look);
+        return f.At(0f, -f.H, 0.3f * f.L) - Vector3.UnitY * (f.Belly + DroneGlowLift * f.H);
+    }
+
+    /// <summary>
     /// Builds the two lit parts of a work drone, in the hull's frame: the segments of the tractor array under the nose
     /// and the strip on each pod. Each is drawn as light of its own brightness, a little off the dark glass
     /// <see cref="BuildWorkDrone"/> leaves under it. Built on a worker.

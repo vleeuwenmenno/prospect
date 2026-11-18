@@ -1191,3 +1191,25 @@ Active module spending is shared with client prediction through `ModuleScanRules
 - Bytes of encoding 6 are refused ("Unknown design encoding"), and so is a saved world that holds them.
 - Content identity: evaluator 24, bumped for margin only. A design on whole cells gives the same figures and shell, to the bit.
 - The editor's snap step is a client preference and is never sent: a server cannot tell how a block was placed.
+
+### Drones carrying what (protocol 77)
+
+- Reliable message 52, server to client: which drones carry which body, one record a carrying drone — the body's id
+  (uint32), its pool (byte: 0 a free container, 1 an ore chunk) and the drone's packed hull handle (uint32), 9 bytes
+  each, at most 256 records (2,315 bytes). Sent every six ticks while anything is carried, and an empty set once after
+  the last carry, as a full ore-chunk set withdraws its records. Nothing is sent while nothing is carried.
+- It is its own message rather than a field of the container record (37) or the chunk record (47) because those are
+  fixed-size records for a whole set: 33 bytes a body would cost about 8.4 kB on every container set and every chunk
+  set, ten times a second, whether anything is carried or not. Here a carry costs nothing until it exists.
+- Only a drone holding on is a carrier: it pulls the body (the server's `CarryGroup` counts those, phase 1 of the
+  fetch order). A drone still flying out to the body, and a drone merely parked beside a loose container, carries
+  nothing and is not sent.
+- A carry is filtered like the record of the body it names: the body must be inside the recipient's sensor and gas
+  cover (`MaySeeContainer`, and `Covered` for a chunk), and the drone must be a hull it may see (`MaySeeHull`) of a
+  design it is ready for. A body or a drone the client cannot draw is left out, so no beam is drawn to a place the
+  client cannot see.
+- Refused: truncation, surplus bytes, a body id or drone id of zero, a drone handle without its generation, a pool
+  past 1, and the same drone twice (a drone carries one body).
+- Disclosure: a carry says that someone's drone is pulling a body, within sensor range only. Nothing else about the
+  body or the drone changes hands.
+- Not saved: a loaded world docks its drones, so no carry survives a save and no codec byte was added.

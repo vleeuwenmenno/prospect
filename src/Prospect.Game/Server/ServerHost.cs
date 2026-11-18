@@ -368,14 +368,18 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         public uint AimHull;
         public Vector3 AimOffset, AimDirection;
 
-        /// <summary>Whether the last beams sent held any, whether the last ore chunks sent held any, and which hull's group changes, at which revision, were sent last.</summary>
-        public bool BeamsSent, OreChunksSent;
+        /// <summary>
+        /// Whether the last beams sent held any, whether the last ore chunks sent held any, whether the last carries
+        /// sent held any, and which hull's group changes, at which revision, were sent last.
+        /// </summary>
+        public bool BeamsSent, OreChunksSent, CarriesSent;
         public uint GroupsHull, GroupsRevision;
 
         public void Reset()
         {
             Array.Clear(Visible);
             FreeContainersSent = false;
+            CarriesSent = false;
             Array.Clear(ContactIds);
             Array.Clear(ContactUntil);
             Array.Clear(VisibleIds);
@@ -1012,6 +1016,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         SendFreeContainers();
         CleanupOreChunks();
         SendOreChunks();
+        SendDroneCarries();
         SendActionGroups();
         foreach (var connection in _connections)
             if (connection.State == ConnectionState.Active && connection.CatalogueReady) UpdateVisibility(connection, tick);

@@ -67,9 +67,6 @@ internal sealed class WorkDroneLook
     /// <summary>Brightness of the pods' strips at full thrust.</summary>
     public float ThrustGlow { get; init; }
 
-    /// <summary>Metres past a carrier's reach within which the array brightens as the drone closes on what it carries.</summary>
-    public float CarryFadeMetres { get; init; }
-
     /// <summary>The array and the strips are left dark on a drone whose radius on screen is under this many pixels.</summary>
     public float GlowPixels { get; init; }
 
@@ -84,17 +81,11 @@ internal sealed class WorkDroneLook
     public Vector3 GlowLight(float level) => new(Glow[0] * level, Glow[1] * level, Glow[2] * level);
 
     /// <summary>
-    /// How much a drone <paramref name="distance"/> metres from the middle of a body of <paramref name="radius"/> counts
-    /// as carrying it, from 0 to 1: wholly within <paramref name="reach"/> of its side (as far as the shared rule lets a
-    /// carrier be: the tether, the attach gap and the drone's own radius), fading out over
-    /// <see cref="CarryFadeMetres"/> beyond.
+    /// The tractor array's brightness for a drone that carries (<paramref name="carrying"/>, as the server says) at
+    /// <paramref name="time"/> seconds: its carrying glow, pulsing.
     /// </summary>
-    public float Carry(float distance, float radius, float reach) =>
-        Math.Clamp((radius + reach + CarryFadeMetres - distance) / CarryFadeMetres, 0f, 1f);
-
-    /// <summary>The tractor array's brightness for a drone carrying by <paramref name="carry"/> (0 to 1) at <paramref name="time"/> seconds.</summary>
-    public float ArrayLevel(float carry, float time) =>
-        IdleGlow + (CarryGlow * (1f + PulseDepth * MathF.Sin(time * PulseRate * MathF.Tau)) - IdleGlow) * Math.Clamp(carry, 0f, 1f);
+    public float ArrayLevel(bool carrying, float time) =>
+        carrying ? CarryGlow * (1f + PulseDepth * MathF.Sin(time * PulseRate * MathF.Tau)) : IdleGlow;
 
     /// <summary>The pods' strips' brightness at <paramref name="throttle"/>, the largest share of thrust in use on any axis.</summary>
     public float StripLevel(float throttle) => IdleGlow + (ThrustGlow - IdleGlow) * Math.Clamp(throttle, 0f, 1f);
@@ -117,7 +108,7 @@ internal sealed class WorkDroneLook
             || !Colour(Body) || !Colour(Dark) || !Colour(Accent) || !Colour(EyeLight) || !Colour(Light) || !Colour(Glow)
             || !(IdleGlow is >= 0 and <= 8) || !(CarryGlow >= IdleGlow && CarryGlow <= 8) || !(ThrustGlow >= IdleGlow && ThrustGlow <= 8)
             || !(PulseRate is >= 0 and <= 10) || !(PulseDepth is >= 0 and <= 1)
-            || !(CarryFadeMetres is > 0 and <= 50) || !(GlowPixels is >= 0 and <= 64))
+            || !(GlowPixels is >= 0 and <= 64))
             throw new InvalidDataException($"{path}: the work drone look is out of range");
     }
 }

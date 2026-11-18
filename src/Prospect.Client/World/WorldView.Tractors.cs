@@ -175,6 +175,12 @@ internal sealed partial class WorldView
                 ContainerHalf = new float4(half, half, half, half * 1.7320508f),
             };
         }
+        // A carrying drone pulls a body with the array under its nose: the same beam, from the drone to where the body
+        // is drawn. Only the drones the server names as carriers show one.
+        if (snapshot.DroneCarryCount > 0 && count < output.Length && PropulsionLook.Shared.WorkDrone is { } drone)
+            count += DroneCarryBeams.Fill(snapshot, _visuals.Hulls.Slice(0, snapshot.HullCount), _designs, drone,
+                _freeVisuals, _oreVisuals, _frameAlpha, camera, output[count..]);
+
         _scene.QueueTractors(count, TractorLook.Constants);
     }
 }

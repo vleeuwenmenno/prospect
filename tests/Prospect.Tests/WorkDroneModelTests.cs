@@ -141,19 +141,24 @@ public sealed class WorkDroneModelTests
     public void TheArrayBrightensWithCarryingAndTheStripsWithThrust()
     {
         var look = Look.WorkDrone!;
-        // Within a carrier's reach of the body's side it carries; past the fade it does not.
-        Assert.Equal(1f, look.Carry(4f, 1f, 4.5f));
-        Assert.Equal(1f, look.Carry(5.5f, 1f, 4.5f));
-        Assert.InRange(look.Carry(5.5f + 0.5f * look.CarryFadeMetres, 1f, 4.5f), 0.49f, 0.51f);
-        Assert.Equal(0f, look.Carry(5.5f + look.CarryFadeMetres, 1f, 4.5f));
-        Assert.Equal(0f, look.Carry(500f, 1f, 4.5f));
-
-        Assert.Equal(look.IdleGlow, look.ArrayLevel(0f, 0.37f));
+        // Only what the server says is carrying lights the array; nearness to a loose body does not.
+        Assert.Equal(look.IdleGlow, look.ArrayLevel(false, 0.37f));
         for (var time = 0f; time < 3f; time += 0.05f)
         {
-            Assert.InRange(look.ArrayLevel(1f, time), look.CarryGlow * (1f - look.PulseDepth) - 1e-4f, look.CarryGlow * (1f + look.PulseDepth) + 1e-4f);
-            Assert.True(look.ArrayLevel(0.5f, time) >= look.IdleGlow - 1e-4f);
+            Assert.InRange(look.ArrayLevel(true, time), look.CarryGlow * (1f - look.PulseDepth) - 1e-4f, look.CarryGlow * (1f + look.PulseDepth) + 1e-4f);
+            Assert.True(look.ArrayLevel(true, time) > look.IdleGlow);
         }
+        // A beam from the drone starts in the array's own light: on the tray's glowing plane, among its segments, under
+        // the body rather than in a surface.
+        var (centre, half) = Bounds();
+        var array = PropulsionModels.WorkDroneArrayPoint(Drone, look);
+        var vertices = new List<MeshVertex>();
+        var stripVertices = new List<MeshVertex>();
+        PropulsionModels.BuildWorkDroneGlow(Drone, look, vertices, [], stripVertices, []);
+        Assert.All(vertices, vertex => Assert.Equal(array.Y, vertex.Position.Y, 4));
+        Assert.InRange(array.X, vertices.Min(vertex => vertex.Position.X), vertices.Max(vertex => vertex.Position.X));
+        Assert.InRange(array.Z, vertices.Min(vertex => vertex.Position.Z), vertices.Max(vertex => vertex.Position.Z));
+        Assert.True(array.Y < centre.Y - half.Y * look.Height);
         Assert.Equal(look.IdleGlow, look.StripLevel(0f));
         Assert.Equal(look.ThrustGlow, look.StripLevel(1f));
         Assert.Equal(look.ThrustGlow, look.StripLevel(3f));
