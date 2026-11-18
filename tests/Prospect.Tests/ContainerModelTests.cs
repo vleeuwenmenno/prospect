@@ -65,6 +65,36 @@ public sealed class ContainerModelTests
         }
     }
 
+    /// <summary>
+    /// A container's plates, strips and corner caps sit on its body and never in its planes facing the same way, so no
+    /// two of its faces fight for a pixel.
+    /// </summary>
+    [Fact]
+    public void NoTwoFacesOfAContainerOrItsJawsShareAPlaneFacingTheSameWay()
+    {
+        for (var size = 0; size < 8; size++)
+        {
+            var shape = Look.Cargo.Sizes[size].Shape;
+            var slot = new Vector3(shape.X, shape.Y, shape.Z) * (Look.Cargo.UnitSize * .5f);
+            foreach (var resource in new[] { -1, 0, Look.Rack!.Galaxy.Length - 1 })
+            {
+                var vertices = new List<MeshVertex>();
+                var indices = new List<uint>();
+                PropulsionModels.ContainerModel(new PartBox(Vector3.Zero, slot, BlockFacing.Front, 1), size, resource, Look.Rack, vertices, indices);
+                var fight = ModelFaces.Fight(vertices, indices);
+                Assert.True(fight is null, $"a container of size {size} holding {resource}: {fight}");
+            }
+            for (var face = 0; face < 6; face++)
+            {
+                var vertices = new List<MeshVertex>();
+                var indices = new List<uint>();
+                PropulsionModels.ClampModel(shape, (BlockFacing)face, Look.Rack, Look.Cargo, vertices, indices);
+                var fight = ModelFaces.Fight(vertices, indices);
+                Assert.True(fight is null, $"the jaws of a size {size} container held by {face}: {fight}");
+            }
+        }
+    }
+
     [Fact]
     public void ANewDetailThatDoesNotFitTheClearanceOrAnUnknownCodeIsRefused()
     {

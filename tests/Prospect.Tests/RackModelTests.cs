@@ -150,4 +150,60 @@ public sealed class RackModelTests
             }
         }
     }
+
+    /// <summary>
+    /// No two faces of a rack lie in one plane facing the same way unless they are painted alike. Two surfaces in one
+    /// plane fight for the pixel, and an empty rack's walls flickered in stripes because a wall panel and the backing
+    /// behind it, painted differently, lay in one plane. Faces painted alike come out the same colour whichever wins,
+    /// so the corner where two walls' rim bands or lit rims meet cannot show.
+    /// </summary>
+    [Fact]
+    public void NoTwoFacesOfARackShareAPlaneFacingTheSameWayUnlessTheyArePaintedAlike()
+    {
+        var look = PropulsionLook.Load();
+        foreach (var half in new[] { new Vector3(.5f), new Vector3(.5f, .5f, 2), new Vector3(1.5f, .5f, 1), new Vector3(1, 1, 1) })
+            for (var face = 0; face < 6; face++)
+                foreach (var closed in new[] { 0, 0b111111 & ~(1 << face) })
+                {
+                    var vertices = new List<MeshVertex>();
+                    var indices = new List<uint>();
+                    PropulsionModels.BuildRack(new PartBox(Vector3.Zero, half, (BlockFacing)face, 1), look.Rack!, look.Cargo, vertices, indices, closed);
+                    var fight = ModelFaces.Fight(vertices, indices);
+                    Assert.True(fight is null, $"a rack {half} open {face}, closed {closed}: {fight}");
+                }
+    }
+
+    /// <summary>
+    /// A rack block is drawn as its model, never as its own box, and the model keeps inside the block: no triangle of
+    /// the hull mesh lies on one of the block's faces, where a plain box face of a neighbour would meet it in one
+    /// plane.
+    /// </summary>
+    [Fact]
+    public void ARackBlockIsDrawnAsItsModelAndNeverAsItsOwnBox()
+    {
+        var design = HullDesign.Of(new BoxDesign("rack", 1,
+            [new DesignBox(new(0, 0, 0), new(1, 1, 1), Content.Blocks.Get("core")), new DesignBox(new(5, 0, 0), new(2, 1, 1), Cargo)],
+            Content.Blocks.Limits, "rack"), Content.Rules);
+        var rack = Array.FindIndex(Enumerable.Range(0, design.BlockCount).ToArray(), b => design.Types[b].Cargo > 0);
+        Assert.True(rack >= 0, "the fixture has no rack");
+        var centre = design.BlockOffsets[rack];
+        var half = design.BlockHalfExtents[rack];
+        var mesh = MeshBuilder.Hull(design, PropulsionLook.Load());
+        var drawn = 0;
+        for (var i = 0; i + 2 < mesh.Indices.Count; i += 3)
+        {
+            var corners = new[] { ModelFaces.Point(mesh.Vertices[(int)mesh.Indices[i]]), ModelFaces.Point(mesh.Vertices[(int)mesh.Indices[i + 1]]), ModelFaces.Point(mesh.Vertices[(int)mesh.Indices[i + 2]]) };
+            // Only the faces inside the rack's own box: the design carries a core block 5 cells away.
+            if (corners.Any(p => MathF.Abs(p.X - centre.X) > half.X || MathF.Abs(p.Y - centre.Y) > half.Y || MathF.Abs(p.Z - centre.Z) > half.Z)) continue;
+            drawn++;
+            for (var axis = 0; axis < 3; axis++)
+                foreach (var side in new[] { -1f, 1f })
+                {
+                    var plane = centre[axis] + side * half[axis];
+                    if (corners.All(p => MathF.Abs(p[axis] - plane) <= 1e-4f))
+                        Assert.Fail($"a face of the rack model lies in the block's own face {(BlockFacing)(2 * axis + (side > 0 ? 0 : 1))} at {plane}: {corners[0]} {corners[1]} {corners[2]}");
+                }
+        }
+        Assert.True(drawn > 100, $"the rack's model is not in the hull mesh ({drawn} triangles near the block)");
+    }
 }
