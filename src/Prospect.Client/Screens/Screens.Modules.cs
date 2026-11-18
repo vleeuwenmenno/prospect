@@ -405,7 +405,7 @@ internal sealed partial class ScreenHost
         }
         else if (bays.Fetching > 0)
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Info, Kit.F($"{bays.Fetching} FETCHING  {stocked} IN"), inner);
-        else if (rebuild <= 0 && snapshot.Content?.Drones.OreFetch == true && _app.World.OreChunksNear is > 0 and var chunks)
+        else if (rebuild <= 0 && _app.World.OreChunksNear is > 0 and var chunks)
         {
             // Loose ore close to the ship: the one line that says there is something to collect (see
             // OreChunkLook.NearMetres). Chunks the bins cannot take say why here too, in the blocked colour; the words
