@@ -44,11 +44,19 @@ internal sealed partial class ScreenHost
     {
         if (!_notices.Enabled)
             return;
-        _noticeTracker.Update(_notices, snapshot.Modules.Scan, snapshot.Exploration.Scan, snapshot.NewShip, world.Own.Id, world.Own.Fuel);
+        _noticeTracker.Update(_notices, snapshot.Modules.Scan, snapshot.Exploration.Scan, snapshot.NewShip, world.Own.Id, world.Own.Fuel,
+            world.OreIntakeCounts, OreName(snapshot, world.OreBlockedOther));
         _editorNotices.Update(_notices, world.Editor, RefusalSentence);
         // Only while they can be read: a notice does not run out behind a menu.
         if (NoticesVisible)
             _notices.Update(_ui.DeltaTime);
+    }
+
+    /// <summary>The galaxy's name for an ore, for a notice that names it; null for -1 or an ore this galaxy lacks.</summary>
+    private static string? OreName(SessionSnapshot snapshot, int resource)
+    {
+        var resources = (snapshot.Galaxy ?? snapshot.Content.Galaxy).Resources;
+        return (uint)resource < (uint)resources.Length ? resources[resource].Name : null;
     }
 
     /// <summary>
@@ -116,6 +124,9 @@ internal sealed partial class ScreenHost
                 break;
             case NoticeAction.OpenChartsWindow:
                 OpenPane(SocialPane.Charts);
+                break;
+            case NoticeAction.OpenCargoOreWindow:
+                OpenCargoWindow(false, CargoTab.Ore);
                 break;
         }
     }

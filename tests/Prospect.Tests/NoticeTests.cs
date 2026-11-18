@@ -1,5 +1,6 @@
 using Prospect.Client.Input;
 using Prospect.Client.Screens;
+using Prospect.Client.World;
 using Prospect.Game.Protocol;
 using Prospect.Game.World;
 using Xunit;
@@ -401,6 +402,53 @@ public sealed class NoticeTests
     }
 
     [Fact]
+    public void TheTrackerPostsOnceWhenTheNearChunksBinsRunFullAndOnceForAnOreWithNoBin()
+    {
+        var board = Board();
+        var tracker = new NoticeTracker();
+        var none = default(ModuleScanView);
+        var sector = default(ScanView);
+        var ship = default(NewShipView);
+        const uint own = 7;
+
+        // The first look is taken as it is: bins that were already full are not news.
+        tracker.Update(board, none, sector, ship, own, default, new OreIntakeCounts(4, 0, 4, 0, 0));
+        Assert.Equal(0, board.Count);
+
+        // Chunks the bins take, then chunks they cannot: the bins have filled.
+        tracker.Update(board, none, sector, ship, own, default, new OreIntakeCounts(4, 4, 0, 0, 0));
+        tracker.Update(board, none, sector, ship, own, default, new OreIntakeCounts(4, 1, 3, 0, 0));
+        tracker.Update(board, none, sector, ship, own, default, new OreIntakeCounts(4, 1, 3, 0, 0));
+        Assert.Equal(1, board.Count);
+        Assert.Equal(NoticeKinds.OreBinsFull, board.NoticeAt(0).Id);
+        Assert.Equal(NoticeAction.OpenCargoOreWindow, board.NoticeAt(0).Action);
+
+        // Room in kilograms, but not for this ore: it is named, once while it is the one no bin takes.
+        tracker.Update(board, none, sector, ship, own, default, new OreIntakeCounts(4, 2, 0, 2, 0), "Gold");
+        Assert.Equal(2, board.Count);
+        Assert.Equal(NoticeKinds.OreNoBin, board.NoticeAt(0).Id);
+        Assert.Equal("No bin for Gold.", System.Text.Encoding.UTF8.GetString(board.TextAt(0)));
+        tracker.Update(board, none, sector, ship, own, default, new OreIntakeCounts(4, 2, 0, 2, 0), "Gold");
+        Assert.Equal(2, board.Count);
+
+        // Another ore is another message, and the crossing ends when nothing near is blocked any more.
+        tracker.Update(board, none, sector, ship, own, default, new OreIntakeCounts(4, 2, 0, 2, 0), "Iron");
+        Assert.Equal(3, board.Count);
+        Assert.Equal("No bin for Iron.", System.Text.Encoding.UTF8.GetString(board.TextAt(0)));
+        tracker.Update(board, none, sector, ship, own, default, new OreIntakeCounts(4, 4, 0, 0, 0));
+        tracker.Update(board, none, sector, ship, own, default, new OreIntakeCounts(4, 4, 0, 0, 0), "Gold");
+        Assert.Equal(3, board.Count);
+        tracker.Update(board, none, sector, ship, own, default, new OreIntakeCounts(4, 1, 3, 0, 0));
+        Assert.Equal(4, board.Count);
+        Assert.Equal(NoticeKinds.OreBinsFull, board.NoticeAt(0).Id);
+
+        // Another hull, such as a new ship, is taken as it is: its full bins are not news either.
+        board.Clear();
+        tracker.Update(board, none, sector, ship, 8, default, new OreIntakeCounts(4, 0, 4, 0, 0), "Gold");
+        Assert.Equal(0, board.Count);
+    }
+
+    [Fact]
     public void TheTrackerTakesNoMemory()
     {
         var board = Board();
@@ -408,6 +456,7 @@ public sealed class NoticeTests
         var module = new ModuleScanView { Serial = 1, Hull = 7, Family = ModuleFamily.GasScanner, State = ModuleScanState.Scanning };
         var sector = default(ScanView);
         var ship = default(NewShipView);
+        var ore = new OreIntakeCounts(4, 1, 2, 1, 0);
         tracker.Update(board, module, sector, ship, 7);
         module.State = ModuleScanState.Completed;
         tracker.Update(board, module, sector, ship, 7);
@@ -419,7 +468,7 @@ public sealed class NoticeTests
             for (var i = 0; i < 100; i++)
             {
                 module.Serial = (uint)i + 10;
-                tracker.Update(board, module, sector, ship, 7);
+                tracker.Update(board, module, sector, ship, 7, default, ore, i % 2 == 0 ? "Gold" : null);
                 board.Clear();
             }
         }

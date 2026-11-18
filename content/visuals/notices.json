@@ -20,6 +20,8 @@
     { "id": "designLoaded", "text": "Design loaded into the draft. Your ship changes when you press Apply.", "accent": "info", "seconds": 8 },
     { "id": "editAsking", "text": "Asking the server to edit this ship...", "accent": "info", "seconds": 20 },
     { "id": "mirrorSkipped", "text": "Some mirrored copies were left out: no room.", "accent": "info", "seconds": 6 },
+    { "id": "oreBinsFull", "text": "Ore bins are full. Click to open the ore hold.", "accent": "bad", "seconds": 8, "action": "openCargoOreWindow" },
+    { "id": "oreNoBin", "text": "No bin for this ore: the bins hold other ores. Click to open the ore hold.", "accent": "bad", "seconds": 8, "action": "openCargoOreWindow" },
     { "id": "fillDone", "text": "Debug: tanks filled.", "accent": "info", "seconds": 4 },
     { "id": "fillRefused", "text": "Debug: the server refused to fill that tank.", "accent": "bad", "seconds": 6 },
     { "id": "fillOff", "text": "Debug: filling tanks is off on this server.", "accent": "bad", "seconds": 6 },

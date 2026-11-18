@@ -346,8 +346,25 @@ internal sealed partial class ScreenHost
         else if (bays.Fetching > 0)
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Info, Kit.F($"{bays.Fetching} FETCHING  {stocked} IN"), inner);
         else if (rebuild <= 0 && _app.World.OreChunksNear is > 0 and var chunks)
-            // Loose ore close to the ship: the one line that says there is something to collect (see OreChunkLook.NearMetres).
-            Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Good, Kit.F($"{chunks} {(chunks == 1 ? "CHUNK" : "CHUNKS")} NEAR"), inner);
+        {
+            // Loose ore close to the ship: the one line that says there is something to collect (see
+            // OreChunkLook.NearMetres). Chunks the bins cannot take say why here too, in the blocked colour; the words
+            // are short so the line fits a chip 124 px wide at every interface scale, and the tooltip and notice say it
+            // in full.
+            var intake = _app.World.OreIntakeCounts;
+            if (intake.Blocked)
+            {
+                // The count at the left and the reason at the right, so neither crowds the other out: even "256
+                // OTHER ORE" fits the chip's line at every interface scale.
+                var blocked = OreChunkLook.Current.BlockedRgb;
+                ReadOnlySpan<byte> reason = intake.Full > 0 ? "BINS FULL"u8 : intake.Other > 0 ? "OTHER ORE"u8 : "NO BINS"u8;
+                var width = Kit.Measure(_ui.Mono, Theme.FontCaption, reason).X;
+                Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, blocked, Kit.F($"{chunks}"), MathF.Max(0f, inner - width - Kit.Px(Theme.Space1)));
+                Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(statusAt.X + inner - width, statusAt.Y), blocked, reason);
+            }
+            else
+                Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Good, Kit.F($"{chunks} {(chunks == 1 ? "CHUNK" : "CHUNKS")} NEAR"), inner);
+        }
         else if (_droneState == DroneChipState.Out)
             Kit.ClippedText(draw, _ui.Mono, Theme.FontCaption, statusAt, Theme.Info, Kit.F($"{outside} DRONES OUT  {stocked} IN"), inner);
         else if (_droneState == DroneChipState.Ready)

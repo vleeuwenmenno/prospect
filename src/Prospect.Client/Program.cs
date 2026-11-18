@@ -92,8 +92,8 @@ internal static class Program
                                   fire button from --fire-at <sec> after the splash (default 3); --open laser puts the
                                   hull 25 m over a rock nose first and fires group 1, laser-command watches from the
                                   command camera (--rock-scrape-distance <m>, default 40)
-          --hover-chunk           With --open laser or laser-command and --capture or --bench: rest the pointer on the
-                                  first ore chunk in view, so its tooltip shows
+          --hover-chunk           With --open ore, laser or laser-command and --capture or --bench: rest the pointer on
+                                  the first ore chunk in view, so its tooltip shows
           --laser-camera <d,y,p>  With --capture or --bench: hold the command camera d metres from the flown hull's first
                                   mining laser, at yaw y and pitch p degrees in the hull's frame (yaw 180 looks at the
                                   nose from ahead); with --open laser, from the moment its beam is on
@@ -116,6 +116,9 @@ internal static class Program
           --cut-hull <sec>        Scripted unsaved private local game: cut the flown hull across its middle.
           --hurt-fleet <sec>      With --capture or --bench: hurt the other owned hulls that many seconds in;
                                   --hurt-kind damaged, broken, or tank (the flown hull loses its last fuel tank)
+          --fill-bins <sec>       With --capture or --bench: fill the flown hull's ore bins that many seconds in, so the
+                                  ore around it cannot be taken home; --bins-kind full or other (every bin half full of
+                                  another ore, which leaves room in kilograms but none for that chunk's ore)
           --social-run <seconds>  Run a headless client script, then exit; uses --join or a private local game
           --player <name>         Player name for the headless script
           --say <text>            Send one everyone-chat line after admission (with --social-run)
@@ -538,6 +541,14 @@ internal static class Program
                     options.HurtFleetSeconds = hurtAt;
                     i++;
                     break;
+                case "--fill-bins" when hasValue && float.TryParse(args[i + 1], out var fillAt) && fillAt is >= 0f and <= 600f:
+                    options.FillBinsSeconds = fillAt;
+                    i++;
+                    break;
+                case "--bins-kind" when hasValue && args[i + 1] is "full" or "other":
+                    options.FillBinsOther = args[i + 1] == "other";
+                    i++;
+                    break;
                 case "--hurt-kind" when hasValue && (args[i + 1] is "damaged" or "broken" or "tank" or "cargo"):
                     options.HurtFleetBroken = args[i + 1] == "broken";
                     options.HurtFleetTank = args[i + 1] == "tank";
@@ -745,8 +756,8 @@ internal static class Program
             return Fail("--cargo-wide and --hover-container require --capture or --bench and --open cargo or edit-cargo in an unsaved private local game.");
 
         if (options.HoverChunk && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
-            || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null || options.OpenView is not ("laser" or "laser-command")))
-            return Fail("--hover-chunk requires --capture or --bench and --open laser or laser-command in an unsaved private local game.");
+            || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null || options.OpenView is not ("ore" or "laser" or "laser-command")))
+            return Fail("--hover-chunk requires --capture or --bench and --open ore, laser or laser-command in an unsaved private local game.");
 
         if (options.CargoSample && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null
             || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null || options.OpenView != "cargo-window"))
@@ -754,6 +765,9 @@ internal static class Program
 
         if (options.HurtFleetSeconds is not null && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
             return Fail("--hurt-fleet works only with --capture or --bench, in an unsaved private local game.");
+
+        if ((options.FillBinsSeconds is not null || options.FillBinsOther) && (options.CapturePath is null && options.BenchSeconds <= 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private || options.WorldsRoot is not null))
+            return Fail("--fill-bins and --bins-kind work only with --capture or --bench, in an unsaved private local game.");
 
         if (options.RtsSeed is not null && options.RtsScript is null) return Fail("--rts-seed requires --rts-script.");
         if (options.RtsScript is not null && (options.CapturePath is null || options.BenchSeconds > 0 || options.JoinHost is not null || options.Hosting.Visibility != ServerVisibility.Private))

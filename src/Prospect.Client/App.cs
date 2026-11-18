@@ -140,6 +140,12 @@ internal sealed class AppOptions
     /// <summary>Scripted runs only (<c>--hurt-fleet</c>): seconds into the run at which the other owned hulls are hurt.</summary>
     public float? HurtFleetSeconds { get; set; }
 
+    /// <summary>Scripted runs only (<c>--fill-bins</c>): seconds into the run at which the flown hull's ore bins are filled.</summary>
+    public float? FillBinsSeconds { get; set; }
+
+    /// <summary>With <c>--fill-bins</c>, <c>--bins-kind other</c> fills every bin half full of another ore instead of full.</summary>
+    public bool FillBinsOther { get; set; }
+
     /// <summary>With <c>--hurt-fleet</c>, <c>--hurt-kind broken</c> breaks the shields instead of half-charging them.</summary>
     public bool HurtFleetBroken { get; set; }
     public string? CapturePath { get; set; }
@@ -812,6 +818,8 @@ internal sealed class App : IDisposable
                 ScriptedExhaustShield = Devices.Muted ? _options.OpenView switch { "exhaust-shield" => 1, "exhaust-shield-cold" => 2, _ => 0 } : 0,
                 ScriptedEscorts = Devices.Muted && !hosted ? ScriptedEscorts(_options) : 0,
                 ScriptedFleetHurtSeconds = _options.HurtFleetSeconds,
+                ScriptedFillBinsSeconds = _options.FillBinsSeconds,
+                ScriptedFillBinsOther = _options.FillBinsOther,
                 ScriptedFleetHurtBroken = _options.HurtFleetBroken,
                 ScriptedFleetHurtTank = _options.HurtFleetTank,
                 ScriptedFleetHurtCargo = _options.HurtFleetCargo,

@@ -98,7 +98,11 @@ yields ore from the rock's interior; every 300 kg of one ore breaks off as a loo
 off rocks and ships. Each chunk in sensor cover wears a diamond in its ore's colour, fading with distance (chunks off
 screen show as small arrows at the window's edge, with how many lie that way); a shown pointer over one shows its ore,
 grade and kilograms, and the DRONES chip says "N CHUNKS NEAR" while any are within 500 m (figures in
-`content/visuals/ore_chunks.json`). The temporary debug scrape (`F10`, held in the pilot view, private local games only)
+`content/visuals/ore_chunks.json`). A chunk the ship cannot take says so: its diamond is dimmed, hollow and crossed
+out, its tooltip says "BINS FULL", "NO BIN FOR <ORE>: BINS HOLD <ORES>" or "NO ORE BINS", and while chunks near the
+ship are kept out the DRONES chip shows their count beside "BINS FULL", "OTHER ORE" or "NO BINS" in red. When the bins
+first fill, or a near chunk's ore has no bin because the bins hold other ores, a notice says so once and opens the
+Cargo window's ORE tab when clicked. The temporary debug scrape (`F10`, held in the pilot view, private local games only)
 still exists. Not there: cracks, scraping ice shards, beams blocked by other ships, and the pointer
 and exhaust marks following a groove.
 
