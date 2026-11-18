@@ -99,6 +99,28 @@
       "sparkLength": 0.55,
       "sparkWidth": 0.035,
       "sparkColor": 16760938
+    },
+    "cut": {
+      "markRadius": 1.6,
+      "glow": 2.6,
+      "hotSeconds": 5,
+      "hotColor": 16774370,
+      "warmColor": 16742944,
+      "coolColor": 9050629,
+      "hotShare": 0.55,
+      "crackSeconds": 16,
+      "crackHoldSeconds": 9,
+      "crackReach": 1.5,
+      "crackWidth": 0.14,
+      "crackAlpha": 0.45,
+      "burstParticles": 24,
+      "burstSpeed": 3.5,
+      "burstSeconds": 1.5,
+      "burstSize": 0.3,
+      "debrisParticles": 8,
+      "debrisSpeed": 1.8,
+      "debrisSeconds": 1.9,
+      "debrisSize": 0.42
     }
   },
   "workDrone": {

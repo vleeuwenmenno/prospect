@@ -32,7 +32,7 @@ public sealed class MiningLaserContentTests
         Assert.Equal(0f, type.Thrust);
         Assert.Equal(0f, type.PowerDraw);
         Assert.Null(type.Tractor);
-        Assert.Equal((60f, 0.5f, 0.25f, 6f, 40f, ModuleQuality.Common), (laser.Range, laser.CutRadius, laser.CutRate, laser.Power, laser.GimbalDegrees, laser.Quality));
+        Assert.Equal((60f, 1.0f, 0.25f, 6f, 40f, ModuleQuality.Common), (laser.Range, laser.CutRadius, laser.CutRate, laser.Power, laser.GimbalDegrees, laser.Quality));
 
         // Its heat: twenty seconds of firing to overheat, fifteen to cool from full, and shut down until 30 %.
         Assert.Equal((1f / 20f, 1f / 15f, 0.3f), (laser.HeatRate, laser.CoolRate, laser.UnlockHeat));
@@ -50,7 +50,7 @@ public sealed class MiningLaserContentTests
         var rare = content.Blocks.Get("miningLaser").Laser!;
         Assert.Equal(ModuleQuality.Rare, rare.Quality);
         Assert.Equal(60f * 1.3f, rare.Range, 3);
-        Assert.Equal(0.5f * 1.2f, rare.CutRadius, 4);
+        Assert.Equal(1.0f * 1.2f, rare.CutRadius, 4);
         Assert.Equal(0.25f * 1.7f, rare.CutRate, 4);
         Assert.Equal(MiningFixtures.LaserPower * 1.2f, rare.Power, 4);
         Assert.Equal(40f, rare.GimbalDegrees);
@@ -106,15 +106,16 @@ public sealed class MiningLaserContentTests
     [Fact]
     public void ACutRadiusThatNoScrapeMayHaveOrABiteWiderThanTheBeamIsRefusedWhenTheContentLoads()
     {
-        // The laser's 0.5 m cut is below a least scrape radius of 0.6 m.
-        var radius = Refused(() => MiningFixtures.Make(other: copy => copy.Replace("rules/rock_edits.json", "\"minRadiusMetres\": 0.25", "\"minRadiusMetres\": 0.6")));
+        // The laser's 1 m cut is below a least scrape radius of 1.2 m.
+        var radius = Refused(() => MiningFixtures.Make(other: copy => copy.Replace("rules/rock_edits.json", "\"minRadiusMetres\": 0.25", "\"minRadiusMetres\": 1.2")
+            .Replace("rules/rock_edits.json", "\"radiusMetres\": 1", "\"radiusMetres\": 1.5")));
         Assert.Contains("scrape radius", radius);
 
         // Or above the greatest.
         Refused(() => MiningFixtures.Make(other: copy => copy.Replace("rules/rock_edits.json", "\"maxRadiusMetres\": 2", "\"maxRadiusMetres\": 0.4").Replace("rules/rock_edits.json", "\"radiusMetres\": 1", "\"radiusMetres\": 0.3")));
 
-        // A bite of 1.2 m is more than the 1 m the beam is wide.
-        var bite = Refused(() => MiningFixtures.Make(other: copy => copy.Replace("rules/mining.json", "\"biteMetres\": 0.25", "\"biteMetres\": 1.2")));
+        // A bite of 2.2 m is more than the 2 m the beam is wide.
+        var bite = Refused(() => MiningFixtures.Make(other: copy => copy.Replace("rules/mining.json", "\"biteMetres\": 0.5", "\"biteMetres\": 2.2")));
         Assert.Contains("bite", bite);
     }
 
@@ -126,14 +127,14 @@ public sealed class MiningLaserContentTests
     public void TheShippedMiningFiguresParseToTicksAndLimits()
     {
         var rules = Shipped.Mining;
-        Assert.Equal(0.25f, rules.BiteMetres);
+        Assert.Equal(0.5f, rules.BiteMetres);
         Assert.Equal(9, rules.EditIntervalTicks);
         Assert.Equal(30, rules.StrokeGapTicks);
         Assert.Equal(1f, rules.MoveRadii);
         Assert.Equal(16, rules.MaxLasersPerHull);
         Assert.Equal(400f, rules.MaxAimOffsetMetres);
         Assert.Equal(400f, rules.ChunkOreKg);
-        Assert.Equal(0.5f, rules.OreYieldShare);
+        Assert.Equal(0.125f, rules.OreYieldShare);
         Assert.Equal(0.25f, rules.ChunkRockShare);
         Assert.Equal(400f / 0.75f, rules.ChunkMaxMassKg, 3);
         Assert.Equal(1f, rules.ChunkIntakeMetres);
@@ -155,12 +156,12 @@ public sealed class MiningLaserContentTests
         // A lifetime of zero is allowed: such chunks never end.
         Assert.Equal(0L, Parse(MiningJson.Replace("\"lifetimeMinutes\": 30", "\"lifetimeMinutes\": 0")).ChunkLifetimeTicks);
         // The capsule a scrape takes out: its cross-section and the length it swept, times the bite, in kilograms of rock.
-        Assert.Equal((Math.PI * 0.25 + 2 * 0.5 * 2) * 0.25 * 2.5 * 1000, rules.ScrapeKg(0.5f, 2f, 2.5f), 6);
+        Assert.Equal((Math.PI * 0.25 + 2 * 0.5 * 2) * rules.BiteMetres * 2.5 * 1000, rules.ScrapeKg(0.5f, 2f, 2.5f), 6);
     }
 
     [Theory]
-    [InlineData("\"biteMetres\": 0.25", "\"biteMetres\": 0.01")]
-    [InlineData("\"biteMetres\": 0.25", "\"biteMetres\": 5")]
+    [InlineData("\"biteMetres\": 0.5", "\"biteMetres\": 0.01")]
+    [InlineData("\"biteMetres\": 0.5", "\"biteMetres\": 5")]
     [InlineData("\"editSeconds\": 0.15", "\"editSeconds\": 0")]
     [InlineData("\"editSeconds\": 0.15", "\"editSeconds\": 11")]
     [InlineData("\"strokeGapSeconds\": 0.5", "\"strokeGapSeconds\": 0")]
@@ -173,8 +174,8 @@ public sealed class MiningLaserContentTests
     [InlineData("\"maxAimOffsetMetres\": 400", "\"maxAimOffsetMetres\": 10001")]
     [InlineData("\"oreKg\": 400", "\"oreKg\": 0.5")]
     [InlineData("\"oreKg\": 400", "\"oreKg\": 2000000")]
-    [InlineData("\"yieldShare\": 0.5", "\"yieldShare\": 0")]
-    [InlineData("\"yieldShare\": 0.5", "\"yieldShare\": 1.5")]
+    [InlineData("\"yieldShare\": 0.125", "\"yieldShare\": 0")]
+    [InlineData("\"yieldShare\": 0.125", "\"yieldShare\": 1.5")]
     [InlineData("\"rockShare\": 0.25", "\"rockShare\": -0.1")]
     [InlineData("\"rockShare\": 0.25", "\"rockShare\": 1")]
     [InlineData("\"intakeMetres\": 1.0", "\"intakeMetres\": 0")]

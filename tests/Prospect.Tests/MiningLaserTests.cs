@@ -24,11 +24,17 @@ public sealed class MiningLaserTests
         return new Vector3(MathF.Sin(angle), MathF.Cos(angle), 0);
     }
 
-    private const int FirstScrape = 75;
+    /// <summary>
+    /// Ticks a beam held still takes to make its first scrape: the bite it must fill, at the rate it cuts. Read from the
+    /// content, since the two figures have been retuned more than once.
+    /// </summary>
+    private static readonly int FirstScrape = (int)MathF.Ceiling(MiningFixtures.Content.Mining.BiteMetres
+        / MiningFixtures.Content.Blocks.Get("miningLaser").Laser!.CutRate / HullSim.Dt);
 
     /// <summary>Whether the aim cut <paramref name="rock"/> in the next <paramref name="ticks"/> ticks, with the aim kept up.</summary>
-    private static bool Cuts(MiningRig rig, RockRef rock, ushort groups, Vector3 direction, int ticks = FirstScrape + 60)
+    private static bool Cuts(MiningRig rig, RockRef rock, ushort groups, Vector3 direction, int ticks = 0)
     {
+        if (ticks <= 0) ticks = FirstScrape + 60;
         var before = rig.Edits(rock);
         rig.Aim(0, groups, direction);
         rig.Step(ticks);
@@ -109,7 +115,7 @@ public sealed class MiningLaserTests
         using var rig = new MiningRig();
         var (rock, _) = MiningFixtures.FindRock(rig.Rocks);
         rig.Place(0, rock, Up, 25);
-        Assert.True(Cuts(rig, rock, MiningFixtures.Mask(1), Up, 5 * 60 + 5));
+        Assert.True(Cuts(rig, rock, MiningFixtures.Mask(1), Up, FirstScrape * 4 + 5));
         var edits = MiningFixtures.EditList(rig.Server, rock);
         Assert.InRange(edits.Count, 3, 8);
 
@@ -117,7 +123,7 @@ public sealed class MiningLaserTests
         for (var i = 1; i < edits.Count; i++)
         {
             var d = new Vector3(edits[i].Bx - edits[i - 1].Bx, edits[i].By - edits[i - 1].By, edits[i].Bz - edits[i - 1].Bz) / RockScrape.Units;
-            Assert.True(d.Length() < 0.6f, $"scrape {i} is {d.Length()} m from the last");
+            Assert.True(d.Length() < rig.Content.Mining.BiteMetres + 0.1f, $"scrape {i} is {d.Length()} m from the last");
         }
 
         Stop(rig);

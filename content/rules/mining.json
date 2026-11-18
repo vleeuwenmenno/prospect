@@ -1,6 +1,6 @@
 {
   "laser": {
-    "biteMetres": 0.25,
+    "biteMetres": 0.5,
     "editSeconds": 0.15,
     "strokeGapSeconds": 0.5,
     "moveRadii": 1,
@@ -9,7 +9,7 @@
   },
   "chunks": {
     "oreKg": 400,
-    "yieldShare": 0.5,
+    "yieldShare": 0.125,
     "rockShare": 0.25,
     "densityKgPerCubicMetre": 3000,
     "intakeMetres": 1.0,

@@ -492,12 +492,16 @@ How to work on it is in `AGENTS.md`, "Mining lasers, action groups and ore chunk
   by sensor cover and saved.
 - Wire: protocol 68, messages 44 to 48. Save: codec 20.
 - Laser heat (added after R4, protocol 72): see "Laser heat and cold clouds" below.
+- The cut's look (client only): the groove is 1 m wide and 0.5 m deep a scrape, the rock round it glows white-hot, then
+  orange, then dull red, and fractures spread out over the surface from it; a chunk that breaks off throws dust.
 
 ### Figures
 
 | Figure | Value | Where |
 | --- | --- | --- |
-| Scrape's yield | 0.5 of the ore the rock it cuts holds | `chunks.yieldShare` |
+| Cut's radius | 1 m (twice the old one), so a groove is about 1.7 m wide at the surface | `miningLaser.laser.cutRadius` |
+| How deep one scrape bites | 0.5 m | `laser.biteMetres` |
+| Scrape's yield | 0.125 of the ore the rock it cuts holds: a 1 m cut takes four times the rock of the old 0.5 m one, so the share falls to keep the mining rate where the player balanced it | `chunks.yieldShare` |
 | Ore one chunk carries | 400 kg | `chunks.oreKg` |
 | Rock a chunk may hold | 0.25 of the chunk, at most | `chunks.rockShare` |
 | Heaviest chunk | 533 kg, 0.56 m a side | worked out from the two above |

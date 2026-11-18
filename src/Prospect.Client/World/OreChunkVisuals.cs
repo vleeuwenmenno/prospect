@@ -22,16 +22,29 @@ internal sealed class OreChunkVisuals
     private readonly OreChunk[] _current = new OreChunk[OreChunks.Capacity];
     private readonly OreChunk[] _previous = new OreChunk[OreChunks.Capacity];
     private readonly int[] _match = new int[OreChunks.Capacity];
-    private int _count, _previousCount;
+    private readonly int[] _newIndices = new int[OreChunks.Capacity];
+    private int _count, _previousCount, _newCount;
     private long _tick = -1, _previousTick = -1;
 
     /// <summary>The newest set, in the server's order.</summary>
     public ReadOnlySpan<OreChunk> Items => _current.AsSpan(0, _count);
 
+    /// <summary>
+    /// How many chunks the newest set brought in that the set before did not hold: what broke off since. None for the
+    /// first set of a session, whose chunks are all new to it.
+    /// </summary>
+    public int NewCount => _newCount;
+
+    /// <summary>The place in <see cref="Items"/> of the newest set's <paramref name="i"/>th new chunk.</summary>
+    public int NewAt(int i) => _newIndices[i];
+
+    /// <summary>Forgets which chunks were new, after what draws them has thrown their dust.</summary>
+    public void ConsumeNew() => _newCount = 0;
+
     /// <summary>Forgets both sets: another world.</summary>
     public void Clear()
     {
-        _count = _previousCount = 0;
+        _count = _previousCount = _newCount = 0;
         _tick = _previousTick = -1;
     }
 
@@ -63,6 +76,12 @@ internal sealed class OreChunkVisuals
             _match[i] = found;
             if (found >= 0) from = found + 1;
         }
+
+        // What broke off since the set before: nothing is new to a client on the set it first receives.
+        _newCount = 0;
+        if (_previousTick >= 0)
+            for (var i = 0; i < _count; i++)
+                if (_match[i] < 0) _newIndices[_newCount++] = i;
 
         return true;
     }
