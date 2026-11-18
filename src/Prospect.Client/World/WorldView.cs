@@ -1438,6 +1438,10 @@ internal sealed partial class WorldView
         }
 
         _rockExhaust.Begin(time, camera);
+        // What this frame adds to the marks: the rock a beam has just cut, glowing and cracking, and the dust where a
+        // chunk broke off, both out of the fixed pools the exhaust uses.
+        FeedCutMarks(snapshot.RockEdits);
+        SpawnChunkBursts(snapshot);
         _rockPatches.Begin(snapshot.RockEdits, _scene);
         _scene.BeginRockPatches();
         _patchDrawCount = 0;

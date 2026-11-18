@@ -196,8 +196,9 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   step bills `PowerFlow.Laser` all or nothing after the tractors, `FireLasers` after the round fires from the hull's
   new pose toward the aim found before (`LaserAim`, `RockRay.First`) and cuts through `ScrapeRock` only, strokes
   chained so the wire sends 9 B a scrape. Ore: `MiningRules.ScrapeKg` shared out by `RockInterior.Sample` at the
-  cut's deepest point, per laser and ore, times `chunks.yieldShare` (0.5: half the ore a scrape's rock holds comes
-  free, the rest is lost). A chunk carries exactly `chunks.oreKg` of one ore (400 kg) and only the rock that keeps it
+  cut's deepest point, per laser and ore, times `chunks.yieldShare` (0.125: an eighth of the ore a scrape's rock holds
+  comes free, the rest is lost; the share is low because the 1 m cut takes four times the rock the old 0.5 m one did,
+  and the ore a second is `face * cutRate`, so widening the cut without lowering the share multiplies the mining rate). A chunk carries exactly `chunks.oreKg` of one ore (400 kg) and only the rock that keeps it
   within `MiningRules.ChunkMaxMassKg` (`chunks.oreKg / (1 - chunks.rockShare)` = 533 kg): the rock above that is left
   in space, its grade is its ore over its mass, and `mining.json` is refused unless that heaviest chunk goes through
   `chunks.intakeMetres` less `chunks.intakeMarginMetres`. Never spawn a chunk of the whole rock again, and never work
@@ -1456,6 +1457,21 @@ How to apply it:
   with `--open laser` it waits for the beam): `--laser-camera 2.2,125,-18` idle, with `--open laser --capture-after 7`
   firing and `--capture-after 25` overheated. `--open edit-laser --zoom 3.2` puts the editor's camera that many metres
   from the held ghost. Tests: `LaserVisualTests`.
+- The cut itself (client look only, no wire or save field): `WorldView.CutMarks.cs` reads the session's `RockEditLog`
+  as it grows and gives each new scrape a hot mark in the same 64-mark pool the exhaust uses (`RockExhaust.HeatCut`),
+  centred on the scrape's own point and `edit.Radius * cut.markRadius` wide, so the rock round the rim of the hole
+  glows. `LaserCutLook` (`laser.cut` in `propulsion.json`) holds the cooling (white-hot, then orange, then a dull red,
+  dark by `hotSeconds`), the fractures (`crackSeconds`, held then faded, their reach, width and darkness) and the dust
+  a broken chunk throws. `mesh.frag` draws the glow with a hot core and carves the fractures as wobbling, broken
+  radial lines from a seed the client works out from the cut's place in the rock's frame (`WorldView.Seed`), so every
+  player sees the same cracks. Marks a frame takes in are capped (`CutMarksPerFrame`); a jump larger than
+  `CutMarksBehind` is a join or a load, whose cuts are old and none of them glows. A chunk the newest set of
+  `OreChunkVisuals` brought in (`NewCount`, `NewAt`, `ConsumeNew`; empty on a session's first set) throws a burst from
+  the same fixed dust pool (`RockExhaust.Burst`): `burstParticles` motes and `debrisParticles` larger, slower ones,
+  tinted by the rock and its ore. Never add a second particle pool or mark buffer for any of it, and never read
+  anything but the edits and the rock's pose for a mark. Captures: `--open rock-scrape` (the debug groove takes the
+  same marks: white-hot at 3 s, orange at 5 s, dull red at 7 s, fractures left by 9 s) and `--open laser` with
+  `--capture-count`/`--capture-every` for a real cut. Tests: `RockExhaustTests`.
 - Ore chunks: `OreChunkVisuals` keeps two sets and matches chunks by id once per set (and carries them tumbling at the replicated
   spin); `WorldView.OreChunks.cs` draws the worker-built `OreChunkModels` lump scaled to `OreChunks.Half`. A lump is a convex
   polyhedron cut from a box by random planes (sharp break faces, each split into a fan round a pushed middle), `variants` of them

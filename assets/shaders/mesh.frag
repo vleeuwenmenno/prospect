@@ -15,7 +15,10 @@ layout(location = 8) flat in vec4 oreFigures;
 layout(location = 9) flat in float crystal;
 // How much of its full colour a light that follows thrust gains now (mesh.vert); 0 for every other light.
 layout(location = 10) flat in float thrustLit;
-struct RockMark { vec4 centerRadius; vec4 normalScorch; vec4 glow; };
+// centerRadius: where the mark is and how far it reaches. normalScorch: the way the surface faces there, and how much
+// soot it has. glow: the light it gives off, and the plume's shimmer clock (-1 for none). cut: a mining laser's mark,
+// x the fractures' strength, y a line's width, z how far they reach, w a seed, all zero for every other mark.
+struct RockMark { vec4 centerRadius; vec4 normalScorch; vec4 glow; vec4 cut; };
 layout(std430, set = 0, binding = 3) readonly buffer RockMarks { RockMark marks[]; } rock;
 
 // On for the hull pipeline: a hull going through a jump's opening is cut away where it is past it, before anything
@@ -42,7 +45,7 @@ float noise(vec3 x)
 }
 
 // Shade the actual rock fragments: no decal plane, depth copy, hatch texture or detached geometry.
-vec3 exhaustMarks(vec3 lit, vec3 normal)
+vec3 exhaustMarks(vec3 lit, vec3 normal, float pixel)
 {
     for (int group = 0; group < 4; group++)
     {
@@ -52,11 +55,39 @@ vec3 exhaustMarks(vec3 lit, vec3 normal)
             int bit = findLSB(bits);
             bits &= bits - 1u;
             RockMark mark = rock.marks[group * 16 + bit];
+            vec3 n = mark.normalScorch.xyz;
             vec3 delta = worldPosition - mark.centerRadius.xyz;
             float r = length(delta) / mark.centerRadius.w;
-            float edge = (1.0 - smoothstep(0.15, 1.0, r)) * smoothstep(0.0, 0.35, dot(normal, mark.normalScorch.xyz));
+            float facing = smoothstep(0.0, 0.35, dot(normal, n));
+            float edge = (1.0 - smoothstep(0.15, 1.0, r)) * facing;
             float shimmer = mark.glow.w >= 0.0 ? 0.7 + 0.3 * sin(mark.glow.w * 3.0 + r * 8.0) : 1.0;
-            lit = lit * (1.0 - edge * mark.normalScorch.w) + mark.glow.rgb * (edge * shimmer);
+            // A hot cut glows hardest in its middle, where the rock is thinnest against the beam.
+            float core = mark.cut.z > 0.0 ? 1.0 + 0.8 * (1.0 - smoothstep(0.0, 0.75, r)) : 1.0;
+            lit = lit * (1.0 - edge * mark.normalScorch.w) + mark.glow.rgb * (edge * shimmer * core);
+
+            // The fractures a cut leaves: wobbly lines running out from it, thin, dark and gone with the look's clock.
+            if (mark.cut.x > 0.0 && r < mark.cut.z / mark.centerRadius.w)
+            {
+                float scale = mark.centerRadius.w;
+                float reach = mark.cut.z / scale;
+                vec3 reference = abs(n.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+                vec3 t1 = normalize(cross(n, reference));
+                vec3 t2 = cross(n, t1);
+                float angle = atan(dot(delta, t2), dot(delta, t1));
+                float seed = mark.cut.w;
+                // Four fractures, bent by the seed so two cuts never crack alike, wandering as they run out.
+                float bend = 0.5 * sin(angle * 2.7 + seed * 41.0 + r * 9.0) + 0.3 * sin(angle * 6.1 - seed * 23.0 + r * 5.0);
+                float turns = (angle + bend + 3.1415927) / 6.2831853 * 4.0;
+                float offset = abs(fract(turns) - 0.5) * 2.0;
+                float arc = offset * (6.2831853 / 4.0) * max(r, 0.15) * scale;
+                float width = max(mark.cut.y, pixel * 1.2);
+                float line = 1.0 - smoothstep(width, width * 2.0, arc);
+                // They start a little inside the rim, are longer in some directions than others, and break into lengths
+                // of a metre or so, so they read as fractures in rock rather than as spokes drawn out of the cut.
+                float spread = smoothstep(0.45, 0.95, r) * (1.0 - smoothstep(reach * 0.5, reach, r));
+                float broken = smoothstep(0.2, 0.5, 0.5 + 0.5 * sin(r * 3.1 + seed * 29.0 + angle * 1.7));
+                lit *= 1.0 - line * spread * broken * mark.cut.x * facing;
+            }
         }
     }
     return lit;
@@ -74,6 +105,8 @@ void main()
     vec3 n = normalize(worldNormal);
     vec3 view = normalize(-worldPosition);
     vec3 albedo = color.rgb;
+    // How many metres one pixel covers here: a fracture thinner than a pixel is drawn a pixel wide rather than lost.
+    float pixelSize = max(length(fwidth(worldPosition)), 1e-4);
 
     // Ice (material 0.25, WorldView.MaterialIce): an asteroid to everything that reads the scene, lit as a clear,
     // faceted crystal: flat faces, light wrapping into it and shining through where the star is behind it, streaks
@@ -111,7 +144,7 @@ void main()
             float below = worldPosition.y < frame.gridPlane.x ? 0.55 : 1.0;
             ice = mix(ice * mix(1.0, below, frame.gridPlane.z), vec3(1.0, 0.69, 0.13) * 1.8, cutLine * frame.gridPlane.z);
         }
-        outColor = vec4(exhaustMarks(ice, n), 0.25);
+        outColor = vec4(exhaustMarks(ice, n, pixelSize), 0.25);
         return;
     }
 
@@ -234,6 +267,6 @@ void main()
     // A solid surface clears the jump lens mask, so a hull in front of an opening stays sharp, and leaves a mark
     // of what it is in the fraction: 0.25 an asteroid, 0.375 a hull, 0.5 the pilot's own hull, which their jump
     // never covers.
-    if (color.a < 0.5 && !ore) lit = exhaustMarks(lit, n);
+    if (color.a < 0.5 && !ore) lit = exhaustMarks(lit, n, pixelSize);
     outColor = vec4(lit, color.a > 1.5 ? 0.5 : color.a > 0.5 ? 0.375 : 0.25);
 }

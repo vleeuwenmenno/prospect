@@ -10,6 +10,9 @@ internal struct RockMarkData
     public float4 CenterRadius;
     public float4 NormalScorch;
     public float4 Glow;
+    // A mining laser's hot mark: the fractures around it. x how dark they are now, y a line's width (m), z how far they
+    // reach (m), w a seed that keeps one mark's pattern the same for every player. All zero for every other mark.
+    public float4 Cut;
 }
 
 internal struct RockEffectInstance
@@ -52,6 +55,9 @@ internal sealed class RockExhaust
     private struct Mark
     {
         public bool Used, Seen;
+        // A mining laser's hot mark: its glow and fractures come from the laser's cut look, not from a plume's.
+        public bool Cut;
+        public float Seed;
         public SectorCoord Sector;
         public int Index, Kind, Draw;
         public Vector3 Local, Normal, Center, WorldNormal;
@@ -167,8 +173,25 @@ internal sealed class RockExhaust
         {
             ref var m = ref _marks[i];
             if (!m.Used) continue;
-            var look = PropulsionLook.Shared.PlumeOrder[m.Kind].Rock;
             var age = (float)(_time - m.Heated);
+            if (m.Cut)
+            {
+                var cut = PropulsionLook.Shared.Laser?.Cut;
+                if (cut is null || age >= cut.CrackSeconds) { m.Used = false; continue; }
+                if (!m.Seen) continue;
+                var heat = cut.Heat(age);
+                MarkData[i] = new RockMarkData
+                {
+                    CenterRadius = new(m.Center.X, m.Center.Y, m.Center.Z, m.Radius),
+                    NormalScorch = new(m.WorldNormal.X, m.WorldNormal.Y, m.WorldNormal.Z, 0),
+                    Glow = new(heat.X, heat.Y, heat.Z, -1),
+                    Cut = new(cut.CrackStrength(age), cut.CrackWidth, m.Radius * cut.CrackReach, m.Seed),
+                };
+                MarkDraws[i] = m.Draw;
+                continue;
+            }
+
+            var look = PropulsionLook.Shared.PlumeOrder[m.Kind].Rock;
             if (age >= look.FadeSeconds) { m.Used = false; continue; }
             if (!m.Seen) continue;
             var response = Response(look, age, m.Strength);
@@ -194,14 +217,26 @@ internal sealed class RockExhaust
         return _outputCount;
     }
 
-    internal int Heat(SectorCoord sector, int index, int kind, Vector3 local, Vector3 normal, Vector3 center, Vector3 worldNormal, float radius, float strength, int draw = -1)
+    internal int Heat(SectorCoord sector, int index, int kind, Vector3 local, Vector3 normal, Vector3 center, Vector3 worldNormal, float radius, float strength, int draw = -1) =>
+        HeatCore(sector, index, kind, local, normal, center, worldNormal, radius, strength, false, 0, draw);
+
+    /// <summary>
+    /// A mining laser's hot mark where its beam cut into a rock: the rock's own frame, the point on its surface the cut
+    /// made, how far out that point faces, and how wide the mark reaches. Its glow, its cooling and its fractures are
+    /// the laser cut look's; <paramref name="seed"/> (0 to 1) keeps one mark's pattern the same on every client.
+    /// </summary>
+    internal int HeatCut(SectorCoord sector, int index, Vector3 local, Vector3 normal, Vector3 center, Vector3 worldNormal, float radius, float seed) =>
+        HeatCore(sector, index, -1, local, normal, center, worldNormal, radius, 1f, true, seed, -1);
+
+    private int HeatCore(SectorCoord sector, int index, int kind, Vector3 local, Vector3 normal, Vector3 center, Vector3 worldNormal, float radius,
+        float strength, bool cut, float seed, int draw)
     {
         var slot = -1;
         var oldest = 0;
         for (var i = 0; i < Marks; i++)
         {
             ref var m = ref _marks[i];
-            if (m.Used && m.Sector == sector && m.Index == index && m.Kind == kind && Vector3.DistanceSquared(m.Local, local) < radius * radius
+            if (m.Used && m.Cut == cut && m.Sector == sector && m.Index == index && m.Kind == kind && Vector3.DistanceSquared(m.Local, local) < radius * radius
                 && Vector3.Dot(m.Normal, normal) > 0.8f)
             {
                 m.Heated = _time; m.Strength = Math.Max(m.Strength, strength); m.Seen = true; m.Draw = draw;
@@ -215,6 +250,8 @@ internal sealed class RockExhaust
         {
             Used = true,
             Seen = true,
+            Cut = cut,
+            Seed = seed,
             Sector = sector,
             Index = index,
             Kind = kind,
@@ -229,6 +266,40 @@ internal sealed class RockExhaust
             Heated = _time
         };
         return slot;
+    }
+
+    /// <summary>
+    /// The dust and debris a chunk throws up where it broke off: a short burst out of the fixed pool, thrown outward
+    /// and drifting on the chunk's own velocity. <paramref name="half"/> is half the chunk's edge. Takes no memory.
+    /// </summary>
+    public void Burst(Double3 position, Vector3 velocity, float half, Vector3 tint)
+    {
+        if (PropulsionLook.Shared.Laser?.Cut is not { } cut) return;
+        Spray(position, velocity, half, tint, cut.BurstParticles, cut.BurstSpeed, cut.BurstSeconds, cut.BurstSize);
+        // Larger, slower motes after the dust read as debris rather than as light.
+        Spray(position, velocity, half, tint * 0.55f, cut.DebrisParticles, cut.DebrisSpeed, cut.DebrisSeconds, cut.DebrisSize);
+    }
+
+    private void Spray(Double3 position, Vector3 velocity, float half, Vector3 tint, int count, float speed, float seconds, float size)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            // Directions spread over the sphere, so a burst never clumps on one side.
+            var up = Random() * 2f - 1f;
+            var around = Random() * MathF.Tau;
+            var across = MathF.Sqrt(MathF.Max(0f, 1f - up * up));
+            var direction = new Vector3(across * MathF.Cos(around), up, across * MathF.Sin(around));
+            _particles[_particleNext] = new Particle
+            {
+                Origin = position + direction * (half * 1.2f),
+                Velocity = direction * (speed * (0.35f + Random())) + velocity * 0.5f,
+                Born = _time,
+                Life = seconds * (0.55f + Random() * 0.45f),
+                Size = size * (0.4f + Random() * 0.8f),
+                Color = tint,
+            };
+            _particleNext = (_particleNext + 1) % Particles;
+        }
     }
 
     /// <summary>Retained heat and soot, independent of the last wisp's fading throttle.</summary>

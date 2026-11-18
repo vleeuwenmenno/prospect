@@ -66,6 +66,9 @@ internal sealed class LaserLook
     /// <summary>The beam's appearance.</summary>
     public LaserBeamLook Beam { get; init; } = new();
 
+    /// <summary>The hot mark it leaves on the rock where it cuts, its cooling, and the dust a broken chunk throws.</summary>
+    public LaserCutLook Cut { get; init; } = new();
+
     /// <summary>The base ring and yoke of the turret, as the shared turret models take them.</summary>
     public TurretFrame Turret => new(BaseRadius, BaseHeight, BaseSides, Slots, YokeHeight, YokeSpread, YokeArm, YokeHub, BodyColor, DarkColor, AccentColor, LightColor);
 
@@ -107,6 +110,7 @@ internal sealed class LaserLook
             || !(PulseRate is >= 0 and <= 30) || !(PulseDepth is >= 0 and <= 1))
             throw new InvalidDataException($"{path}: laser turret is out of range: a base of 8 to 16 sides, a head that fits between the yoke's arms and turns clear of the yoke at every pitch, a muzzle wider than the barrel and a lens inside it");
         Beam.Check(path);
+        Cut.Check(path);
     }
 }
 
