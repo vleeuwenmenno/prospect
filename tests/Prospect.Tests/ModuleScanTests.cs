@@ -50,7 +50,7 @@ public sealed class ModuleScanTests
         internal readonly Wire[] Wires;
         private readonly ManualTime _clock = new();
         internal long Tick;
-        internal Rig(bool equipped = true, string quality = "Common")
+        internal Rig(bool equipped = true, string quality = "Common", string locator = "asteroidLocator")
         {
             using var copy = new ContentCopy(fleet: true);
             if (equipped)
@@ -62,7 +62,7 @@ public sealed class ModuleScanTests
                 {
                     // A scanner is a face mount: plating to carry it, and the scanner on that block's top face.
                     blocks.Add(new JsonObject { ["at"] = new JsonArray(-3 - i, 0, 0), ["type"] = "hull" });
-                    mounts.Add(new JsonObject { ["on"] = blocks.Count - 1, ["face"] = "up", ["at"] = new JsonArray(2, 2), ["type"] = new[] { "gasScanner", "asteroidScanner", "asteroidLocator" }[i] });
+                    mounts.Add(new JsonObject { ["on"] = blocks.Count - 1, ["face"] = "up", ["at"] = new JsonArray(2, 2), ["type"] = i == 2 ? locator : new[] { "gasScanner", "asteroidScanner" }[i] });
                 }
                 copy.Write("ships/command_pod.json", pod.ToJsonString());
                 var catalogue = JsonNode.Parse(copy.Read("blocks/blocks.json"))!;

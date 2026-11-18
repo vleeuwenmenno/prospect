@@ -108,6 +108,20 @@ internal static partial class PropulsionModels
         g.Loft(inner, ringTop, inner, baseH * 1.25f, Vector2.Zero, plating, -1f);
         g.Cap(inner, Vector2.Zero, baseH * 1.25f, 1f, plating);
 
+        // Extra rings on the deck inside the pickets' ring, each a shallow step: an array of more than one ring is the
+        // advanced locator, told apart at a glance from the basic one's single row of pickets.
+        Span<Vector2> step = stackalloc Vector2[sides];
+        Span<Vector2> stepTop = stackalloc Vector2[sides];
+        for (var r = 1; r < look.Rings; r++)
+        {
+            var share = 0.62f - 0.16f * (r - 1);
+            Polygon(step, Vector2.Zero, headR * (share + 0.12f), turn);
+            Polygon(stepTop, Vector2.Zero, headR * share, turn);
+            var baseY = baseH * 1.25f;
+            g.Loft(step, baseY, stepTop, baseY + (ringTop - baseH * 1.25f) * 0.55f, Vector2.Zero, detail, 1f);
+            g.Cap(stepTop, Vector2.Zero, baseY + (ringTop - baseH * 1.25f) * 0.55f, 1f, metal);
+        }
+
         // Pickets round the middle, each a little taller than the last, with a hub spike in the centre at full height.
         var count = look.Spikes;
         var radius = small * look.SpikeRadius;

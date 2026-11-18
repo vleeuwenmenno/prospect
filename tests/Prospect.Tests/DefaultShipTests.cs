@@ -24,15 +24,18 @@ public sealed class DefaultShipTests(ITestOutputHelper output)
     [Fact]
     public void TheShipCarriesEveryPartAShipCanTake()
     {
-        // A ship takes FTL drives of one kind only (BoxDesign.RequireOneDriveKind), so a drive of another kind than
-        // the ship's own is the only part it may leave out.
+        // A ship takes FTL drives of one kind only (BoxDesign.RequireOneDriveKind) and locators of one kind only
+        // (BoxDesign.RequireOneLocatorKind), so a drive or a locator of another kind than the ship's own is the only
+        // part it may leave out.
         var pod = Content.Pod;
+        var locator = pod.Stats.AsteroidLocator;
         var carried = new HashSet<string>();
         foreach (var box in pod.Boxes) carried.Add(box.Type.Id);
         foreach (var mount in pod.Mounts) carried.Add(mount.Type.Id);
         foreach (var type in Content.Blocks.Types)
         {
             if (!type.FitsClass(HullClass.Ship) || (type.Ftl != FtlKind.None && type.Ftl != pod.Flight.Ftl)) continue;
+            if (type.Module.Family == ModuleFamily.AsteroidLocator && type.Module.Filter != locator.Filter) continue;
             Assert.True(carried.Contains(type.Id), $"the shipped ship has no {type.Name} ({type.Id})");
         }
 

@@ -135,7 +135,7 @@ Candidates are checked at their current positions before publication, so out-of-
 
 - `PlayerInputBridge.StartGasScan(SectorCoord anchor)`.
 - `PlayerInputBridge.StartAsteroidScan(RockRef target)`.
-- `PlayerInputBridge.PulseAsteroidLocator()`.
+- `PlayerInputBridge.PulseAsteroidLocator(LocatorFilter filter)`; the empty filter is the basic pulse.
 - `SessionSnapshot.Modules.Scan`: state, Refusal, Serial, Hull, quality, start/end ticks, one cooldown tick per family (`CooldownUntil(family)`), origin, Partial.
 - `SessionSnapshot.Modules.Records[0..Count]`: retained observations; `Find(family, sector, index)` locates one.
 
@@ -145,9 +145,11 @@ An asteroid analysis names every resource in the rock: `Resource`, `Mix1`, `Mix2
 Each share (`Grade`, `Mix1Share`, `Mix2Share`) is whole steps of the scanner's resolution, rounded down (`ModuleScanRules.Resolved`).
 A named resource with share zero is a trace: present, under one step, no figure claimed. Never show it as 0 % or guess.
 Ore mass of a resource is `Mass` times its share. What the shares leave of one is rock plus traces, not rock alone.
-Locator records deliberately contain zero radius/mass/grade and no mix-in. Their positions are observations, not live tracking.
+A basic locator's records contain zero radius/mass/grade and no mix-in; an advanced one's carry the radius its marks
+word as the diameter. Their positions are observations, not live tracking.
 
-Protocol 49: ModuleScan (33), reliable, 18 bytes; ModuleSurvey (34), reliable, at most 1143 bytes.
+Protocol 78: ModuleScan (33), reliable, 26 bytes (the family, what it targets, and the advanced locator's filter);
+ModuleSurvey (34), reliable, at most 1143 bytes.
 The publication is a 95-byte header (three cooldown ticks, one per family) plus at most eight 131-byte observations.
 Admission, catalogue readiness and normal receive/rate budgets precede request decoding.
 Only the receiving owner's records are sent; the client rejects a packet containing a foreign owner.
@@ -188,7 +190,7 @@ Evaluator version is 18; protocol 65; generation 8; save codec 18. Older incompa
 
 ## Decided: advanced locator
 
-Decided 2026-11-18, not built yet.
+Decided 2026-11-18; built (see "As built" below).
 
 - An advanced locator is a second locator part in the editor's Sensors tab: heavier, with more power draw.
 - A ship carries one kind of locator, never both: the editor refuses the second kind and says why, and a design
@@ -200,12 +202,45 @@ Decided 2026-11-18, not built yet.
   The basic locator's chip pulses as before.
 - Range, scan time and cooldown stay the basic locator's; the extra is the filter and the diameter.
 
+### As built
+
+- The part is `advancedLocator`, a face mount of the `asteroidLocator` family with `"filter": true` and variant
+  `advanced`: one `ModuleFamily`, so cooldowns, chips, `HullStats.Module` and the equipment selection stay one
+  locator. 1.1 t, 0.3 MW standing, 18 MW while pulsing, 7 tenths wide; range 5 km, 2 s, 15 s cooldown as the basic
+  one. Its own look in the `scanners` entry of `visuals/propulsion.json`: a two-ring, eight-picket array.
+- One kind a ship: `BoxDesign.RequireOneLocatorKind` (beside the one drive kind), asked by design files, by
+  `DesignBytes.Decode` and by the draft's `Export`; the draft answers `DraftEdit.MixedLocators` from `CanAddMount`,
+  from a paste of the other kind and from a loaded design that has both. Several of one kind stay allowed.
+- The filter is `LocatorFilter` (shared): a smallest and a largest diameter in whole metres and a bit mask over the
+  galaxy's resources. A zero diameter is no bound, and an empty mask is no ore narrowing (every rock, bare rock
+  included); with ore bits set only those mains are reported and bare rock is not. `Valid` refuses unknown ore bits.
+  It is a client preference (`ClientSettings.LocatorMinMetres`/`LocatorMaxMetres`/`LocatorOres`), sent with each pulse
+  and kept by no server.
+- Wire: protocol 78. `ModuleScan` (33) grows by eight bytes, to 26: the two diameters (16 bits each) and the mask.
+  The reader refuses a range the wrong way round; the server refuses a filter for a ship whose locator has none, and
+  one naming an ore this galaxy lacks, as `InvalidTarget` before anything is dispatched or cooled.
+- Server: `ModuleSurveyWorker` applies the filter in the locator's candidate loop, before the 256-place limit.
+  `ModuleScanRules.Disclose` keeps the radius for an advanced pulse and zeroes it for a basic one.
+  `ModuleObservationRules.Valid` holds a locator record to no mass, grade or mix-in and to any radius, so a save may
+  keep one; the save layout is unchanged (codec 18).
+- Interface: the chip of an advanced locator opens `LocatorPopup` over it (Escape closes it, `BackStep.LocatorPopup`);
+  the key pulses with the filter as it stands. The popup edits both bounds in steps of `stepMetres` and shows every
+  resource of the galaxy as a checkbox in its own colour, with All and None. Figures are `locatorFilter` in
+  `content/visuals/modules.json`. A mark of a fresh advanced pulse reads "COMMON METAL  180 M  2.4 KM".
+- Captures: `tools/prepare_locator_capture.py` swaps the shipped ship's two locators for advanced ones, then
+  `--open locator-popup`, `--module locator` with `--locator-ores`/`--locator-diameter`, and (on the shipped build)
+  `--open edit-advanced-locator` for the one-kind refusal.
+- Gaps: the popup has no text entry for a diameter, only steps; the filter is not shown on the chip; a pulse that
+  matches nothing still runs and cools; and the ore set cannot name bare rock on its own.
+
 ## Open
 
 - Whether the sector scanner (`charting`) and the passive `sensor` also become face mounts. Not decided: they stay blocks.
 - Converting old saved worlds: not built. A world saved with scanner blocks is refused; a migration would have to rebuild
   each hull's design and block hit points.
 - Gameplay balance of the provisional figures and quality multipliers.
-- UI controls, presentation and locator overlay treatment of partial/stale observations.
+- UI controls, presentation and locator overlay treatment of partial/stale observations: the advanced locator's
+  filter popup is the first cut.
 - Inventory, upgrades, mining revisions and explicit knowledge sharing/trading.
+- Whether a filtered pulse that matches nothing should be refused before it spends power and starts a cooldown.
 - Exhaustive locator coverage of displaced asteroids beyond the bounded generated candidate set.

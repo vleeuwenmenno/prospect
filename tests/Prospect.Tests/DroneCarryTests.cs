@@ -73,7 +73,7 @@ public sealed class DroneCarryTests
         Assert.True(DroneCarryMessage.TryRead(ref reader, read, out tick, out count));
         Assert.Equal(42, tick);
         Assert.Equal(0, count);
-        Assert.Equal(77u, ProtocolInfo.Version);
+        Assert.Equal(78u, ProtocolInfo.Version);
         Assert.Equal(52, (int)MessageId.DroneCarries);
 
         // One byte of a record, and one record's drone, changed by hand.

@@ -82,7 +82,7 @@ public sealed class ModuleInterfaceTests
         var tuning = EditorTuning.Load(Path.Combine(Content, "visuals", "editor.json"));
         var tab = Array.Find(tuning.Categories, c => c.Name == "Sensors")!;
         var listed = Game.Blocks.Types.Where(t => tuning.Lists(tab, t)).Select(t => t.Id).Order().ToArray();
-        Assert.Equal(["asteroidLocator", "asteroidScanner", "gasScanner"], listed);
+        Assert.Equal(["advancedLocator", "asteroidLocator", "asteroidScanner", "gasScanner"], listed);
         foreach (var id in listed)
             Assert.Equal(PartRole.Module, EditorGeometry.Role(Game.Blocks.Get(id)));
         var palette = new EditorPalette { Category = Array.IndexOf(tuning.Categories, tab) };

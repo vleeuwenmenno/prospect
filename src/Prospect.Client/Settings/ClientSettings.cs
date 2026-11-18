@@ -50,6 +50,29 @@ internal sealed class ClientSettings
     public string LastHost { get; set; } = "127.0.0.1";
     public int LastPort { get; set; } = ProtocolInfo.DefaultPort;
 
+    /// <summary>
+    /// What the advanced locator's pulse looks for, kept per client and sent with each pulse: the smallest and the
+    /// largest diameter reported, in whole metres (zero for no bound), and one bit a resource of the galaxy by its
+    /// index (zero for any ore). It is a preference of the player, never a server's or a world's; a hand-edited file
+    /// is clamped and unknown ore bits are dropped when it is read.
+    /// </summary>
+    public int LocatorMinMetres { get; set; }
+
+    public int LocatorMaxMetres { get; set; }
+
+    public uint LocatorOres { get; set; }
+
+    /// <summary>The filter as the game sends it, from the three preferences.</summary>
+    public LocatorFilter LocatorFilter => new((ushort)LocatorMinMetres, (ushort)LocatorMaxMetres, LocatorOres);
+
+    /// <summary>Keeps the three filter preferences as the game sent them, clamped to what the wire and the controls allow.</summary>
+    public void SetLocatorFilter(in LocatorFilter filter)
+    {
+        LocatorMinMetres = filter.MinMetres;
+        LocatorMaxMetres = filter.MaxMetres;
+        LocatorOres = filter.Ores;
+    }
+
     /// <summary>Seconds between automatic saves of a world this game runs, from 10 to 600. Read when a world is opened.</summary>
     public int AutosaveSeconds { get; set; } = 30;
 
@@ -175,6 +198,12 @@ internal sealed class ClientSettings
         AutosaveSeconds = Math.Clamp(AutosaveSeconds, 10, 600);
         EditorMirror &= 7;
         if (!BuildDraft.IsSnapStep(EditorSnap)) EditorSnap = GridPoint.PerCell;
+
+        LocatorMinMetres = Math.Clamp(LocatorMinMetres, 0, LocatorFilter.MaxDiameterMetres);
+        LocatorMaxMetres = Math.Clamp(LocatorMaxMetres, 0, LocatorFilter.MaxDiameterMetres);
+        if (LocatorMaxMetres != 0 && LocatorMinMetres > LocatorMaxMetres) LocatorMinMetres = LocatorMaxMetres;
+        // A resource index an observation cannot name is not one a filter can, whatever the file says.
+        LocatorOres &= (uint)((1UL << LocatorFilter.MaxResources) - 1);
 
         // A file can say anything: keep sane, distinct ids, in the order they were hidden.
         HiddenTips ??= [];

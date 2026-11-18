@@ -154,7 +154,7 @@ in the command view; the same fuel again, or `Esc`, closes it, another fuel swit
 Not there: thruster torque, fuel transfer between tanks, refineries and stations. The figures are a first balance. See
 [propulsion](docs/roadmap/propulsion.md).
 
-Scanning modules have a non-visual backend: three Common Mk I face-mounted scanners (a small part on a block face, like a thruster), gas composition, targeted asteroid analysis, bounded locator pulses and personal saved observations. The interface is wired: a **Module** tab in the ship editor, keys and chips for the three scanners, the asteroid analysis on the target panel, the **Gas** window and the locator's vision over the flight and command views (see *Ship modules* below). No ship in the shipped fleet carries a module: build one in the editor. Mining, upgrades and sharing knowledge are not there. See [module contract](docs/roadmap/modules.md).
+Scanning modules have a non-visual backend: four Common Mk I face-mounted scanners (a small part on a block face, like a thruster), gas composition, targeted asteroid analysis, bounded locator pulses (a basic locator and an advanced one that filters by diameter and ore), and personal saved observations. The interface is wired: a **Module** tab in the ship editor, keys and chips for the three scanners, the asteroid analysis on the target panel, the **Gas** window and the locator's vision over the flight and command views (see *Ship modules* below). No ship in the shipped fleet carries a module: build one in the editor. Mining, upgrades and sharing knowledge are not there. See [module contract](docs/roadmap/modules.md).
 
 New ships from a drone: server/session creation, remote editor grant, persistence, the New ship dialog and its keys are implemented. Closing the editor of a ship just built puts you in control of it.
 
@@ -842,10 +842,11 @@ galaxy rules in `content/galaxy`, world settings in `content/rules`, the listing
 
 ## Ship modules
 
-Three modules exist, each a small part you mount on a block face in the ship editor (**Sensors** tab; a card shows the family, the quality
+Four modules exist, each a small part you mount on a block face in the ship editor (**Sensors** tab; a card shows the family, the quality
 as a coloured badge, the mark, range, scan time, power draw and cooldown). All are Common Mk I today; the six
 qualities (Common, Uncommon, Rare, Epic, Legendary, Alien Tech) and their colours are content
-(`content/visuals/modules.json`, `moduleTiers` in `content/blocks/blocks.json`).
+(`content/visuals/modules.json`, `moduleTiers` in `content/blocks/blocks.json`). A ship carries locators of one kind
+only, the basic one or the advanced one; the editor refuses the other kind and says why.
 
 - **Chips.** Over the flight console, one chip for each module the ship you fly carries (none otherwise): its key,
   name, tier colour and what it would do now: READY, the seconds left while it runs, COOL while that module's
@@ -869,7 +870,14 @@ qualities (Common, Uncommon, Rare, Epic, Legendary, Alien Tech) and their colour
   PARTIAL when more may be there) gets a mark in the colour of its class: ice, common metal, rare metal, precious
   metal or bare rock. Marks appear nearest first, stay for about nine seconds and fade; in the command view they
   fade to a faint mark and stay as your knowledge, in flight they go. A mark is where the asteroid was
-  observed, not a live track. The map index lists the classes once you have a locator or a mark.
+  observed, not a live track. The map index lists the classes once you have a locator or a mark. Its chip pulses
+  when clicked.
+- **Advanced locator (`Y`).** The same pulse with a filter and with each mark's diameter: a click on its chip opens
+  a popup with a smallest and a largest diameter (stepped, so "any" is no bound) and a checkbox for every ore of the
+  galaxy in its own colour, with **All** and **None**. Only rocks that answer the filter are reported, so the 256
+  places go to rocks you want; **None** means no ore narrowing, bare rock included. The filter is your own setting,
+  kept with the client and sent with the pulse; it costs a little more power and mass than the basic locator. The
+  key pulses with the filter as it stands.
 - **Tips.** Each module has a tip the first time it can be used.
 
 ## World settings

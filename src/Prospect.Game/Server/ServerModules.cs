@@ -81,6 +81,11 @@ public sealed partial class ServerHost
         if (_tick < scan.CooldownUntil(request.Family)) { scan.State = ModuleScanState.Cooldown; return; }
         var equipment = InstalledModule(connection, request.Family);
         if (equipment.Mount == 0) { scan.State = ModuleScanState.NoEquipment; return; }
+        // A filter belongs to an advanced locator's pulse and nowhere else, and only one this galaxy's ores and a range
+        // the right way round describe may be sent. The reader has already refused a range the wrong way round; the
+        // empty filter means no narrowing, which is what a basic locator's pulse carries.
+        if (!request.Filter.Empty && (!equipment.Filter || !request.Filter.Valid(Galaxy)))
+        { scan.State = ModuleScanState.InvalidTarget; return; }
         ref var state = ref _hulls.State(connection.Hull.Index);
         if (state.Energy < equipment.PowerDraw / Prospect.Engine.Time.TickLoop.SimulationHz)
         { scan.State = ModuleScanState.NoPower; return; }

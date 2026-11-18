@@ -46,6 +46,14 @@
     "retainedMarkerPixels": 3,
     "labelNearest": 5
   },
+  "locatorFilter": {
+    "width": 280,
+    "rowHeight": 22,
+    "stepMetres": 100,
+    "maxDiameterMetres": 10000,
+    "oresPerRow": 2,
+    "swatchPixels": 10
+  },
   "strip": {
     "chipWidth": 124,
     "chipHeight": 38,

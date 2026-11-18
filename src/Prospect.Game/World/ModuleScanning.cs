@@ -9,8 +9,9 @@ public enum ModuleScanState : byte
     Cooldown, InvalidTarget, Busy, KnowledgeLimit, Unavailable
 }
 
-/// <summary>One scan intent. Gas targets name the anchor; asteroid targets name sector and index.</summary>
-public readonly record struct ModuleScanRequest(ModuleFamily Family, SectorCoord Sector, int Index = 0);
+/// <summary>One scan intent. Gas targets name the anchor; asteroid targets name sector and index; a locator pulse
+/// names what it looks for.</summary>
+public readonly record struct ModuleScanRequest(ModuleFamily Family, SectorCoord Sector, int Index = 0, LocatorFilter Filter = default);
 
 /// <summary>Progress belongs to one controlled hull and one request serial, never to a rendered target.</summary>
 public struct ModuleScanView
@@ -136,14 +137,18 @@ public static class ModuleScanRules
         return (float)Math.Clamp(Math.Floor(share / step + 1e-4) * step, 0, 1);
     }
 
-    /// <summary>Copies only detail allowed by the equipment; locator never publishes detailed composition or mass.</summary>
+    /// <summary>
+    /// Copies only detail allowed by the equipment; locator never publishes detailed composition or mass. An advanced
+    /// locator's pulse reports each rock's radius, which its marks word as the diameter; the basic one reports none.
+    /// </summary>
     public static void Disclose(ref ModuleObservation observation, in ModuleEquipment equipment)
     {
         observation.Quality = equipment.Quality;
         if (observation.Family == ModuleFamily.AsteroidLocator)
         {
-            observation.Grade = 0; observation.Mass = 0; observation.Radius = 0; observation.Gas = default;
+            observation.Grade = 0; observation.Mass = 0; observation.Gas = default;
             observation.Mix1 = observation.Mix2 = -1; observation.Mix1Share = observation.Mix2Share = 0;
+            if (!equipment.Filter) observation.Radius = 0;
             return;
         }
         if (observation.Family != ModuleFamily.GasScanner)
@@ -184,7 +189,9 @@ public static class ModuleObservationRules
         if (record.Family == ModuleFamily.GasScanner)
             return record.Index == record.Gas.Region && record.Resource == -1 && record.Radius == 0 && record.Mass == 0 && record.Grade == 0;
         if (sum != 0 || record.Gas.Purity != 0 || record.Gas.Density != 0 || record.Gas.Region != 0) return false;
-        return record.Family != ModuleFamily.AsteroidLocator || record.Radius == 0 && record.Mass == 0 && record.Grade == 0 && record.Mix1 == -1;
+        // A locator names no composition and no mass. A radius is its mark's diameter, which only an advanced locator
+        // reports; a basic pulse's records carry none, and a save may hold either.
+        return record.Family != ModuleFamily.AsteroidLocator || record.Mass == 0 && record.Grade == 0 && record.Mix1 == -1;
     }
 
     /// <summary>

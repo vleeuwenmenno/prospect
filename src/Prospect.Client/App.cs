@@ -312,6 +312,20 @@ internal sealed class AppOptions
     public bool DronePopup { get; set; }
 
     /// <summary>
+    /// Scripted runs only (<c>--locator-ores all|none|iron,nickel,...</c>): the main ores the advanced locator's filter
+    /// names, by resource id. With <c>--module locator</c> the pulse keeps only the rocks of those ores.
+    /// </summary>
+    public string? LocatorOres { get; set; }
+
+    /// <summary>
+    /// Scripted runs only (<c>--locator-diameter &lt;min&gt;,&lt;max&gt;</c>): the diameter range in metres the advanced locator's
+    /// filter reports. A zero means no bound, as the popup's own controls have it.
+    /// </summary>
+    public int? LocatorMinMetres { get; set; }
+
+    public int? LocatorMaxMetres { get; set; }
+
+    /// <summary>
     /// Captures only (<c>--ore-window</c>, with <c>--open ore</c>): pins the Ship window on its ORE section, where the
     /// bins fill. Not for the benchmark: a pinned window is saved with the settings.
     /// </summary>
@@ -500,6 +514,9 @@ internal sealed class App : IDisposable
 
         _catalogueMeshes = new CatalogueMeshes(Jobs);
         Content = GameContent.Load();
+        // A capture can set the advanced locator's filter from the command line; it is still the client's own
+        // preference, so it goes where the popup writes it.
+        ApplyLocatorFilterOptions(options);
         if (options.VisualBenchmark is { } scenario) Content = scenario.PrepareContent(Content);
         NewGameSettings = Content.SettingCatalog.Build(null, options.WorldSettingArgs, message => Logs.App.Warning(message));
         NewGameHosting = options.Hosting.Clone();
@@ -1304,6 +1321,40 @@ internal sealed class App : IDisposable
     private bool _benchmarkSawChunk, _benchmarkSawBeam, _benchmarkSawChunkPull;
     private int _laserEditsSeen;
     private bool _dronesLaunched, _dronesRecalled, _benchmarkSawDrones, _dronesHome, _droneFetchSent, _benchmarkSawFetch, _droneAutoSent, _droneOresSent, _dronePopupRequested;
+
+    /// <summary>
+    /// Puts <c>--locator-diameter</c> and <c>--locator-ores</c> into this client's filter, for a capture of a filtered
+    /// pulse. An ore named by an id this content does not have is named in a warning and left out.
+    /// </summary>
+    private void ApplyLocatorFilterOptions(AppOptions options)
+    {
+        if (options.LocatorMinMetres is not { } min && options.LocatorMaxMetres is not { } max && options.LocatorOres is null)
+            return;
+        var filter = Settings.LocatorFilter;
+        if (options.LocatorMinMetres is not null || options.LocatorMaxMetres is not null)
+            filter = new((ushort)(options.LocatorMinMetres ?? 0), (ushort)(options.LocatorMaxMetres ?? 0), filter.Ores);
+        if (options.LocatorOres is { } ores && Content.Galaxy is { } galaxy)
+        {
+            if (ores is "all")
+                filter = LocatorPopup.AllOres(galaxy, filter);
+            else if (ores is "none")
+                filter = LocatorPopup.NoOres(filter);
+            else
+            {
+                var mask = 0u;
+                foreach (var id in ores.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    var index = Array.FindIndex(galaxy.Resources, r => r.Id == id);
+                    if (index < 0) Logs.App.Warning($"--locator-ores: no resource {id}");
+                    else mask |= LocatorFilter.BitOf(index);
+                }
+
+                filter = filter with { Ores = mask };
+            }
+        }
+
+        Settings.SetLocatorFilter(filter);
+    }
     private int _dronesOut;
 
     /// <summary>
@@ -1608,6 +1659,18 @@ internal sealed class App : IDisposable
                 World.CaptureGhostDistance = _options.Zoom;
                 _screens.SelectEditorTab(view == "edit-scanner" ? "Sensors" : "Storage");
             }
+            else if (view == "edit-advanced-locator" && snapshot is { OwnHull: >= 0 })
+            {
+                // The editor on the part list's Sensors category, holding the advanced locator's ghost on a top face of
+                // a ship that already carries basic locators: the ghost is refused, and the note says which rule.
+                World.Editor.Request(snapshot.Hulls[snapshot.OwnHull], Session.Client.Input);
+                World.HoldPartGhostForCapture("advancedLocator", new GridSize(1, 1, 1));
+                // The harness clicks it where it is held; the placement is refused, so the ghost stays and the details
+                // panel says which rule it broke.
+                World.PlaceHeldPartForCapture();
+                World.CaptureGhostDistance = _options.Zoom;
+                _screens.SelectEditorTab("Sensors");
+            }
             else if (view is "edit-palette-tip" or "edit-tank-fuel" && snapshot is { OwnHull: >= 0 })
             {
                 // edit-palette-tip: the Thrust category chosen with its rail tooltip held open (no pointer in a scripted
@@ -1709,6 +1772,11 @@ internal sealed class App : IDisposable
             }
             else if (view == "action-groups-popup")
                 _screens.OpenActionGroupsPopup();
+            else if (view == "locator-popup")
+            {
+                // The advanced locator's filter popup over its chip, on a ship that carries one.
+                _screens.RequestLocatorPopup();
+            }
             else if (view == "hud")
             {
                 // The world with only what is always shown: the navigation bar, the party list, the passive chat

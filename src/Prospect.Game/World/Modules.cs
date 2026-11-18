@@ -8,9 +8,13 @@ public enum ModuleFamily : byte { None, GasScanner, AsteroidScanner, AsteroidLoc
 /// <summary>Ordered equipment quality, independent of mark and variant.</summary>
 public enum ModuleQuality : byte { Common, Uncommon, Rare, Epic, Legendary, AlienTech }
 
-/// <summary>Evaluated equipment figures from one mounted part's type; duplicates and resizing do not improve them.</summary>
+/// <summary>
+/// Evaluated equipment figures from one mounted part's type; duplicates and resizing do not improve them.
+/// <paramref name="Filter"/> marks the advanced locator: its pulse carries a <see cref="LocatorFilter"/>, and it is
+/// the one thing that tells the two locator kinds apart, here and in the one-kind rule of a design.
+/// </summary>
 public readonly record struct ModuleSpec(ModuleFamily Family, ModuleQuality Quality, int Mark, string Variant,
-    double Range, double Accuracy, double ScanSeconds, double PowerDraw, double CooldownSeconds)
+    double Range, double Accuracy, double ScanSeconds, double PowerDraw, double CooldownSeconds, bool Filter = false)
 {
     /// <summary>Decodes one module using the catalogue's content-owned tier multipliers.</summary>
     internal static ModuleSpec Read(JsonElement block, JsonElement root)
@@ -51,8 +55,12 @@ public readonly record struct ModuleSpec(ModuleFamily Family, ModuleQuality Qual
         }
         var accuracy = Figure("accuracy");
         if (accuracy > 1) throw new InvalidDataException("Module accuracy exceeds one.");
+        var filter = module.TryGetProperty("filter"u8, out var filtered) && filtered.GetBoolean();
+        // Only a locator's pulse has anything to filter: a scanner names a rock, and a gas scan a cloud.
+        if (filter && family != ModuleFamily.AsteroidLocator)
+            throw new InvalidDataException("Only a locator's pulse carries a filter.");
         return new(family, quality, mark, variant!, Figure("range"), accuracy, Figure("scanSeconds"),
-            Figure("powerDraw"), Figure("cooldownSeconds"));
+            Figure("powerDraw"), Figure("cooldownSeconds"), filter);
     }
 }
 
@@ -62,7 +70,7 @@ public readonly record struct ModuleSpec(ModuleFamily Family, ModuleQuality Qual
 /// exactly while the block it is mounted on is.
 /// </summary>
 public readonly record struct ModuleEquipment(int Mount, ModuleQuality Quality, int Mark, double Range,
-    double Accuracy, double ScanSeconds, double PowerDraw, double CooldownSeconds)
+    double Accuracy, double ScanSeconds, double PowerDraw, double CooldownSeconds, bool Filter = false)
 {
     /// <summary>
     /// Field-wise equality written by hand: the synthesized one goes through <c>EqualityComparer&lt;T&gt;.Default</c>,
@@ -71,12 +79,12 @@ public readonly record struct ModuleEquipment(int Mount, ModuleQuality Quality, 
     public bool Equals(ModuleEquipment other) =>
         Mount == other.Mount && Quality == other.Quality && Mark == other.Mark && Range == other.Range
         && Accuracy == other.Accuracy && ScanSeconds == other.ScanSeconds && PowerDraw == other.PowerDraw
-        && CooldownSeconds == other.CooldownSeconds;
+        && CooldownSeconds == other.CooldownSeconds && Filter == other.Filter;
 
     /// <inheritdoc/>
-    public override int GetHashCode() => HashCode.Combine(Mount, (int)Quality, Mark, Range, Accuracy, HashCode.Combine(ScanSeconds, PowerDraw, CooldownSeconds));
+    public override int GetHashCode() => HashCode.Combine(Mount, (int)Quality, Mark, Range, Accuracy, HashCode.Combine(ScanSeconds, PowerDraw, CooldownSeconds), Filter);
 
     /// <summary>Copies the selected mount's evaluated specification without allocating.</summary>
     internal static ModuleEquipment Of(int mount, in ModuleSpec spec) => mount == 0 ? default :
-        new(mount, spec.Quality, spec.Mark, spec.Range, spec.Accuracy, spec.ScanSeconds, spec.PowerDraw, spec.CooldownSeconds);
+        new(mount, spec.Quality, spec.Mark, spec.Range, spec.Accuracy, spec.ScanSeconds, spec.PowerDraw, spec.CooldownSeconds, spec.Filter);
 }

@@ -47,6 +47,8 @@ public enum DraftEdit : byte
     NoGroup,
     /// <summary>The mounted part is not made in that size: only a part with sizes (<see cref="MountSpec.Sizes"/>) has more than one.</summary>
     NoSize,
+    /// <summary>The mounted part is another kind of locator than the one the ship already carries (<see cref="BoxDesign.RequireOneLocatorKind"/>).</summary>
+    MixedLocators,
 }
 
 /// <summary>
@@ -102,6 +104,10 @@ public sealed class BuildDraft
     // How many drives of each FtlKind the draft has, so a placement can be checked against them without a pass.
     private readonly int[] _drives = new int[4];
 
+    // How many locators of each kind the draft carries: a ship takes one kind, never both. Counted, like the drives,
+    // so the ghost's check takes no pass over the mounts every frame.
+    private int _basicLocators, _advancedLocators;
+
     // The selection of the group edit being checked, as a set. Kept so that a preview every frame takes no memory.
     private ulong[] _marks = [];
 
@@ -122,6 +128,7 @@ public sealed class BuildDraft
             if (box.Type.Core) _cores++;
             _drives[(int)box.Type.Ftl]++;
         }
+        foreach (var mount in mounts) CountLocator(mount.Type, 1);
     }
 
     /// <summary>
@@ -405,6 +412,9 @@ public sealed class BuildDraft
         if (type?.Mount is null) return DraftEdit.WrongKind;
         if (!type.FitsClass(Class)) return DraftEdit.WrongCraft;
         if (_mounts.Count >= _content.Blocks.Limits.MaxMounts) return DraftEdit.TooManyMounts;
+        if (type.Module.Family == ModuleFamily.AsteroidLocator
+            && (type.Module.Filter ? _basicLocators : _advancedLocators) > 0)
+            return DraftEdit.MixedLocators;
         return FaceMounts.Check(Boxes, Mounts, new DesignMount(parent, face, u, v, type, Size: SizeOr(type, size)));
     }
 
@@ -471,6 +481,7 @@ public sealed class BuildDraft
         foreach (ref readonly var box in boxes) ArgumentNullException.ThrowIfNull(box.Type, nameof(boxes));
         var check = CanPaste(boxes, by);
         if (check != DraftEdit.Done) return check;
+        if (MixesLocators(mounts)) return DraftEdit.MixedLocators;
         var first = _boxes.Count;
         for (var i = 0; i < boxes.Length; i++)
             Do(Step.Block(first + i, default, boxes[i] with { At = boxes[i].At + by }));
@@ -525,6 +536,7 @@ public sealed class BuildDraft
         if (!CountFits(boxes.Length)) return DraftEdit.TooManyBlocks;
         if (mounts.Length > _content.Blocks.Limits.MaxMounts) return DraftEdit.TooManyMounts;
         if (BoxDesign.MixedDrive(boxes, out _) >= 0) return DraftEdit.MixedDrives;
+        if (BoxDesign.MixedLocator(mounts, out _) >= 0) return DraftEdit.MixedLocators;
 
         // Everything now in the draft goes, so nothing of it is compared against.
         var words = BlockSet.WordCount(_boxes.Count);
@@ -1271,6 +1283,7 @@ public sealed class BuildDraft
             var limits = content.Blocks.Limits;
             GeometryAdmission.Count(boxes.Length, limits);
             BoxDesign.RequireOneDriveKind(boxes, "draft");
+            BoxDesign.RequireOneLocatorKind(mounts, "draft");
             var built = HullDesign.Of(new BoxDesign(name, blockSize, boxes, limits, "draft", hullClass, color, mounts), content.Rules);
 
             // Measured here as well as in the decoding, so that a draft refused for its surface still says how far over it is.
@@ -1296,6 +1309,21 @@ public sealed class BuildDraft
         }
 
         return false;
+    }
+
+    // Whether adding these mounts would give the draft locators of two kinds, as BoxDesign.RequireOneLocatorKind refuses.
+    private bool MixesLocators(ReadOnlySpan<DesignMount> adding)
+    {
+        var basic = _basicLocators > 0;
+        var advanced = _advancedLocators > 0;
+        foreach (ref readonly var mount in adding)
+        {
+            if (mount.Type?.Module.Family != ModuleFamily.AsteroidLocator) continue;
+            if (mount.Type.Module.Filter) advanced = true;
+            else basic = true;
+        }
+
+        return basic && advanced;
     }
 
     /// <summary>How many of the draft's blocks are tanks. One pass over the boxes; allocates nothing.</summary>
@@ -1484,6 +1512,7 @@ public sealed class BuildDraft
             if (before.Type is null) _mounts.Insert(index, after);
             else if (after.Type is null) _mounts.RemoveAt(index);
             else _mounts[index] = after;
+            if (!ReferenceEquals(before.Type, after.Type)) { CountLocator(before.Type, -1); CountLocator(after.Type, 1); }
             Version++;
             return;
         }
@@ -1505,6 +1534,15 @@ public sealed class BuildDraft
         if (from.Type is { } removed) _drives[(int)removed.Ftl]--;
         if (to.Type is { } added) _drives[(int)added.Ftl]++;
         Version++;
+    }
+
+    // Keeps the draft's count of locators of each kind, one more or one less of the kind this part is; nothing for a
+    // part that is no locator.
+    private void CountLocator(BlockType? type, int delta)
+    {
+        if (type?.Module.Family != ModuleFamily.AsteroidLocator) return;
+        if (type.Module.Filter) _advancedLocators += delta;
+        else _basicLocators += delta;
     }
 
     private static int Of(GridSize g, int axis) => axis switch { 0 => g.X, 1 => g.Y, _ => g.Z };

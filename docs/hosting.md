@@ -976,7 +976,11 @@ so ModuleSurvey is at most 1143 bytes: a 95-byte scan header and up to eight 131
 Requests pass admission, catalogue readiness and the normal receive/rate budgets before decoding.
 Client reliable budgets reserve one module request; newer queued intents survive retries.
 
-`PlayerInputBridge.StartGasScan(anchor)`, `StartAsteroidScan(RockRef)` and `PulseAsteroidLocator()` target the controlled hull.
+`PlayerInputBridge.StartGasScan(anchor)`, `StartAsteroidScan(RockRef)` and `PulseAsteroidLocator(LocatorFilter)` target the controlled hull.
+Protocol 78 grows ModuleScan to 26 bytes by the advanced locator's filter: two diameters in whole metres and one bit a
+resource of this galaxy. The server refuses a filter for a ship whose locator has none, a range the wrong way round,
+and any ore bit this galaxy does not have, as `InvalidTarget`, before dispatching or cooling anything; no filter is kept.
+An advanced pulse's observations carry the rock's radius for its marks; a basic pulse's carry none.
 `SessionSnapshot.Modules` carries progress/refusals and personal retained observations; only Records[0..Count] is valid.
 Each publication is filtered by owner on the server; clients also reject any foreign-owner record.
 No party sharing, live tracking or additional generated-data disclosure is implied by retained knowledge.

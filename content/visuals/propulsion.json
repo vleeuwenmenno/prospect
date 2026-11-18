@@ -521,6 +521,24 @@
       "detailShade": 0.7,
       "portShade": 0.05,
       "rimShare": 0.9
+    },
+    "advancedLocator": {
+      "shape": "array",
+      "sides": 24,
+      "baseRadius": 0.96,
+      "baseHeight": 0.22,
+      "headRadius": 0.9,
+      "headHeight": 1.0,
+      "bowlHeight": 0.5,
+      "stemRadius": 0.18,
+      "rings": 2,
+      "spikes": 8,
+      "spikeRadius": 0.05,
+      "baseShade": 0.32,
+      "headShade": 0.46,
+      "detailShade": 0.74,
+      "portShade": 0.05,
+      "rimShare": 0.9
     }
   },
   "tanks": {
