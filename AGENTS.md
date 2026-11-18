@@ -378,7 +378,12 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   rebuild, sized by `Swapchain.ImageCapacity`; log nothing above debug level there; a native import first called
   there must be in an assembly `NativeBindings.Prelink` is given. `--bench-resize <n>` (the second run of
   `make bench`) resizes the window n times and rebuilds both at the same size n times while measuring; a window
-  manager that keeps the window's size is reported, and the same-size rebuilds still count.
+  manager that keeps the window's size is reported, and the same-size rebuilds still count. The scale the interface
+  is given is the window's content scale (`InterfaceScale.Framebuffer`, `UiPlatform.NewFrame`), never this frame's
+  framebuffer-to-window ratio: GLFW reports the two sizes a frame apart while a compositor resizes, and the ratio
+  then jumps far enough that Dear ImGui re-bakes its font atlas into a new page, which its renderer backend builds
+  with managed memory inside the frame loop and destroys three frames later (the 424 bytes in 4 frames the resize
+  benchmark failed on). `InterfaceScaleTests` holds the rule.
 - **Shaders:** files in `assets/shaders/` are compiled at startup. Check them first with
   `glslc -I assets/shaders assets/shaders/<file> -o /dev/null`. `frame.glsl` must match `FrameConstants` field for
   field.
