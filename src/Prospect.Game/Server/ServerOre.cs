@@ -57,6 +57,7 @@ public sealed partial class ServerHost
     private DroneReply StartOreFetch(uint viewer, HullHandle hull, int page, uint id, out int carriers)
     {
         carriers = 0;
+        if (!_content.Drones.OreFetch) return DroneReply.NotFound;
         if (_hulls.State(hull.Index).Jump != JumpPhase.None) return DroneReply.InTransit;
         var index = _chunks.Find(id);
         if (index < 0 || !Covered(viewer, _chunks.Items[index].Position)) return DroneReply.NotFound;
@@ -197,7 +198,7 @@ public sealed partial class ServerHost
     private void TickAutoOre(int index)
     {
         ref var page = ref _bayPages[index];
-        if (!page.PickUpOres || _tick < page.AutoPausedUntil) return;
+        if (!_content.Drones.OreFetch || !page.PickUpOres || _tick < page.AutoPausedUntil) return;
         var items = _chunks.Items;
         if (items.IsEmpty) return;
         var hull = page.Hull;

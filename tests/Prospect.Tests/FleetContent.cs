@@ -18,6 +18,19 @@ internal static class FleetContent
         return copy.Load();
     });
 
+    private static readonly Lazy<GameContent> OreLoaded = new(() =>
+    {
+        var copy = new ContentCopy(fleet: true).Replace("blocks/drones.json", "\"oreFetch\": false", "\"oreFetch\": true");
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => copy.Dispose();
+        return copy.Load();
+    });
+
+    /// <summary>
+    /// <see cref="Value"/> with drone ore hauling switched on (<c>oreFetch</c>), for the tests that keep that code path
+    /// alive while the shipped content has it off.
+    /// </summary>
+    public static GameContent WithOreFetch => OreLoaded.Value;
+
     /// <summary>The shipped content with the test fleet in place of the shipped ship, loaded once.</summary>
     public static GameContent Value => Loaded.Value;
 

@@ -3,6 +3,8 @@
 Product direction from the brainstorm on 2026-11-16. Built so far: D1 (orders, the bay, launch and recall), D2
 (fetching cargo), D3 (drone scans, see "D3 as built") and R1, the scrape foundation (see "R1 as built").
 
+**Drone ore hauling ("Pick up ores") is switched off** (`oreFetch`): see [mining-rework.md](mining-rework.md). Sections below on it describe the disabled code.
+
 ## Why
 
 - Mining is the core loop: find a rock, learn what is inside, take it apart, haul the ore home.

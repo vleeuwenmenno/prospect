@@ -16,7 +16,7 @@ namespace Prospect.Tests;
 public sealed class OreCollectionTests
 {
     private static readonly GameContent Content = GameContent.Load();
-    private static readonly GameContent Shipped = FleetContent.Value;
+    private static readonly GameContent Shipped = FleetContent.WithOreFetch;
     private static readonly GridSize One = new(1, 1, 1);
 
     private static DesignBox Box(string type, int x, int y, int z, BlockFacing facing = BlockFacing.Back, GridSize? size = null) =>
@@ -694,10 +694,11 @@ public sealed class OreCollectionTests
     /// The shipped content with a pod that has a tractor beam on its core's top face, a hopper in its view with the
     /// intake up, two bins under the hull and a drone bay whose hatch faces left.
     /// </summary>
-    private static GameContent Mining(bool bay = true, bool secondBay = false)
+    private static GameContent Mining(bool bay = true, bool secondBay = false, bool oreFetch = true)
     {
+        var shipped = oreFetch ? Shipped : FleetContent.Value;
         DesignBox Part(string type, int x, int y, int z, BlockFacing facing = BlockFacing.Front) =>
-            new(new GridSize(x, y, z), One, Shipped.Blocks.Get(type), BlockShape.Box, facing);
+            new(new GridSize(x, y, z), One, shipped.Blocks.Get(type), BlockShape.Box, facing);
         var boxes = new List<DesignBox>
         {
             Part("core", 0, 0, 0), Part("generator", 0, -1, 0), Part("battery", 0, -2, 0), Part("gyro", -1, 0, 0),
@@ -706,12 +707,12 @@ public sealed class OreCollectionTests
         };
         if (bay) boxes.Add(Part("droneBay", -1, 0, -1, BlockFacing.Left));
         if (secondBay) boxes.Add(Part("droneBay", 1, -1, 0, BlockFacing.Down));
-        var pod = Shipped.Pod;
-        var design = HullDesign.Of(new BoxDesign(pod.Name, 1, [.. boxes], Shipped.Blocks.Limits, "test", pod.Class, pod.Color,
-            [new DesignMount(0, BlockFacing.Up, 2, 2, Shipped.Blocks.Get("tractorBeam"))]), Shipped.Rules);
-        var designs = Shipped.Designs.ToArray();
-        designs[Shipped.PodDesign] = design;
-        return Shipped.WithCatalogue(designs, Shipped.PodDesign, Shipped.DroneDesign, Shipped.StartingFleet, Shipped.WorkDroneDesign);
+        var pod = shipped.Pod;
+        var design = HullDesign.Of(new BoxDesign(pod.Name, 1, [.. boxes], shipped.Blocks.Limits, "test", pod.Class, pod.Color,
+            [new DesignMount(0, BlockFacing.Up, 2, 2, shipped.Blocks.Get("tractorBeam"))]), shipped.Rules);
+        var designs = shipped.Designs.ToArray();
+        designs[shipped.PodDesign] = design;
+        return shipped.WithCatalogue(designs, shipped.PodDesign, shipped.DroneDesign, shipped.StartingFleet, shipped.WorkDroneDesign);
     }
 
     private static SaveRig Rig(GameContent content)
@@ -902,6 +903,31 @@ public sealed class OreCollectionTests
         // What came in fills the bins to the kilogram, never past it; the other two chunks wait loose.
         Assert.Equal(capacity * 2, Held(rig), 3);
         Assert.Equal(2, Chunks(rig).Items.Length);
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
+    public void WithTheShippedSwitchOffNoDroneIsSentForAChunkAutomaticallyOrOnRequest()
+    {
+        // The shipped content hauls no ore with drones (docs/roadmap/mining-rework.md); the container fetch tests in
+        // DroneFetchTests run on that same content and show that cargo still goes.
+        var content = Mining(oreFetch: false);
+        Assert.False(content.Drones.OreFetch);
+        Assert.False(GameContent.Load().Drones.OreFetch);
+        using var rig = Rig(content);
+        var id = Place(rig, content, new Vector3(-150, 20, 40), mass: 600);
+        Settings(rig, cargo: false, ores: true);
+        rig.Tick(300);
+        Assert.True(rig.Link.Bays.PickUpOres);
+        Assert.Equal(0u, Chunks(rig).Items[0].FetchHull);
+        Assert.Empty(Drones(rig));
+
+        var start = typeof(ServerHost).GetMethod("StartOreFetch", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var args = new object?[] { rig.Link.LastSnapshot.OwnHull == 0 ? 0u : 1u, Pod(rig), 0, id, 0 };
+        var info = rig.Hulls.Info(Pod(rig).Index);
+        args[0] = info.Owner;
+        Assert.Equal(DroneReply.NotFound, (DroneReply)start.Invoke(rig.Server, args)!);
+        Assert.Equal(0u, Chunks(rig).Items[0].FetchHull);
         Assert.Null(rig.Server.Fault);
     }
 

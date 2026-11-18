@@ -291,6 +291,12 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   `ServerHost.ScriptedFillBins.cs`: unsaved private local game only, bins only, `other` gives each bin an ore of its own
   half full). Tests: `OreChunkMarkTests`, `OreIntakeTests`, `NoticeTests`.
 - **Ore collection (R4):** chunks go into ore bins through an ore hopper, led there by a tractor beam.
+  - **Drone ore hauling is switched off** (`oreFetch: false` in `content/blocks/drones.json`, `DroneRules.OreFetch`, shared
+    content, so in the identity; docs/roadmap/mining-rework.md). `TickAutoOre` returns and `StartOreFetch` answers
+    `DroneReply.NotFound`; the popup draws no "Pick up ores" checkbox (its height shrinks by that row) and the DRONES chip
+    never says "N CHUNKS NEAR". A saved or sent `PickUpOres` flag stays valid and is ignored: no wire, save or protocol change.
+    Tests of the fetch path use `FleetContent.WithOreFetch` (a copy with the switch on); `--drone-ores` captures need the
+    switch on in a copy of the build. The bullets on drones below describe the code that is disabled, not deleted.
   - Blocks (`blocks.json`, Storage): `oreBin` (`BlockType.OreCapacity`, `oreKgPerCubicMetre`: capacity is that times
     the box's volume) and `oreHopper` (`BlockType.Hopper`). Both box only. `HullDesign.Bins` (`DesignBin`: block,
     capacity) and `Hoppers` list them in block order; limits `maxBins` 64, `maxHoppers` 16 (`OreBins.MaxBins`).
