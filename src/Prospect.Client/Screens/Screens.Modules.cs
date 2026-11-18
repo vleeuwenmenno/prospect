@@ -692,6 +692,9 @@ internal sealed partial class ScreenHost
         var draw = ImGui.GetWindowDrawList();
         var row = Kit.Px(Theme.ControlHeight);
         const float Button = 26f;
+        // Both bounds draw a "-" and a "+" button: each row needs an ID scope of its own, or Dear ImGui sees two
+        // buttons with one ID and both rows answer the same click.
+        ImGui.PushID(min ? "min"u8 : "max"u8);
         var nameWidth = Kit.Measure(_ui.SansMedium, Theme.FontCaption, name).X;
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(at.X, at.Y + (row - Kit.Measure(_ui.SansMedium, Theme.FontCaption, name).Y) * 0.5f), Theme.TextMute, name);
         var valueX = at.X + nameWidth + Kit.Px(Theme.Space2);
@@ -723,6 +726,7 @@ internal sealed partial class ScreenHost
             changed = true;
         }
 
+        ImGui.PopID();
         result = filter;
     }
 
