@@ -14,6 +14,7 @@ Implementation continues separately; this change records decisions and a read-on
 6. [Wreckage](wreckage.md): ships that break apart, wrecks, lifetime settings.
 7. [FTL travel](ftl-travel.md): jumps fly across the map instead of teleporting.
 8. [Drones and mining](drones-mining.md): drone bay, scans, charges, fetching; scraping, cracking, heat; orders.
+9. [Mining and ships: the rework](mining-rework.md): what changes after the 2026-11-18 playtest; overrides item 8 where they differ.
 
 ## Status vocabulary
 

@@ -18,6 +18,7 @@ to work.
 - `docs/controls.md`: the Controls screens, tabs, search, remapping, clashes and their limits.
 - `docs/world-generation.md`: fields and clouds in world space: anchors, which sector takes a rock, the gas query.
 - `docs/roadmap/drones-mining.md`: drones, rock edits, interiors and mining lasers: decided, built, open.
+- `docs/roadmap/mining-rework.md`: the rework of mining, ore collection and ship parts; overrides the page above where they differ.
 - An item under "Open" is not decided. Ask; do not guess and build.
 - When a decision is made in conversation, move it from "Open" to "Decided" in the same change.
 
