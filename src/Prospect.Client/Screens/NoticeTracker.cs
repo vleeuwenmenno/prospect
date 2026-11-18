@@ -1,3 +1,5 @@
+using System.Text;
+using Prospect.Client.World;
 using Prospect.Game.Protocol;
 using Prospect.Game.World;
 
@@ -5,9 +7,10 @@ namespace Prospect.Client.Screens;
 
 /// <summary>
 /// Turns the changes the snapshot reports into notices, once each: a module scan that finished, was cancelled or ran
-/// out of energy, the sector scan that charted, a ship the New ship flow built. It reads only what the snapshot says
-/// and posts only for the player's own hull, as the module chips do. The first snapshot after <see cref="Reset"/> is
-/// taken as it is without posting, so a state left over from before is not news. No fonts, no allocation.
+/// out of energy, the sector scan that charted, a ship the New ship flow built, a fuel that ran low or out, and the
+/// loose ore near the hull that its bins cannot take. It reads only what the snapshot says and posts only for the
+/// player's own hull, as the module chips do. The first snapshot after <see cref="Reset"/> is taken as it is without
+/// posting, so a state left over from before is not news. No fonts, no allocation.
 /// </summary>
 internal sealed class NoticeTracker
 {
@@ -20,15 +23,21 @@ internal sealed class NoticeTracker
     private FuelLevel _nitrogen;
     private FuelLevel _hydrazine;
     private FuelLevel _bipropellant;
+    private bool _oreFull;
+    private uint _oreHull;
+    private string? _oreOther;
+    private readonly byte[] _oreText = new byte[NoticeCatalogue.MaxText];
 
     /// <summary>Forgets what was last seen: a new game starts fresh.</summary>
     public void Reset() => _primed = false;
 
     /// <summary>
     /// Follows one frame's scans and new-ship answer, posting to <paramref name="board"/>. <paramref name="ownHull"/> is
-    /// the packed id of the hull flown, zero when none.
+    /// the packed id of the hull flown, zero when none. <paramref name="oreIntake"/> counts the chunks near it by what its
+    /// bins would do with them, and <paramref name="oreName"/> is the ore of the nearest one no bin has room for.
     /// </summary>
-    public void Update(NoticeBoard board, in ModuleScanView module, in ScanView sector, in NewShipView newShip, uint ownHull, in FuelFlow fuel = default)
+    public void Update(NoticeBoard board, in ModuleScanView module, in ScanView sector, in NewShipView newShip, uint ownHull, in FuelFlow fuel = default,
+        in OreIntakeCounts oreIntake = default, string? oreName = null)
     {
         var moduleChanged = module.Serial != _moduleSerial || module.State != _moduleState;
         var sectorChanged = sector.State != _sectorState;
@@ -42,6 +51,8 @@ internal sealed class NoticeTracker
         var fuelPrimed = primed && ownHull != 0 && ownHull == _fuelHull;
         _fuelHull = ownHull;
         TrackFuel(board, fuel, fuelPrimed);
+        TrackOre(board, oreIntake, oreName, primed && ownHull != 0 && ownHull == _oreHull);
+        _oreHull = ownHull;
         if (!primed)
             return;
 
@@ -94,5 +105,48 @@ internal sealed class NoticeTracker
             board.Post(empty);
         else if (now == FuelLevel.Low && before == FuelLevel.Ok)
             board.Post(low);
+    }
+
+    /// <summary>
+    /// Posts when the chunks near the hull flown cannot go in: once when its bins become full, and once for each ore a
+    /// near chunk has and no bin has room for because the bins hold other ores, named in the message. A crossing ends
+    /// when no near chunk is blocked that way, and a hull seen for the first time posts nothing, so what was full
+    /// before is not news.
+    /// </summary>
+    private void TrackOre(NoticeBoard board, in OreIntakeCounts intake, string? otherName, bool primed)
+    {
+        if (!primed)
+        {
+            _oreFull = intake.Full > 0;
+            _oreOther = intake.Other > 0 ? otherName : null;
+            return;
+        }
+
+        var full = intake.Full > 0;
+        if (full && !_oreFull)
+            board.Post(NoticeKinds.OreBinsFull);
+        _oreFull = full;
+
+        if (intake.Other == 0)
+        {
+            _oreOther = null;
+            return;
+        }
+
+        if (otherName is null || otherName == _oreOther)
+            return;
+        _oreOther = otherName;
+        board.Post(NoticeKinds.OreNoBin, NoBin(otherName));
+    }
+
+    // "No bin for Gold.", encoded into the tracker's own buffer: the words are only known when the crossing happens.
+    private ReadOnlySpan<byte> NoBin(string ore)
+    {
+        var text = _oreText.AsSpan();
+        "No bin for "u8.CopyTo(text);
+        var at = "No bin for "u8.Length;
+        if (Encoding.UTF8.TryGetBytes(ore, text[at..], out var written)) at += written;
+        if (at < text.Length) text[at++] = (byte)'.';
+        return text[..at];
     }
 }

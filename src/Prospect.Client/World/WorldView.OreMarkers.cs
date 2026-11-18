@@ -18,6 +18,12 @@ internal sealed partial class WorldView
     /// <summary>Chunks within <see cref="OreChunkLook.NearMetres"/> of the flown hull.</summary>
     public int OreChunksNear { get; private set; }
 
+    /// <summary>How many of those the bins can take, and how many they cannot and why: the DRONES chip's warning.</summary>
+    public OreIntakeCounts OreIntakeCounts { get; private set; }
+
+    /// <summary>The ore of the nearest near chunk no bin has room for because the bins hold other ores, or -1.</summary>
+    public int OreBlockedOther { get; private set; } = -1;
+
     /// <summary>The chunk under a shown pointer; nothing when none is.</summary>
     public OreChunkInfo HoverOreChunk { get; private set; }
 
@@ -31,11 +37,18 @@ internal sealed partial class WorldView
     {
         _oreMarkerCount = 0;
         OreChunksNear = 0;
+        OreIntakeCounts = default;
+        OreBlockedOther = -1;
         HoverOreChunk = default;
         var items = _oreVisuals.Items;
         if (items.IsEmpty || snapshot.Galaxy is null || Editor.Shown) return;
         var look = OreChunkLook.Current;
         var rules = snapshot.Content.Mining;
+        // What the bins of the hull flown would do with a chunk, once for the whole set: the server's own room rule.
+        var design = snapshot.Content.Designs[Own.Design];
+        var bins = Own.Ore.Span;
+        var alive = Own.Blocks.Span;
+        var hoppers = design.Hoppers.Length;
         var tick = OreChunkVisuals.ShownTick(snapshot.Hulls.AsSpan(0, snapshot.HullCount), snapshot.OwnHull, snapshot.ServerTickPrecise, _frameAlpha);
         for (var i = 0; i < items.Length; i++)
         {
@@ -48,10 +61,13 @@ internal sealed partial class WorldView
             marker.Mass = item.Mass;
             marker.View = ToView(pose.Position);
             marker.OwnDistance = (float)pose.Position.RelativeTo(OwnDrawnPosition).Length();
+            marker.Intake = OreIntake.State(bins, design.Bins, alive, hoppers, item.Resource, item.Mass);
             OreChunkMarks.Place(ref marker, OreChunks.Half(rules, item.Mass), _tanHalfFov, _screen, NearPlane);
         }
 
         OreChunksNear = OreChunkMarks.CountNear(OreMarkers, look);
+        OreIntakeCounts = OreIntake.Count(OreMarkers, look.NearMetres);
+        OreBlockedOther = OreIntake.NearestOtherOres(OreMarkers, look.NearMetres);
         UpdateOreHover(snapshot, pointerOverUi, look);
     }
 
@@ -87,7 +103,7 @@ internal sealed partial class WorldView
         var count = PickTargets(snapshot, pointer, true);
         for (var i = 0; i < count; i++)
             if (_pickHits[i].Distance < hit.Distance) return;
-        HoverOreChunk = new OreChunkInfo(hit.Id, hit.Resource, hit.Grade, hit.Mass, hit.OwnDistance);
+        HoverOreChunk = new OreChunkInfo(hit.Id, hit.Resource, hit.Grade, hit.Mass, hit.OwnDistance, hit.Intake);
         HoverOreChunkAt = pointer;
     }
 }

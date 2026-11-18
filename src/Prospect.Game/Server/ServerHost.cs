@@ -23,6 +23,16 @@ public sealed class ServerConfig
     /// </summary>
     public float? ScriptedShieldBreakSeconds { get; init; }
 
+    /// <summary>
+    /// Scripted captures only (<c>--fill-bins</c>): this many seconds into the run every hull a player flies has its ore
+    /// bins filled, so a capture can show a ship that cannot take the ore around it. Null for never, and the same rules
+    /// as <see cref="ScriptedShieldBreakSeconds"/> apply.
+    /// </summary>
+    public float? ScriptedFillBinsSeconds { get; init; }
+
+    /// <summary>With <see cref="ScriptedFillBinsSeconds"/>: fill each bin half full of another ore instead of full.</summary>
+    public bool ScriptedFillBinsOther { get; init; }
+
     /// <summary>Capture-only impact speed against a large rock, in an unsaved local game.</summary>
     public float? ScriptedRamSpeed { get; init; }
 
@@ -590,6 +600,13 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
                     throw new InvalidDataException("A scripted shield break needs an unsaved private in-process server and a time of 0 to 600 s.");
                 _scriptedShieldBreakTick = (long)MathF.Ceiling(breakAt / HullSim.Dt);
             }
+            if (config.ScriptedFillBinsSeconds is { } fillAt)
+            {
+                if (!(fillAt >= 0f && fillAt <= 600f) || config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
+                    throw new InvalidDataException("A scripted bin fill needs an unsaved private in-process server and a time of 0 to 600 s.");
+                _scriptedFillBinsSeconds = fillAt;
+                _scriptedFillBinsOther = config.ScriptedFillBinsOther;
+            }
             if (config.ScriptedFleetHurtSeconds is { } hurtAt)
             {
                 if (!(hurtAt >= 0f && hurtAt <= 600f) || config.Visibility != ServerVisibility.Private || world is not null || transports.Any(t => !t.IsInProcess))
@@ -974,6 +991,7 @@ public sealed partial class ServerHost : ITickHandler, ITransportHandler, IDispo
         TickScriptedRockScrape(tick);
         TickScriptedExhaustShield();
         TickScriptedFleetHurt(tick);
+        TickScriptedFillBins(tick);
 
         // Drones launch, dock and take their orders before the round, so each flies its new order this interval.
         TickDrones();

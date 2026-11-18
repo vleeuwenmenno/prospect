@@ -36,6 +36,9 @@ public sealed class OreChunkMarkTests
         var look = OreChunkLook.Load(AppPaths.Content("visuals", "ore_chunks.json"));
         Assert.True(look.FadeStartMetres < look.FadeEndMetres && look.FadeEndMetres <= look.CullMetres);
         Assert.True(look.NearMetres > 0 && look.MinAlpha > 0);
+        // A mark whose chunk the bins cannot take is dimmed and hollow, and struck through.
+        Assert.True(look.BlockedAlpha < 1f && look.BlockedFillAlpha == 0f && look.BlockedMarkPixels > 0);
+        Assert.Equal(0xFF5A52u, look.BlockedRgb);
     }
 
     [Theory]
@@ -45,6 +48,10 @@ public sealed class OreChunkMarkTests
     [InlineData("""{ "markerPixels": 0 }""")]
     [InlineData("""{ "nearMetres": -1 }""")]
     [InlineData("""{ "hoverPixels": 500 }""")]
+    [InlineData("""{ "blockedAlpha": 0 }""")]
+    [InlineData("""{ "blockedFillAlpha": 2 }""")]
+    [InlineData("""{ "blockedMarkPixels": 0 }""")]
+    [InlineData("""{ "blockedColor": "red" }""")]
     public void ALookOutOfRangeIsRefused(string json)
     {
         var path = Scratch(json);

@@ -70,6 +70,12 @@ internal static class NoticeKinds
     public const string FillRefused = "fillRefused";
     public const string FillOff = "fillOff";
 
+    /// <summary>Loose ore chunk near the hull flown: its bins are full.</summary>
+    public const string OreBinsFull = "oreBinsFull";
+
+    /// <summary>Loose ore chunk near the hull flown: no bin has room for its ore because the bins hold other ores.</summary>
+    public const string OreNoBin = "oreNoBin";
+
     /// <summary>A tank of the own hull dropped under the low mark, one kind for each fuel.</summary>
     public const string FuelLowNitrogen = "fuelLowNitrogen";
 
@@ -83,7 +89,7 @@ internal static class NoticeKinds
     public const string FuelEmptyBipropellant = "fuelEmptyBipropellant";
 
     /// <summary>Every kind, for validation.</summary>
-    public static readonly string[] All = [GasResults, AsteroidResults, LocatorResults, ModuleNoPower, ModuleCancelled, SectorCharted, ShipBuilt, ShipRebuilt, ShipFlown, EditRefused, DesignSaved, DesignSaveFailed, DesignLoaded, FollowOutOfSector, FollowMissing, EditAsking, MirrorSkipped, FillDone, FillRefused, FillOff, FuelLowNitrogen, FuelLowHydrazine, FuelLowBipropellant, FuelEmptyNitrogen, FuelEmptyHydrazine, FuelEmptyBipropellant];
+    public static readonly string[] All = [GasResults, AsteroidResults, LocatorResults, ModuleNoPower, ModuleCancelled, SectorCharted, ShipBuilt, ShipRebuilt, ShipFlown, EditRefused, DesignSaved, DesignSaveFailed, DesignLoaded, FollowOutOfSector, FollowMissing, EditAsking, MirrorSkipped, FillDone, FillRefused, FillOff, OreBinsFull, OreNoBin, FuelLowNitrogen, FuelLowHydrazine, FuelLowBipropellant, FuelEmptyNitrogen, FuelEmptyHydrazine, FuelEmptyBipropellant];
 }
 
 /// <summary>What a click on a notice's body does. Named in the file, like a tip's trigger; an unknown name is refused.</summary>
@@ -97,6 +103,9 @@ internal enum NoticeAction : byte
 
     /// <summary>Opens the Charts window.</summary>
     OpenChartsWindow,
+
+    /// <summary>Opens the Cargo window on its ORE tab, where the bins and what keeps them from taking more are shown.</summary>
+    OpenCargoOreWindow,
 }
 
 /// <summary>One kind of notice as the file defines it, with its text's key names resolved from the loaded bindings.</summary>

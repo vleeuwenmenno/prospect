@@ -872,6 +872,7 @@ public sealed class FrameOrderTests : IDisposable
     private HudRect _noticeRect;
     private int _noticeGasOpens;
     private int _noticeChartsOpens;
+    private int _noticeCargoOreOpens;
 
     private void UseNotices(float scale = 1f)
     {
@@ -907,6 +908,7 @@ public sealed class FrameOrderTests : IDisposable
             board.Close(result.ActionRow);
             _noticeGasOpens += action == NoticeAction.OpenGasWindow ? 1 : 0;
             _noticeChartsOpens += action == NoticeAction.OpenChartsWindow ? 1 : 0;
+            _noticeCargoOreOpens += action == NoticeAction.OpenCargoOreWindow ? 1 : 0;
         }
     }
 
@@ -942,6 +944,16 @@ public sealed class FrameOrderTests : IDisposable
         ClickAt(NoticeBody(0));
         Assert.Equal(1, _noticeGasOpens);
         Assert.Equal(owned, _world.Selection.Length);
+        for (var i = 0; i < 40; i++)
+            Frame();
+        Assert.Equal(0, board.Count);
+
+        // The ore notice opens the Cargo window on its ORE tab.
+        board.Post(NoticeKinds.OreBinsFull);
+        Frame();
+        Frame();
+        ClickAt(NoticeBody(0));
+        Assert.Equal(1, _noticeCargoOreOpens);
         for (var i = 0; i < 40; i++)
             Frame();
         Assert.Equal(0, board.Count);

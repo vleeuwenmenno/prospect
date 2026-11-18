@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Brutal.Numerics;
 using Prospect.Engine.IO;
 
@@ -53,6 +54,23 @@ internal sealed class OreChunkLook
     /// <summary>The pointer is on a chunk when within this many pixels of it, or of its drawn edge when that is wider.</summary>
     public float HoverPixels { get; set; } = 14f;
 
+    /// <summary>How strongly a mark is drawn when the bins cannot take its chunk: its own alpha times this.</summary>
+    public float BlockedAlpha { get; set; } = 0.55f;
+
+    /// <summary>Opacity of a blocked diamond's fill against its outline's own; zero leaves the diamond hollow.</summary>
+    public float BlockedFillAlpha { get; set; }
+
+    /// <summary>Half the arm of the cross struck through a mark whose chunk the bins cannot take.</summary>
+    public float BlockedMarkPixels { get; set; } = 5f;
+
+    /// <summary>The colour of that cross, 0xRRGGBB, read from the file's <c>blockedColor</c>. It says the same thing in the
+    /// chunk's tooltip and on the DRONES chip.</summary>
+    [JsonIgnore]
+    public uint BlockedRgb { get; private set; } = 0xFF5A52;
+
+    [JsonPropertyName("blockedColor")]
+    public string BlockedColorFile { get; set; } = "FF5A52";
+
     /// <summary>The shipped file, read once.</summary>
     public static OreChunkLook Current => _current ??= Load(AppPaths.Content("visuals", "ore_chunks.json"));
 
@@ -71,8 +89,12 @@ internal sealed class OreChunkLook
         static bool Within(float v, float low, float high) => float.IsFinite(v) && v >= low && v <= high;
         if (!(Within(MarkerPixels, 2, 64) && Within(FramePaddingPixels, 0, 32) && Within(LineWidth, 0.5f, 8) && Within(FillAlpha, 0, 1)
             && Within(MinAlpha, 0.05f, 1) && Within(ArrowPixels, 3, 64) && Within(EdgeMarginPixels, 0, 400) && Within(HoverPixels, 1, 100)
-            && Within(NearMetres, 1, 100_000)))
+            && Within(NearMetres, 1, 100_000) && Within(BlockedAlpha, 0.05f, 1) && Within(BlockedFillAlpha, 0, 1)
+            && Within(BlockedMarkPixels, 1, 32)))
             throw new InvalidDataException("ore_chunks.json: a size, alpha or radius is out of range.");
+        if (BlockedColorFile.Length != 6 || !uint.TryParse(BlockedColorFile, System.Globalization.NumberStyles.AllowHexSpecifier, null, out var blocked))
+            throw new InvalidDataException("ore_chunks.json: blockedColor is six hex digits.");
+        BlockedRgb = blocked;
         if (!(FadeStartMetres > 0 && FadeStartMetres < FadeEndMetres && FadeEndMetres <= CullMetres && Within(CullMetres, 1, 1_000_000)))
             throw new InvalidDataException("ore_chunks.json: fadeStartMetres must be above 0, below fadeEndMetres, which is at most cullMetres.");
     }
@@ -110,10 +132,13 @@ internal struct OreMarker
 
     /// <summary>True when the centre is in front of the camera and inside the window.</summary>
     public bool OnScreen;
+
+    /// <summary>What the flown hull's bins would do with this chunk, worked out where the marker is placed.</summary>
+    public OreIntakeState Intake;
 }
 
 /// <summary>What the hover tooltip says about a chunk. Plain data, drawn by the screens.</summary>
-internal readonly record struct OreChunkInfo(uint Id, int Resource, float Grade, float Mass, float Distance)
+internal readonly record struct OreChunkInfo(uint Id, int Resource, float Grade, float Mass, float Distance, OreIntakeState Intake)
 {
     /// <summary>True when a chunk is hovered.</summary>
     public bool Any => Id != 0;
