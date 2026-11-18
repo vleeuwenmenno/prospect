@@ -947,6 +947,32 @@ internal sealed partial class ClientWorld : IDisposable
         transport.Send(0, NetChannel.Unreliable, writer.Written);
     }
 
+    /// <summary>
+    /// What a snapshot corrected of the flown hull: the gap between the state predicted for the newest predicted
+    /// tick and the state replayed for that same tick from the snapshot. Every gap is zero when prediction and
+    /// authority agree, which is what a hull that touches nothing is held to (<c>PredictionCorrectionTests</c>).
+    /// </summary>
+    internal struct Correction
+    {
+        /// <summary>Snapshots reconciled so far; the other figures are those of the newest.</summary>
+        public long Count;
+
+        /// <summary>The server tick of the snapshot, and how many ticks prediction ran ahead of it.</summary>
+        public long Tick;
+
+        /// <inheritdoc cref="Tick" />
+        public int Ahead;
+
+        /// <summary>Metres, radians, metres a second and radians a second between the two states.</summary>
+        public float Position, Angle, Velocity, Spin;
+
+        /// <summary>Megajoules of battery and the share of boost heat between the two states.</summary>
+        public float Energy, Heat;
+    }
+
+    /// <summary>The newest snapshot's correction. Measurement only: nothing in the game reads it.</summary>
+    internal Correction LastCorrection;
+
     private void Reconcile(in HullState authoritative, in HullOrder authoritativeOrder, long snapshotTick, ushort appliedOrderId)
     {
         var hadState = _hasOwnState;
@@ -987,6 +1013,25 @@ internal sealed partial class ClientWorld : IDisposable
         // Keep the drawn position continuous: whatever the correction moved is bled off over the next ticks.
         var error = _predicted.Position.RelativeTo(state.Position);
         PredictionError = Math.Max(PredictionError * 0.98f, error.Length());
+        if (hadState)
+        {
+            // The turn between the two by its vector part: the arc cosine of a dot product cannot tell an angle
+            // under 0.03 degrees from none.
+            var between = Quaternion.Conjugate(_predicted.Orientation) * state.Orientation;
+            LastCorrection = new Correction
+            {
+                Count = LastCorrection.Count + 1,
+                Tick = snapshotTick,
+                Ahead = (int)(horizon - snapshotTick),
+                Position = error.Length(),
+                Angle = 2f * MathF.Asin(MathF.Min(1f, new Vector3(between.X, between.Y, between.Z).Length())),
+                Velocity = (_predicted.Velocity - state.Velocity).Length(),
+                Spin = (_predicted.AngularVelocity - state.AngularVelocity).Length(),
+                Energy = MathF.Abs(_predicted.Energy - state.Energy),
+                Heat = MathF.Abs(_predicted.Heat - state.Heat),
+            };
+        }
+
         _correction = error.Length() > SnapDistance ? Vector3.Zero : _correction + error;
         _predicted = state;
     }
