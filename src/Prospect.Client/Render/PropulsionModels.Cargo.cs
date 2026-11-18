@@ -471,7 +471,7 @@ internal static partial class PropulsionModels
             Label(vertices, indices, label, sizeAt, sizeRoom, normal, right, up, panelDepth * .5f, look.Stroke * 1.25f, Paint(look.SizeText));
             Plate(vertices, indices, plateAt, plateHalf, normal, right, up, plateDepth, Paint(plateColour));
             // The name when it can be read at the plate's height, else the code.
-            var text = res is null || Fit(name, plateHalf) >= .6f * Fit(res.Code, plateHalf) ? name : res.Code;
+            var text = res is null || Fit(name, plateHalf) >= .35f * Fit(res.Code, plateHalf) ? name : res.Code;
             Label(vertices, indices, text, plateAt, plateHalf * .82f, normal, right, up, plateDepth, look.Stroke, Tag(look.TextShade));
             Stripes(vertices, indices, hazardAt, hazardHalf, normal, right, up, plateDepth, hazard);
         }

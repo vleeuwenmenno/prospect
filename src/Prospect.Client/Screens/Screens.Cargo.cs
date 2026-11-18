@@ -1,6 +1,7 @@
 using Brutal.ImGuiApi;
 using Brutal.Numerics;
 using Prospect.Client.Ui;
+using Prospect.Client.World;
 using Prospect.Game.Client;
 using Prospect.Game.Protocol;
 using Prospect.Game.World;
@@ -264,6 +265,7 @@ internal sealed partial class ScreenHost
         var tiles = _cargoView.Tiles;
         var sizes = snapshot.Content.Cargo.Sizes;
         var resources = snapshot.Galaxy?.Resources ?? [];
+        var motion = _app.World.CargoMotion;
 
         ImGui.PushItemFlag(ImGuiItemFlags.NoNav, true);
         for (var i = 0; i < tiles.Length; i++)
@@ -298,7 +300,20 @@ internal sealed partial class ScreenHost
             var textWidth = Math.Max(1f, rect.Width - Kit.Px(11));
             Kit.ClippedText(gridDraw, _ui.SansMedium, Theme.FontSmall, new float2(textLeft, tileMin.Y + Kit.Px(4)), Theme.Text, Kit.F($"{sizeName}"), textWidth);
 
-            if (c.Resource < 0)
+            // A container moving in its rack says so in place of its mass, until its locks hold (CargoMotion).
+            var stage = motion.Records.Length == cargo.Length ? motion.Stage(i) : CargoStage.Stored;
+            if (stage != CargoStage.Stored)
+            {
+                var line = new float2(textLeft, tileMin.Y + Kit.Px(20));
+                gridDraw.AddRectFilled(tileMin, new float2(tileMax.X, tileMin.Y + Kit.Px(2)), Kit.Color(stage == CargoStage.Locked ? Theme.Good : Theme.Accent, 0.95f));
+                if (stage == CargoStage.Locked)
+                    Kit.ClippedText(gridDraw, _ui.SansMedium, Theme.FontCaption, line, Theme.Good, "LOCKED"u8, textWidth);
+                else if (stage == CargoStage.Transferring)
+                    Kit.ClippedText(gridDraw, _ui.SansMedium, Theme.FontCaption, line, Theme.Accent, "TRANSFERRING"u8, textWidth);
+                else
+                    Kit.ClippedText(gridDraw, _ui.SansMedium, Theme.FontCaption, line, Theme.Accent, "POSITIONING"u8, textWidth);
+            }
+            else if (c.Resource < 0)
                 Kit.ClippedText(gridDraw, _ui.Sans, Theme.FontCaption, new float2(textLeft, tileMin.Y + Kit.Px(20)), Theme.TextMute, "Empty"u8, textWidth);
             else
                 Kit.ClippedText(gridDraw, _ui.Mono, Theme.FontCaption, new float2(textLeft, tileMin.Y + Kit.Px(20)), Theme.TextDim, Kit.F($"{c.Amount:0} kg"), textWidth);

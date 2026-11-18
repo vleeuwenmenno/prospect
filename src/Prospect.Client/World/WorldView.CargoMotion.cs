@@ -37,6 +37,10 @@ internal sealed partial class WorldView
 
     private uint _cargoMotionHull;
 
+    // Whether the own hold was drawn this frame: only then does a container stand in for a loose body, which is
+    // otherwise drawn itself (an open editor draws the draft instead, and a hull out of view draws nothing).
+    private bool _cargoHoldDrawn;
+
     // The containers a hull holds, each with its mag-lock jaws and their lights, where the motion has them; for the own
     // hull also the ones leaving, sliding out to the loose bodies they became.
     private void DrawCargo(int frameIndex, in HullView hull, HullDesign design, Double3 camera,
@@ -62,6 +66,7 @@ internal sealed partial class WorldView
                 light, material, stretch, true);
         }
         if (hull.Id != _cargoMotionHull) return;
+        _cargoHoldDrawn = true;
         for (var k = 0; k < _cargoMotion.LeavingCount; k++)
         {
             _cargoMotion.Leave(k, out var record, out var from, out var turn, out var free, out var slide, out var light);

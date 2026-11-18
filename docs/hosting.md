@@ -1213,3 +1213,9 @@ Active module spending is shared with client prediction through `ModuleScanRules
 - Disclosure: a carry says that someone's drone is pulling a body, within sensor range only. Nothing else about the
   body or the drone changes hands.
 - Not saved: a loaded world docks its drones, so no carry survives a save and no codec byte was added.
+
+### Racks with one open face (protocol 78, evaluator 26)
+
+- No message changed. The meaning of a rack's facing did: it is the rack's one open face, through which tractors load
+  and releases leave. Both sides must agree, so the protocol and `ContentIdentity.EvaluatorVersion` were bumped.
+- Saved worlds made before are refused by the content identity; design files of version 9 and older convert on load.

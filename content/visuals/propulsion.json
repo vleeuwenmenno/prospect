@@ -720,118 +720,62 @@
   "maxPlumes": 192,
   "minPixels": 1.5,
   "rack": {
-   "wall": 0.024,
-   "wallPaint": [
-    0.07,
-    0.075,
-    0.085
-   ],
-   "seamPaint": [
-    0.015,
-    0.016,
-    0.019
-   ],
-   "panelEvery": 2,
-   "seam": 0.06,
-   "rim": 0.5,
-   "rimPaint": [
-    0.025,
-    0.027,
-    0.031
-   ],
-   "hazard": [
-    0.89,
-    0.27,
-    0.012
-   ],
-   "hazardWidth": 0.07,
-   "hazardPitch": 0.28,
-   "accent": [
-    0.89,
-    0.3,
-    0.02
-   ],
-   "accentSize": 0.3,
-   "light": [
-    0.07,
-    0.69,
-    1.0
-   ],
-   "lightLength": 0.6,
-   "lightWidth": 0.06,
-   "rail": 0.12,
-   "railHeight": 0.014,
-   "railShade": 0.6,
-   "jaw": 0.035,
-   "jawWidth": 0.25,
-   "jawHeight": 0.35,
-   "jawShade": 0.3,
-   "lightSize": 0.08,
-   "gap": 0.16,
-   "chamfer": 0.12,
-   "corner": 0.2,
-   "cornerLift": 0.6,
-   "bodyTint": 0.05,
-   "body": [
-    0.09,
-    0.095,
-    0.11
-   ],
-   "panel": [
-    0.035,
-    0.038,
-    0.045
-   ],
-   "panelDepth": 0.12,
-   "stripBand": 0.12,
-   "stripLength": 0.45,
-   "plateDepth": 0.2,
-   "stroke": 0.16,
-   "textShade": 0.05,
-   "sizeText": [
-    0.75,
-    0.77,
-    0.8
-   ],
-   "emptyPlate": [
-    0.2,
-    0.21,
-    0.23
-   ],
-   "motion": {
-    "slideSpeed": 0.8,
-    "minSeconds": 0.4,
-    "maxSeconds": 2.5,
-    "lockSeconds": 0.7,
-    "unlockSeconds": 0.35,
-    "leaveSeconds": 0.9,
-    "matchSeconds": 1.5,
-    "pulseHz": 2.5,
-    "storedLight": [
-     0.1,
-     0.85,
-     0.45
-    ],
-    "storedLevel": 1.5,
-    "movingLight": [
-     1.0,
-     0.5,
-     0.05
-    ],
-    "movingLevel": 2.5,
-    "lockLight": [
-     0.6,
-     1.0,
-     0.8
-    ],
-    "lockLevel": 8,
-    "unlockLight": [
-     1.0,
-     0.15,
-     0.05
-    ],
-    "unlockLevel": 3
-   }
+    "wall": 0.024,
+    "wallPaint": [0.07, 0.075, 0.085],
+    "seamPaint": [0.015, 0.016, 0.019],
+    "panelEvery": 2,
+    "seam": 0.06,
+    "rim": 0.5,
+    "rimPaint": [0.025, 0.027, 0.031],
+    "hazard": [0.89, 0.27, 0.012],
+    "hazardWidth": 0.07,
+    "hazardPitch": 0.28,
+    "accent": [0.89, 0.3, 0.02],
+    "accentSize": 0.3,
+    "light": [0.07, 0.69, 1.0],
+    "lightLength": 0.6,
+    "lightWidth": 0.06,
+    "rail": 0.12,
+    "railHeight": 0.014,
+    "railShade": 0.6,
+    "jaw": 0.035,
+    "jawWidth": 0.25,
+    "jawHeight": 0.35,
+    "jawShade": 0.3,
+    "lightSize": 0.08,
+    "gap": 0.16,
+    "chamfer": 0.2,
+    "corner": 0.2,
+    "cornerLift": 0.6,
+    "bodyTint": 0.05,
+    "body": [0.04, 0.043, 0.05],
+    "panel": [0.016, 0.018, 0.022],
+    "panelDepth": 0.12,
+    "stripBand": 0.12,
+    "stripLength": 0.45,
+    "plateDepth": 0.2,
+    "stroke": 0.16,
+    "textShade": 0.05,
+    "sizeText": [0.75, 0.77, 0.8],
+    "emptyPlate": [0.2, 0.21, 0.23],
+    "motion": {
+      "slideSpeed": 0.8,
+      "minSeconds": 0.4,
+      "maxSeconds": 2.5,
+      "lockSeconds": 0.7,
+      "unlockSeconds": 0.35,
+      "leaveSeconds": 0.9,
+      "matchSeconds": 1.5,
+      "pulseHz": 2.5,
+      "storedLight": [0.1, 0.85, 0.45],
+      "storedLevel": 1.5,
+      "movingLight": [1.0, 0.5, 0.05],
+      "movingLevel": 2.5,
+      "lockLight": [0.6, 1.0, 0.8],
+      "lockLevel": 8,
+      "unlockLight": [1.0, 0.15, 0.05],
+      "unlockLevel": 3
+    }
   },
   "bay": {
     "inset": 0.05,

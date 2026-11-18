@@ -96,16 +96,22 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
 - **Cargo holds:** `content/blocks/cargo.json` is shared through `GameContent.Cargo`. `CargoPacking` owns
   capacity and largest-first X/Z/Y fixed-orientation packing with caller buffers. The `cargo` block is box-only,
   in Hull; its linear capacity stat is u and must match the grid. `PropulsionModels.Cargo.cs` builds racks and
-  reusable containers on workers, with the `rack` look in `visuals/propulsion.json`: a deck plate on one face
-  (`RackDeck.Choose`: the touched face, else -Y; it travels as the rack's `PartBox.Facing`, so the editor, ghosts and
-  far hulls pass `RackDeck`'s answer, never the design's facing), rails, posts, lights; clamp jaws are per container
-  (`PartModels.TryGetClamp`, drawn beside each container). Every thickness must fit the container clearance (`gap`).
+  reusable containers on workers, with the `rack` look in `visuals/propulsion.json`.
+  A rack is a closed box with ONE open face, the block's `DesignBox.Facing` (`BlockType.FacesOut`), chosen at
+  placement by `OpenFaces.Choose` (`Prospect.Game`, the one rule for racks, bay hatches and hopper intakes: away from
+  what it is set against; with nothing, up) through `ShipEditor.GhostFacing`, mirrored with it. Design file 10;
+  an older file's racks take that rule on load, or, when that face is touched or mounted, the first free face in face
+  order (`BoxDesign.OpenRacks`). The model (`BuildRack`): panelled walls, a rim band round the opening with hazard
+  stripes, light strips, accent corners and lit edges, rails and lights inside. The clearance is split
+  (`RackLook.RackBudget`, `RackLook.DetailShare`): rack parts take the outer half of a one-unit container's, a
+  container's details the inner half of its own; `RackModelTests` and `ContainerModelTests` hold both.
+  Mag-lock jaws are per container (`PartModels.TryGetClamp`, keyed by the rack's back face), their lights a model of
+  their own lit by the container's stage (`CargoMotion`).
   A container (`PropulsionModels.ContainerModel`, one model for racked and free ones, per size and resource, built
-  on workers) has corner blocks, door seams, lock rods, lifting eyes and plates: the resource's plate takes its colour
-  from `Galaxy.Resources[i].Color` and its code from content (`Resource.Code`, `code` in `galaxy.json`), written as
-  raised strokes (`StrokeFont`); the size plate names the class. `RackLook.Attach` gives the look the galaxy's
-  resources; never read a resource's colour or code elsewhere for a container. Every detail stands off the body by
-  less than the slot clearance. `--container-sheet n` (scripted only) draws every resource's size-n container
+  on workers) is a dark body chamfered along its long edges, orange corner caps, light strips, a panel with its size in
+  units (`"16u"`, `ContainerSize.Units`), a plate in `Galaxy.Resources[i].Color` with the resource's name (its code from
+  content, `Resource.Code`, when the name does not fit), hazard stripes, raised strokes (`StrokeFont`). `RackLook.Attach`
+  gives the look the galaxy's resources; never read a resource's colour or code elsewhere for a container. `--container-sheet n` (scripted only) draws every resource's size-n container
   before the camera; `--cargo-wide` loads a rack with one of each resource and jettisons four;
   `--hover-container stowed|free` puts the scripted pointer on one (with `--open cargo`, `--zoom` sets the command
   camera's distance in four-metre steps).
@@ -422,7 +428,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   a mining laser) is an `OrderTask` value and one executor case, never a new path. Bays: `BlockType.Bay` (`BaySpec`,
   tiers in `bayTiers`, like tractors; only Common in the palette), box only, at most 16 a design (`limits.maxBays`),
   listed in `HullDesign.Bays`. The hatch is the block's `DesignBox.Facing`, chosen at placement by
-  `RackDeck.Hatch` (opposite the rack-deck rule) through `ShipEditor.GhostFacing`, and mirrored like a thrust
+  `OpenFaces.Choose` (the racks' and hoppers' rule too) through `ShipEditor.GhostFacing`, and mirrored like a thrust
   part's. `DroneBayRules` holds the shared geometry (hatch, `HatchClear` through the collision tree, launch, staging,
   dock and hold points). The server keeps a page of `BayRecord`s per hull with bays (`HullInfo.BayPage`): stocked,
   out, pending, rebuild tick. `CreateHull` attaches it (full), `ReplaceHull` calls `CarryBays` before destroying the
@@ -657,7 +663,7 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
     `U`/`V` stay tenths from its face's corner; `FaceMounts.Place` turns a box edge back into one.
   - `Mirroring`: `centre2` is `Low4 + High4` of the core. A mount's mirrored place is its reflection across its own
     face and needs no place of the block.
-  - `HullDesign.ExteriorFaces` / `TouchedFaces`, `HullConnectivity.SharesFace`, `RackDeck.Touched`, the draft's
+  - `HullDesign.ExteriorFaces` / `TouchedFaces`, `HullConnectivity.SharesFace`, `OpenFaces.Touched`, the draft's
     `Check`, `CheckGroup`, `CanMerge` (a box of whole cells, else `NotABox`) and `TractorReach.Covered` all work in quarters.
   - `ShieldSurface`: the grid's corner is a whole cell; `_low`/`_high` are exact quarters. `Discover` keeps two ranges a
     block (cells it reaches into, cells wholly inside); only the inner one may be left out. `Flats` takes faces on whole
@@ -1456,6 +1462,29 @@ shield and the server know the design's blocks.
   Capture: `--open cargo --jettison 6`, or `--open cargo --hurt-fleet 7 --hurt-kind cargo`, always with `--capture`.
 
 
+## Loading and unloading: cargo motion
+
+- A rack's one open face is the only way in and out: the tractor stages outside it and glides in along its normal
+  (`TractorPath.TryGuide`), and a jettisoned container leaves there (`CargoEjection.Make`: in line with its slot, a
+  tenth of a unit outside, pushed out along the normal). `CargoEjection.MayLeave` refuses a release whose footprint
+  on the face lies against a live block or whose face carries a mount. A destroyed rack's containers start in their
+  slots (its walls went with it) and are kicked out of the open face. Protocol 78.
+- The animation is client look only (`CargoMotion`, `WorldView.CargoMotion.cs`): font-free, fixed buffers, no memory.
+  Stages are `CargoStage`: Approaching and Transferring (a loose body on the own beam, by its tractor stage), then
+  Transferring, Positioning, Locked and Stored for a hold record, and Unlocking for a released one.
+  - It reads only the own hold (`OwnCargo`, `OwnCargoTick`) and the loose bodies where they are drawn. The first hold
+    of a hull (joining, loading, control, an applied edit) is never animated.
+  - Matching: same rack, size, resource, kilograms and hull points; the same place first. Matched elsewhere, it slides
+    (a repack). A new record takes over from the own beam's body with the same figures, where it was drawn; with
+    none it comes in through the opening. A record gone waits `matchSeconds` for the body it became and slides out to
+    it, handing over at that body's drawn pose (`WorldView.ContainerPose`); the body is hidden meanwhile
+    (`CargoMotion.Hides`, only on frames the hold was drawn).
+  - Durations and lock light colours are the `motion` entry of the `rack` look (`CargoMotionLook`, validated).
+  - Readers: `DrawCargo` (pose and lock light per container), the Cargo window tiles (TRANSFERRING, POSITIONING,
+    LOCKED). Tests: `CargoMotionTests`, `FreeContainerEjectionTests`, `TractorReachTests`, `RackModelTests`.
+- Capture: `--open cargo --jettison 6 --zoom 2` releases through the flight path once the editor has closed (about
+  7 s: the slide out), the beam takes it back from about 17 s and it is stowed about 26 s in.
+
 ## Tractor beams: cargo step 3
 
 - `tractorBeam` is a freely placed face mount: both `mount` and `tractor` data in `blocks.json`, turret model and
@@ -1484,8 +1513,9 @@ shield and the server know the design's blocks.
   - Tests: `TractorTurretModelTests`. Check with `--open edit-cargo` (idle), `--open cargo --jettison 6 --zoom 1`
     from 17 s (aiming at a container) and `--open ore --zoom 0.5 --look 150 --look-height 4` (ore chunks).
 - `TractorReach` is the shared range, rack-face view, live-block segment and packing rule. A rack is in view
-  through any open face the emitter is outside of whose part in the mount's outward half-space (parent block's face
-  plane) has a clear line: aim is that part's middle, else its nearest point (`Rack`'s `nearest`, `Aim`, kept by
+  only through its one open face, the block's facing, by the same rule as a hopper's intake (`TractorReach.Opening`;
+  evaluator 26): the emitter outside it, the face unmounted, its part in the mount's outward half-space (parent block's
+  face plane) with a clear line: aim is that part's middle, else its nearest point (`Rack`'s `nearest`, `Aim`, kept by
   `TractorPreview` and drawn by the editor); never test only the nearest face centre. Its points use
   grid-edge metres; hull-local points subtract `(design.CenterOfMass + 0.5) * BlockSize`. Wedges use their slant.
   Both mount-to-container and mount-to-rack paths must be clear. Never load by contact.

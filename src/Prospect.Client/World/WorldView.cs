@@ -1270,6 +1270,7 @@ internal sealed partial class WorldView
         _partModels.Begin();
         BeginTurrets(time);
         _scene.BeginDamage();
+        _cargoHoldDrawn = false;
         VisibleHulls = DrawnDents = DamageFallbacks = GeneratedRocks = VisibleRocks = 0;
         foreach (var slot in _slots)
             if (slot.State == SectorSlot.Ready && ReferenceEquals(slot.Galaxy, galaxy)) GeneratedRocks += slot.Content.AsteroidCount;
@@ -3886,6 +3887,11 @@ internal sealed partial class WorldView
     private static readonly (int Size, int Resource)[] WideSamples = [(2, 0), (1, 1), (0, 2), (0, 3), (0, 4), (0, 5), (1, 6), (1, -1)];
     private void RunCargoCapture(PlayerInputBridge bridge, float dt)
     {
+        if (_captureCargoMode == 4)
+        {
+            RunJettisonCapture(bridge, dt);
+            return;
+        }
         if (!Editor.CanEdit || Editor.Draft is not { } draft) return;
         if (_captureCargoClock == 0)
         {
@@ -3904,20 +3910,6 @@ internal sealed partial class WorldView
             var (size, resource) = CaptureCargoWide ? WideSamples[_captureCargoSent] : _captureCargoSent == 0 ? (2, 0) : _captureCargoSent == 2 ? (1, -1) : (1, 1);
             if (Editor.RequestContainer(bridge, size, resource)) _captureCargoSent++;
         }
-        // Wide runs jettison several, half a second apart, so loose containers of different resources are in view.
-        var toJettison = CaptureCargoWide ? 4 : 1;
-        if (CaptureJettisonSeconds is { } at && !_captureJettisonSent && _captureCargoClock >= at + _captureJettisonCount * .5f
-            && _snapshot is { OwnHull: >= 0 } snapshot && Editor.DraftCargo.Length == samples - _captureJettisonCount)
-        {
-            var hold = snapshot.Hulls[snapshot.OwnHull].Cargo.Span;
-            for (var i = 0; i < hold.Length; i++)
-            {
-                if (hold[i].Rack != Editor.SelectedCargoRack) continue;
-                bridge.JettisonContainer(Editor.Token, Editor.Hull, hold[i].Rack, i, snapshot.OwnCargoTick);
-                _captureJettisonSent = ++_captureJettisonCount >= toJettison;
-                break;
-            }
-        }
         if (_captureCargoMode == 3 && _captureCargoClock > 3 && Editor.DraftCargo.Length == CaptureCargoCount)
         {
             Editor.Cancel(bridge);
@@ -3925,12 +3917,12 @@ internal sealed partial class WorldView
             _cargoWindowReady = true;
             return;
         }
-        if (_captureCargoMode == 2 && _captureCargoClock > 4
-            && (CaptureJettisonSeconds is null ? Editor.DraftCargo.Length == CaptureCargoCount : _captureJettisonSent && _snapshot!.FreeContainerCount > 0))
+        if (_captureCargoMode == 2 && _captureCargoClock > 4 && Editor.DraftCargo.Length == CaptureCargoCount)
         {
-            if (CaptureJettisonSeconds is not null) TargetContainer = _snapshot!.FreeContainers[0].Id;
+            // A release goes through the flight path, as the Cargo window's does, so the container is seen leaving the rack.
+            _captureJettisonRack = Editor.SelectedCargoRack;
             Editor.Cancel(bridge);
-            _captureCargoMode = 0;
+            _captureCargoMode = CaptureJettisonSeconds is null ? 0 : 4;
             if (LookDegrees is null)
             {
                 SetCommandCapturePose(OwnPosition, 25, -.75f, -.8f);
@@ -3938,6 +3930,34 @@ internal sealed partial class WorldView
                 _commandDistance = CaptureCargoDistance ?? (CaptureCargoSpace ? 30f : 12f);
             }
             ClearSelection();
+        }
+    }
+
+    private int _captureJettisonRack = -1;
+
+    // The release of a cargo capture (--jettison), in flight with the editor closed: one container of the rack the
+    // editor had selected (wide runs: several, half a second apart), then the first loose one is targeted.
+    private void RunJettisonCapture(PlayerInputBridge bridge, float dt)
+    {
+        _captureCargoClock += dt;
+        if (CaptureJettisonSeconds is not { } at || _snapshot is not { OwnHull: >= 0 } snapshot) return;
+        var toJettison = CaptureCargoWide ? 4 : 1;
+        ref readonly var own = ref snapshot.Hulls[snapshot.OwnHull];
+        var hold = own.Cargo.Span;
+        if (!_captureJettisonSent && _captureCargoClock >= at + _captureJettisonCount * .5f && hold.Length == CaptureCargoCount - _captureJettisonCount)
+        {
+            for (var i = 0; i < hold.Length; i++)
+            {
+                if (hold[i].Rack != _captureJettisonRack) continue;
+                bridge.JettisonCargo(own.Id, hold[i].Rack, i, snapshot.OwnCargoTick, Prospect.Game.Protocol.JettisonMode.Abandon);
+                _captureJettisonSent = ++_captureJettisonCount >= toJettison;
+                break;
+            }
+        }
+        if (_captureJettisonSent && snapshot.FreeContainerCount > 0)
+        {
+            TargetContainer = snapshot.FreeContainers[0].Id;
+            _captureCargoMode = 0;
         }
     }
 
