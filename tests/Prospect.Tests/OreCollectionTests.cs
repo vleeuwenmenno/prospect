@@ -694,7 +694,7 @@ public sealed class OreCollectionTests
     /// The shipped content with a pod that has a tractor beam on its core's top face, a hopper in its view with the
     /// intake up, two bins under the hull and a drone bay whose hatch faces left.
     /// </summary>
-    private static GameContent Mining(bool bay = true)
+    private static GameContent Mining(bool bay = true, bool secondBay = false)
     {
         DesignBox Part(string type, int x, int y, int z, BlockFacing facing = BlockFacing.Front) =>
             new(new GridSize(x, y, z), One, Shipped.Blocks.Get(type), BlockShape.Box, facing);
@@ -705,6 +705,7 @@ public sealed class OreCollectionTests
             Part("oreBin", 0, -3, 0), Part("oreBin", 0, -4, 0),
         };
         if (bay) boxes.Add(Part("droneBay", -1, 0, -1, BlockFacing.Left));
+        if (secondBay) boxes.Add(Part("droneBay", 1, -1, 0, BlockFacing.Down));
         var pod = Shipped.Pod;
         var design = HullDesign.Of(new BoxDesign(pod.Name, 1, [.. boxes], Shipped.Blocks.Limits, "test", pod.Class, pod.Color,
             [new DesignMount(0, BlockFacing.Up, 2, 2, Shipped.Blocks.Get("tractorBeam"))]), Shipped.Rules);
@@ -784,6 +785,22 @@ public sealed class OreCollectionTests
     private static void Settings(SaveRig rig, bool cargo, bool ores) =>
         rig.Link.DroneSettings(new DroneSettingsMessage(rig.Link.LastSnapshot.OwnHull, cargo, ores));
 
+    /// <summary>How many chunks of the pool the pod's drones are fetching at this moment.</summary>
+    private static int Fetched(SaveRig rig)
+    {
+        var packed = Pod(rig).Packed;
+        var count = 0;
+        foreach (ref readonly var chunk in Chunks(rig).Items) if (chunk.FetchHull == packed) count++;
+        return count;
+    }
+
+    private static double Held(SaveRig rig)
+    {
+        var total = 0.0;
+        foreach (ref readonly var bin in Bins(rig)) total += bin.Kg;
+        return total;
+    }
+
     [Fact]
     public void TheServerStowsAChunkInReachAndTellsThePilotWhatTheBinsHold()
     {
@@ -812,6 +829,79 @@ public sealed class OreCollectionTests
         Assert.Equal(3, rig.Link.OreMessages);
         Assert.Equal(800, rig.Link.Ore[0].Kg);
         Assert.Equal(0.5f, rig.Link.Ore[0].Grade, 5);
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
+    public void OrePickupStartsAsManyFetchesAsTheContentAllowsAndNoMore()
+    {
+        // Eight drones in two bays, six chunks and a cap of four: four go out at once, and the drones the cap leaves
+        // parked stay parked until one of the four is delivered.
+        var content = Mining(secondBay: true);
+        using var rig = Rig(content);
+        for (var i = 0; i < 6; i++) Place(rig, content, new Vector3(-150 - 20 * i, 20 * (i % 3) - 20, 40), mass: 300);
+        Settings(rig, cargo: false, ores: true);
+        var cap = content.Drones.AutoPickupMaxFetches;
+        Assert.InRange(cap, 2, 4);
+        TickUntil(rig, () => Fetched(rig) >= cap, 30, "fetches for as many chunks as the cap allows");
+        var mostFetches = 0;
+        var mostDrones = 0;
+        for (var i = 0; i < 60 * 240; i++)
+        {
+            rig.Tick();
+            mostFetches = Math.Max(mostFetches, Fetched(rig));
+            mostDrones = Math.Max(mostDrones, rig.Link.Bays.Fetching);
+        }
+        Assert.Equal(cap, mostFetches);
+        Assert.Equal(cap, mostDrones);
+        Assert.Equal(1800.0, Held(rig), 3);
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
+    public void FourDronesBringFourChunksHomeAtOnceAndEveryChunkEndsInTheBins()
+    {
+        var content = Mining();
+        using var rig = Rig(content);
+        // Six chunks beyond the beam, each light enough for one drone, with four drones in the hull.
+        for (var i = 0; i < 6; i++) Place(rig, content, new Vector3(-150 - 20 * i, 20 * (i % 3) - 20, 40), mass: 300);
+        Settings(rig, cargo: false, ores: true);
+        // Four fetches go out at once: one drone each, not one fetch a hull.
+        TickUntil(rig, () => Fetched(rig) >= 4, 30, "four fetches under way at once");
+        Assert.Equal(4, Fetched(rig));
+        TickUntil(rig, () => Drones(rig).Count == 4, 20, "a drone out for each chunk");
+
+        // Every chunk is brought in, one after another as the drones park and take the next.
+        var started = rig.WorldTick;
+        TickUntil(rig, () => Chunks(rig).Items.Length == 0, 60 * 5, "every chunk went into the hopper");
+        var seconds = (rig.WorldTick - started) / 60.0;
+        Assert.True(seconds < 130, $"six chunks with four drones took {seconds:0} s");
+        Assert.Equal(1800.0, Held(rig), 3);
+        Assert.Null(rig.Server.Fault);
+    }
+
+    [Fact]
+    public void OrePickupNeverPromisesMoreOreThanTheBinsHold()
+    {
+        var content = Mining(secondBay: true);
+        using var rig = Rig(content);
+        var state = rig.Hulls.Info(Pod(rig).Index).BlockState;
+        var capacity = content.Designs[content.PodDesign].Bins[0].Capacity;
+        // Room for two more chunks and four waiting: two fetches, never four, since the chunks on their way are
+        // already promised the room.
+        Assert.Equal(capacity * 2 - 1000, rig.Hulls.BlockStates.AddOre(state, 1, capacity * 2 - 1000, 0.5f));
+        for (var i = 0; i < 4; i++) Place(rig, content, new Vector3(-150 - 20 * i, 20 * (i % 2) - 10, 40), resource: 1, mass: 500);
+        Settings(rig, cargo: false, ores: true);
+        var most = 0;
+        for (var i = 0; i < 60 * 240; i++)
+        {
+            rig.Tick();
+            most = Math.Max(most, Fetched(rig));
+        }
+        Assert.Equal(2, most);
+        // What came in fills the bins to the kilogram, never past it; the other two chunks wait loose.
+        Assert.Equal(capacity * 2, Held(rig), 3);
+        Assert.Equal(2, Chunks(rig).Items.Length);
         Assert.Null(rig.Server.Fault);
     }
 
@@ -871,23 +961,23 @@ public sealed class OreCollectionTests
         var content = Mining();
         using var rig = Rig(content);
         var first = Place(rig, content, new Vector3(-150, 20, 40), mass: 600);
-        var second = Place(rig, content, new Vector3(-160, -20, 30), mass: 500);
         Settings(rig, cargo: false, ores: true);
         rig.Tick();
         TickUntil(rig, () => Chunks(rig).Items[0].FetchHull != 0, 3, "ore pickup started a fetch");
-        TickUntil(rig, () => Chunks(rig).Find(first) < 0, 120, "the first chunk went into the hopper");
+        TickUntil(rig, () => Chunks(rig).Find(first) < 0, 60 * 3, "the first chunk went into the hopper");
         Assert.Equal(600, Bins(rig)[0].Kg);
         Assert.Single(Drones(rig));
         Assert.Equal(1, rig.Link.Bays.Bays[0].Out);
         Assert.Equal(3, rig.Link.Bays.Bays[0].Stocked);
 
-        // The second fetch takes the drone that is already out: nothing leaves a bay for it.
+        // The next fetch takes the drone that is already out: nothing leaves a bay for it.
+        var second = Place(rig, content, new Vector3(-160, -20, 30), mass: 500);
         TickUntil(rig, () => Chunks(rig).Find(second) >= 0 && Chunks(rig).Items[Chunks(rig).Find(second)].FetchHull != 0, 10, "ore pickup started the second fetch");
         Assert.Single(Drones(rig));
         Assert.Equal(1, rig.Link.Bays.Bays[0].Out);
         Assert.Equal(3, rig.Link.Bays.Bays[0].Stocked);
         Assert.Equal(1, rig.Link.Bays.Fetching);
-        TickUntil(rig, () => Chunks(rig).Find(second) < 0, 150, "the second chunk went into the hopper");
+        TickUntil(rig, () => Chunks(rig).Find(second) < 0, 60 * 3, "the second chunk went into the hopper");
         Assert.Equal(1100, Bins(rig)[0].Kg);
         Assert.Single(Drones(rig));
         Assert.Equal(3, rig.Link.Bays.Bays[0].Stocked);

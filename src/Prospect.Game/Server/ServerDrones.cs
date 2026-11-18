@@ -48,6 +48,38 @@ public sealed partial class ServerHost
         private AutoSkipRecord _first;
     }
 
+    /// <summary>
+    /// One fetch of a page: the body its drones bring in, what the drones still inside carry together, the next place
+    /// beside the body and when the fetch gives up. A hull may have several fetches under way at once, each with its own
+    /// launches, so a page keeps a fixed table of them (<see cref="DroneBayRules.MaxFetches"/>) instead of one record.
+    /// </summary>
+    private struct FetchGroup
+    {
+        /// <summary>The container or ore chunk fetched; zero while the record is free.</summary>
+        public uint Subject;
+
+        /// <summary>Drones still waiting to launch for this body, of the page's bay launches counted together.</summary>
+        public byte Pending;
+
+        /// <summary>The next place beside the body a drone takes (<see cref="DroneFetch.Place"/>).</summary>
+        public byte Slot;
+
+        /// <summary>Kilograms the drones still waiting to launch carry together.</summary>
+        public float PendingKg;
+
+        /// <summary>The tick the fetch gives up, which every drone it puts on an order is told.</summary>
+        public long Until;
+
+        /// <summary>True while <see cref="Subject"/> names a loose ore chunk, not a container: the two have ids of their own.</summary>
+        public bool Ore;
+    }
+
+    [InlineArray(DroneBayRules.MaxFetches)]
+    private struct FetchGroups
+    {
+        private FetchGroup _first;
+    }
+
     /// <summary>Refused containers one hull remembers; the oldest is forgotten first.</summary>
     private const int AutoSkipSlots = 4;
 
@@ -68,16 +100,10 @@ public sealed partial class ServerHost
         public uint LaunchIssuer;
 
         /// <summary>
-        /// Drones of the waiting launches that go to fetch <see cref="FetchSubject"/> rather than hold station, what
-        /// they carry together, the next place beside the container and when the fetch gives up.
+        /// The hull's fetches under way, a record each while it lasts: several may run at once, one per body, each
+        /// with its own launches, place beside the body and end (<see cref="FetchGroup"/>).
         /// </summary>
-        public byte FetchPending, FetchSlot;
-        public float FetchPendingKg;
-        public uint FetchSubject;
-        public long FetchUntil;
-
-        /// <summary>True while <see cref="FetchSubject"/> names a loose ore chunk, not a container: the two have ids of their own.</summary>
-        public bool FetchOre;
+        public FetchGroups Fetches;
 
         /// <summary>
         /// Auto pickup (saved with the hull): while on, <see cref="TickAutoPickup"/> starts fetches for loose
@@ -195,7 +221,21 @@ public sealed partial class ServerHost
             order.Base = next;
             order.Bay = bay;
         }
-        if (to >= 0) { _bayPages[to].AutoPickup = _bayPages[from].AutoPickup; _bayPages[to].PickUpOres = _bayPages[from].PickUpOres; _bayPages[to].Scan = _bayPages[from].Scan; _bayPages[to].Revision++; }
+        if (to >= 0)
+        {
+            _bayPages[to].AutoPickup = _bayPages[from].AutoPickup;
+            _bayPages[to].PickUpOres = _bayPages[from].PickUpOres;
+            _bayPages[to].Scan = _bayPages[from].Scan;
+            // The fetches under way stay fetches, but their launches went with the old page's bays: the new page starts
+            // with nothing waiting, so no drone is owed to them.
+            for (var g = 0; g < DroneBayRules.MaxFetches; g++)
+            {
+                _bayPages[to].Fetches[g] = _bayPages[from].Fetches[g];
+                _bayPages[to].Fetches[g].Pending = 0;
+                _bayPages[to].Fetches[g].PendingKg = 0;
+            }
+            _bayPages[to].Revision++;
+        }
     }
 
     private void RemoveOrder(int index) => _orders[index] = _orders[--_orderCount];
@@ -352,7 +392,7 @@ public sealed partial class ServerHost
         var count = 0;
         ref var p = ref _bayPages[page];
         for (var b = 0; b < DroneBayRules.MaxBays; b++) p.Bays[b].Pending = 0;
-        p.FetchPending = 0; p.FetchPendingKg = 0;
+        ClearFetches(ref p);
         // A scan under way is given up: its drones fly around the rock and home like the rest.
         p.Scan.Pending = 0;
         if (p.Scan.Phase is not (DroneScanPhase.None or DroneScanPhase.Returning)) EndDroneScan(page);
@@ -454,8 +494,16 @@ public sealed partial class ServerHost
         // Launches that were dropped (a hatch blocked, a bay lost) take their share of a fetch with them.
         var pending = 0;
         for (var b = 0; b < design.Bays.Length; b++) pending += page.Bays[b].Pending;
-        if (page.FetchPending > pending) { page.FetchPending = (byte)pending; if (pending == 0) page.FetchPendingKg = 0; }
-        var scanRoom = Math.Max(0, pending - page.FetchPending);
+        for (var g = 0; g < DroneBayRules.MaxFetches; g++)
+        {
+            ref var group = ref page.Fetches[g];
+            if (group.Pending == 0) continue;
+            if (group.Pending <= pending) { pending -= group.Pending; continue; }
+            group.PendingKg = group.PendingKg * pending / group.Pending;
+            group.Pending = (byte)pending;
+            pending = 0;
+        }
+        var scanRoom = pending;
         if (page.Scan.Pending > scanRoom) page.Scan.Pending = (byte)scanRoom;
     }
 
@@ -463,7 +511,7 @@ public sealed partial class ServerHost
     {
         ref var page = ref _bayPages[index];
         for (var b = 0; b < DroneBayRules.MaxBays; b++) page.Bays[b].Pending = 0;
-        page.FetchPending = 0; page.FetchPendingKg = 0;
+        ClearFetches(ref page);
         page.Scan.Pending = 0;
         page.Revision++;
         ReplyDrones(page.LaunchIssuer, reply, 0);
@@ -500,32 +548,35 @@ public sealed partial class ServerHost
         ref var bay = ref page.Bays[bayIndex];
         bay.Stocked--; bay.Pending--; bay.Out++;
         page.Revision++;
-        if (page.FetchPending > 0)
+        var launching = FirstPendingFetch(ref page);
+        if (launching >= 0)
         {
-            // A drone launched for a fetch goes straight to its place beside the container or the ore chunk.
+            // A drone launched for a fetch goes straight to its place beside the container or the ore chunk. Several
+            // fetches may be waiting for drones: the first record of the page takes this one.
+            ref var fetch = ref page.Fetches[launching];
             Vector3 half;
-            if (page.FetchOre)
+            if (fetch.Ore)
             {
-                var chunk = _chunks.Find(page.FetchSubject);
+                var chunk = _chunks.Find(fetch.Subject);
                 half = chunk >= 0 ? new Vector3(OreChunks.Half(_content.Mining, _chunks.Items[chunk].Mass)) : Vector3.Zero;
             }
             else
             {
-                var container = _containers.Find(page.FetchSubject);
+                var container = _containers.Find(fetch.Subject);
                 half = container >= 0 ? FreeContainers.Half(_content.Cargo, _containers.Items[container].Size) : Vector3.Zero;
             }
-            page.FetchPending--;
-            page.FetchPendingKg = page.FetchPending == 0 ? 0 : Math.Max(0, page.FetchPendingKg - design.Types[block].Bay!.CarryKg);
+            fetch.Pending--;
+            fetch.PendingKg = fetch.Pending == 0 ? 0 : Math.Max(0, fetch.PendingKg - design.Types[block].Bay!.CarryKg);
             _orders[_orderCount++] = new TaskOrder
             {
-                Task = page.FetchOre ? OrderTask.FetchOre : OrderTask.Fetch,
+                Task = fetch.Ore ? OrderTask.FetchOre : OrderTask.Fetch,
                 Issuer = owner,
                 Actor = handle,
                 Base = hull,
                 Bay = bayIndex,
-                Point = DroneFetch.Place(page.FetchSlot++, half, drone.Flight.Radius, rules.AttachGapMetres),
-                Subject = page.FetchSubject,
-                Until = page.FetchUntil,
+                Point = DroneFetch.Place(fetch.Slot++, half, drone.Flight.Radius, rules.AttachGapMetres),
+                Subject = fetch.Subject,
+                Until = fetch.Until,
             };
             return DroneReply.None;
         }

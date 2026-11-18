@@ -201,26 +201,35 @@ public sealed partial class TractorSimulation
     /// Which of hull <paramref name="h"/>'s tractor beams could take the chunk <paramref name="item"/> from drones at
     /// the hand-over point <paramref name="handover"/> metres out in front of it: its block is there, the mass is
     /// within its limit, the point is in its range and line of sight, it sees a hopper's intake and the bins have room
-    /// for the whole chunk. With <paramref name="free"/>, only a beam holding nothing now. The mount, or -1 with what
-    /// stopped it.
+    /// for the whole chunk. With <paramref name="free"/>, only a beam holding nothing now. A mount flagged in
+    /// <paramref name="busy"/> is tried only when no other can take it, so a hull's fetches spread over its beams
+    /// instead of queueing for one. The mount, or -1 with what stopped it.
     /// </summary>
     public int OreReceiver(FreeContainers containers, OreChunks chunks, HullField field, int h, in OreChunk item,
-        float handover, bool free, out FetchRefusal why)
+        float handover, bool free, out FetchRefusal why, ulong busy = 0)
     {
         var hulls = field.Hulls; var design = field.Designs[hulls.Info(h).Design];
         var alive = hulls.Blocks(h); var id = hulls.HandleAt(h).Packed;
         why = FetchRefusal.NoTractor;
-        foreach (var m in design.Tractors)
+        var refused = FetchRefusal.NoTractor;
+        for (var pass = 0; pass < 2; pass++)
         {
-            var mount = design.Mounts[m];
-            if (!BlockSet.Has(alive, mount.Parent) || mount.Type.Tractor is not { } spec) continue;
-            if (item.Mass > spec.MaxMass) { if (why == FetchRefusal.NoTractor) why = FetchRefusal.TooHeavy; continue; }
-            if (!TractorReach.Container(design.Boxes, alive, design.BlockSize, mount, DroneFetch.HandoverGrid(design, m, handover))
-                || TractorReach.ChooseHopper(design.Boxes, design.Mounts, alive, design.BlockSize, m, design.Hoppers) < 0) continue;
-            if (!HasRoom(chunks, hulls, h, item)) { why = FetchRefusal.NoRoom; continue; }
-            if (free && Holds(containers, chunks, id, m)) { why = FetchRefusal.Busy; continue; }
-            why = FetchRefusal.None;
-            return m;
+            foreach (var m in design.Tractors)
+            {
+                if (pass == 0 && (uint)m < 64 && (busy & (1UL << m)) != 0) continue;
+                var mount = design.Mounts[m];
+                if (!BlockSet.Has(alive, mount.Parent) || mount.Type.Tractor is not { } spec) continue;
+                if (item.Mass > spec.MaxMass) { if (why == FetchRefusal.NoTractor) why = FetchRefusal.TooHeavy; continue; }
+                if (!TractorReach.Container(design.Boxes, alive, design.BlockSize, mount, DroneFetch.HandoverGrid(design, m, handover))
+                    || TractorReach.ChooseHopper(design.Boxes, design.Mounts, alive, design.BlockSize, m, design.Hoppers) < 0) continue;
+                if (!HasRoom(chunks, hulls, h, item)) { why = FetchRefusal.NoRoom; continue; }
+                if (free && Holds(containers, chunks, id, m)) { why = FetchRefusal.Busy; continue; }
+                why = FetchRefusal.None;
+                return m;
+            }
+            // What the pass that skipped the busy mounts found still holds when every mount is busy.
+            if (pass == 0) { refused = why; why = FetchRefusal.NoTractor; }
+            else if (why == FetchRefusal.NoTractor) why = refused;
         }
 
         return -1;

@@ -116,8 +116,18 @@ Built: the popup, "Pick up cargo" and "Pick up ores" (R4a).
   a rotating window of `autoPickupWindow` (16) of the 256-body pool.
 - It skips: containers someone has (tractor, other drones), ones the owner may not take, out of range or sensor
   sight, and ones the hull's own tractor reaches (`TractorSimulation.Reaches`) since the beam takes those itself.
-- One fetch at a time per hull. A refused container is left alone for `autoPickupRetrySeconds` (20; four are
-  remembered per hull), so an impossible container never nags. The refusal is told to the owner like a manual one.
+- Decided: every free drone goes out. Auto pickup starts as many fetches at once as the hull has drones free, one
+  body each: the drones holding station first, then those still in the bays. A 400 to 533 kg chunk needs one drone, so
+  a hull with four drones brings four chassis, chunks or boxes at once instead of one. No two fetches take the same
+  body, and a fetch takes the drones its body's mass needs (`AssignCarriers`).
+- Decided: `autoPickupMaxFetches` (4) caps the fetches a hull has at once, containers and chunks together, so a hull
+  cannot launch everything it has for dust. The player's drone cap still holds. A manual `/` fetch is not capped and
+  runs beside the auto ones.
+- Decided: for ore, the bins' room is promised once. `TickAutoOre` takes the room left after what is already on its
+  way (`OreOnItsWay`: a chunk fetched by drones or held by a beam), so four fetches never promise more than the bins
+  can take. The storage is a fixed table of fetch records per hull (`BayPage.Fetches`, `DroneBayRules.MaxFetches`).
+- A refused container is left alone for `autoPickupRetrySeconds` (20; four are remembered per hull), so an
+  impossible container never nags. The refusal is told to the owner like a manual one.
 - A manual recall holds auto pickup off for `autoPickupPauseSeconds` (30), or until the next manual launch.
 - Decided: a fetch that ends parks its drones. Every drone that was on it goes back to holding station at its hold
   point, the same Hold order and place a launch gives (`ToHold`), and does not dock. That holds whether the load was
@@ -614,7 +624,9 @@ How to work on it is in `AGENTS.md`, "Ore collection (R4)". This is what exists 
   0.6 m/s. The chunk is gone when its centre is a half edge inside the face. Power, stall and retry are the
   containers' figures (`tractor` in `blocks/cargo.json`).
 - Drones: "Pick up ores" in the popup, per ship, saved. The drones carry a chunk to the hand-over point in front of
-  a beam; the beam leads it in. One fetch a ship at a time, containers and chunks together.
+  a beam; the beam leads it in. One fetch a body, as many at once as the ship has free drones, up to
+  `autoPickupMaxFetches` (4); chunks of one ship spread over its beams (`OreReceiver`'s `busy` mounts), and the ones a
+  busy beam cannot take wait at the hand-over point until it is free.
 - The pilot is told the bins of the hull flown (message 51) and sees them in the Ship window under ORE.
 - A lost bin loses its ore. A wreck piece keeps the ore in the bins it has.
 - An edit or repair keeps ore by overlap of old and new bins first, then puts the rest into any bin that takes it.

@@ -72,7 +72,7 @@ public sealed partial class ServerHost
         for (var b = 0; b < design.Bays.Length; b++)
             if (BlockSet.Has(alive, design.Bays[b])) best = Math.Max(best, design.Types[design.Bays[b]].Bay!.CarryKg);
         if (best * Math.Min(rules.MaxCarriers, rules.MaxPerPlayer) < item.Mass) return DroneReply.TooHeavy;
-        var mount = _tractors.OreReceiver(_containers, _chunks, _field, hull.Index, item, rules.HandoverMetres, free: false, out var why);
+        var mount = _tractors.OreReceiver(_containers, _chunks, _field, hull.Index, item, rules.HandoverMetres, free: false, out var why, BusyMounts(hull));
         if (mount < 0)
             return why switch { FetchRefusal.NoRoom => DroneReply.NoRoom, FetchRefusal.TooHeavy => DroneReply.TooHeavy, _ => DroneReply.NoTractor };
 
@@ -84,11 +84,26 @@ public sealed partial class ServerHost
         return DroneReply.Fetching;
     }
 
+    /// <summary>
+    /// The beams this hull's other fetches already bring their chunks to, as a bit each: a new fetch hands its chunk to
+    /// another beam when it can, so four chunks do not queue for one beam while the hull's others stand idle.
+    /// </summary>
+    private ulong BusyMounts(HullHandle hull)
+    {
+        var packed = hull.Packed;
+        var mask = 0UL;
+        foreach (ref readonly var chunk in _chunks.Items)
+            if (chunk.FetchHull == packed && (uint)chunk.FetchMount < 64) mask |= 1UL << chunk.FetchMount;
+        return mask;
+    }
+
     /// <summary>A drone fetching an ore chunk: the container fetch's flight, beside the chunk.</summary>
     private bool FetchOre(ref TaskOrder order)
     {
         var index = _chunks.Find((uint)order.Subject);
         var held = index >= 0 && _chunks.Items[index].FetchHull == order.Base.Packed;
+        // A chunk that left the pool without a word ends the fetch here, as a container that did.
+        if (!held) AbandonFetch(order, ore: true);
         return FetchBody(ref order, held, held ? _chunks.Items[index].Position : default, held ? _chunks.Items[index].Velocity : default,
             held ? OreChunks.Half(_content.Mining, _chunks.Items[index].Mass) * 1.7320508f : 0);
     }
@@ -170,10 +185,11 @@ public sealed partial class ServerHost
     }
 
     /// <summary>
-    /// "Pick up ores": once a tick for each hull with bays and the setting on, when the hull is not busy fetching,
-    /// looks at the next <see cref="DroneRules.AutoPickupWindow"/> chunks from a rotating start and sends the drones
-    /// for the first that is in range and sight, that nobody (a tractor, other drones) has, that the hull's own beam
-    /// cannot take by itself, that the bins have room for and that a fetch was not refused for lately. It is
+    /// "Pick up ores": once a tick for each hull with bays and the setting on, looks at the next
+    /// <see cref="DroneRules.AutoPickupWindow"/> chunks from a rotating start and sends the drones for each that is in
+    /// range and sight, that nobody (a tractor, other drones) has, that the hull's own beam cannot take by itself, that
+    /// the bins still have room for after what is already on its way, and that a fetch was not refused for lately. Every
+    /// free drone goes out, one fetch a chunk, up to <see cref="DroneRules.AutoPickupMaxFetches"/> fetches. It is
     /// <see cref="StartOreFetch"/>, never a second path; a refusal is told to the owner and the chunk left alone for
     /// <see cref="DroneRules.AutoPickupRetrySeconds"/>. A hull with no hopper, no bin or no room sends nobody, so a
     /// full ship stops fetching without a word.
@@ -190,39 +206,55 @@ public sealed partial class ServerHost
         var design = _content.Designs[info.Design];
         if (design.Hoppers.Length == 0 || design.Bins.Length == 0) return;
 
-        // One fetch at a time, of a container or of a chunk: the next starts once the drones of the last have delivered
-        // and parked (a fetch that is over leaves them holding station, not back in a bay).
-        if (page.FetchPending > 0 || FetchingDrones(hull, index) > 0) return;
-
+        // What is left of the hull's fetches, containers and chunks counted together: a fetch that is over leaves its
+        // drones holding station, which the next one takes where they are.
         var rules = _content.Drones;
+        var left = rules.AutoPickupMaxFetches - FetchesOf(hull, index);
+        if (left <= 0) return;
+
         var range = (double)rules.FetchRangeMetres;
         var origin = _hulls.State(hull.Index).Position;
         var window = Math.Min(rules.AutoPickupWindow, items.Length);
         var start = page.OreCursor % items.Length;
-        for (var k = 0; k < window; k++)
+        var k = 0;
+        for (; k < window && left > 0; k++)
         {
             var c = (start + k) % items.Length;
             ref readonly var item = ref items[c];
             if (item.TractorHull != 0 || item.FetchHull != 0 || _tick < item.RetryTick) continue;
             if (item.Position.RelativeTo(origin).LengthSquared() > range * range) continue;
             if (OreSkipped(ref page, item.Id) || !Covered(info.Owner, item.Position)) continue;
-            if (_hulls.BlockStates.OreRoom(info.BlockState, item.Resource) < item.Mass) continue;
+            // Room the bins can still promise: the chunks the drones are fetching and the beams are pulling in land in
+            // the same bins, so they are counted against the room before one more is sent for.
+            if (_hulls.BlockStates.OreRoom(info.BlockState, item.Resource) - OreOnItsWay(hull, item.Resource) < item.Mass) continue;
             if (TractorSimulation.Reaches(_content, _field, hull.Index, item)) continue;
+            // One drone a chunk at least: with none free there is nothing more to start this tick.
+            if (FreeCarriers(hull, index, info.Owner) == 0) break;
 
-            page.OreCursor = c + 1;
+            page.OreCursor = (c + 1) % items.Length;
             var id = item.Id;
             var reply = StartOreFetch(info.Owner, hull, index, id, out var carriers);
             ReplyDrones(info.Owner, reply, carriers);
-            if (reply != DroneReply.Fetching)
-            {
-                ref var slot = ref page.OreSkip[page.OreSkipNext];
-                slot.Id = id;
-                slot.Until = _tick + rules.AutoPickupRetryTicks;
-                page.OreSkipNext = (page.OreSkipNext + 1) % AutoSkipSlots;
-            }
-            return;
+            if (reply == DroneReply.Fetching) { left--; continue; }
+            ref var slot = ref page.OreSkip[page.OreSkipNext];
+            slot.Id = id;
+            slot.Until = _tick + rules.AutoPickupRetryTicks;
+            page.OreSkipNext = (page.OreSkipNext + 1) % AutoSkipSlots;
         }
-        page.OreCursor = (start + window) % items.Length;
+        if (k >= window) page.OreCursor = (start + window) % items.Length;
+    }
+
+    /// <summary>
+    /// Kilograms of one ore a hull's bins can no longer promise: what its drones are fetching and what its beams are
+    /// pulling in. Several ore fetches under way at once would otherwise each be told the whole room that is left.
+    /// </summary>
+    private double OreOnItsWay(HullHandle hull, int resource)
+    {
+        var packed = hull.Packed;
+        var kg = 0.0;
+        foreach (ref readonly var chunk in _chunks.Items)
+            if (chunk.Resource == resource && (chunk.FetchHull == packed || chunk.TractorHull == packed)) kg += chunk.Mass;
+        return kg;
     }
 
     private bool OreSkipped(ref BayPage page, uint id)

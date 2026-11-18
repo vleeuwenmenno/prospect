@@ -253,6 +253,8 @@ public sealed class ContentIdentityTests
     // The drone figures: how many a player may have out, and how they come home.
     [InlineData("blocks/drones.json", "\"maxPerPlayer\": 12", "\"maxPerPlayer\": 13")]
     [InlineData("blocks/drones.json", "\"dockRadiusMetres\": 0.6", "\"dockRadiusMetres\": 0.7")]
+    // How many fetches auto pickup runs at once, which the client shows as drones fetching.
+    [InlineData("blocks/drones.json", "\"autoPickupMaxFetches\": 4", "\"autoPickupMaxFetches\": 3")]
     // The world setting catalogue: what a setting may be set to.
     [InlineData("rules/settings.json", "\"name\": \"Weak\",\n          \"value\": 4", "\"name\": \"Weak\",\n          \"value\": 5")]
     // The galaxy rules.

@@ -75,7 +75,9 @@ public sealed partial class ServerHost
         var design = _content.Designs[info.Design];
         var alive = _hulls.Blocks(hull.Index);
         ref var p = ref _bayPages[page];
-        var room = p.FetchPending > 0 || p.Scan.Pending > 0 ? 0 : DroneRoom(viewer, out _);
+        // The drones still inside that the player and the world have room for. Other fetches' launches are counted
+        // already, by their bays' pending drones, so a hull running several fetches never launches past its limit.
+        var room = DroneRoom(viewer, out _);
         var carry = 0f;
         var holders = 0;
         for (var i = 0; i < _orderCount && carry < mass && holders < rules.MaxCarriers; i++)
@@ -92,6 +94,9 @@ public sealed partial class ServerHost
             { carry += spec.CarryKg; taken[b]++; launches++; }
         }
         if (carry < mass) return DroneReply.TooFew;
+        var record = -1;
+        for (var g = 0; g < DroneBayRules.MaxFetches && record < 0; g++) if (p.Fetches[g].Subject == 0) record = g;
+        if (record < 0) return DroneReply.TooFew;
 
         var radius = _content.Designs[_content.WorkDroneDesign].Flight.Radius;
         var until = _tick + rules.FetchTicks;
@@ -114,16 +119,96 @@ public sealed partial class ServerHost
             if (p.Bays[b].NextLaunch < _tick) p.Bays[b].NextLaunch = _tick;
             pendingKg += taken[b] * design.Types[design.Bays[b]].Bay!.CarryKg;
         }
-        p.FetchPending = (byte)launches;
-        p.FetchPendingKg = pendingKg;
-        p.FetchSubject = id;
-        p.FetchOre = task == OrderTask.FetchOre;
-        p.FetchSlot = (byte)slot;
-        p.FetchUntil = until;
+        ref var group = ref p.Fetches[record];
+        group.Subject = id;
+        group.Ore = task == OrderTask.FetchOre;
+        group.Pending = (byte)launches;
+        group.PendingKg = pendingKg;
+        group.Slot = (byte)slot;
+        group.Until = until;
         if (launches > 0) p.LaunchIssuer = viewer;
         p.Revision++;
         carriers = holders + launches;
         return DroneReply.Fetching;
+    }
+
+    /// <summary>
+    /// The record of the first fetch of a page whose drones are still inside, waiting to launch; -1 when every fetch
+    /// has all its drones out. A launch takes them in record order, so the fetch that asked first goes out first.
+    /// </summary>
+    private static int FirstPendingFetch(ref BayPage page)
+    {
+        for (var g = 0; g < DroneBayRules.MaxFetches; g++) if (page.Fetches[g].Pending > 0) return g;
+        return -1;
+    }
+
+    /// <summary>Drones of a page's fetches that are still waiting to launch.</summary>
+    private static int PendingLaunches(ref BayPage page)
+    {
+        var count = 0;
+        for (var g = 0; g < DroneBayRules.MaxFetches; g++) count += page.Fetches[g].Pending;
+        return count;
+    }
+
+    /// <summary>
+    /// Forgets every fetch of a page, with their launches: called where the page's bays are emptied anyway (a recall, a
+    /// launch that was dropped, a hull replaced by an edit).
+    /// </summary>
+    private static void ClearFetches(ref BayPage page)
+    {
+        for (var g = 0; g < DroneBayRules.MaxFetches; g++) page.Fetches[g] = default;
+    }
+
+    /// <summary>
+    /// How many fetches a hull has under way, containers and ore chunks together: one for every body its drones are out
+    /// for or still waiting to launch for. A record whose drones are all out and gone is forgotten here, so a body
+    /// that left the world without a word can never hold one of the hull's places for good.
+    /// </summary>
+    private int FetchesOf(HullHandle hull, int page)
+    {
+        if (page < 0) return 0;
+        var count = 0;
+        for (var g = 0; g < DroneBayRules.MaxFetches; g++)
+        {
+            ref var group = ref _bayPages[page].Fetches[g];
+            if (group.Subject == 0) continue;
+            if (group.Pending == 0 && !FetchingOrder(hull, group.Subject, group.Ore)) { group = default; continue; }
+            count++;
+        }
+        return count;
+    }
+
+    /// <summary>Whether a drone of <paramref name="hull"/> is out on a fetch of body <paramref name="id"/>.</summary>
+    private bool FetchingOrder(HullHandle hull, uint id, bool ore)
+    {
+        var task = ore ? OrderTask.FetchOre : OrderTask.Fetch;
+        for (var i = 0; i < _orderCount; i++)
+            if (_orders[i].Base == hull && _orders[i].Task == task && _orders[i].Subject == id) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Drones a hull could still send on a fetch: those holding station and those inside bays with an open hatch that the
+    /// player and the world have room for, at most <see cref="DroneRules.MaxCarriers"/> (a body takes no more).
+    /// </summary>
+    private int FreeCarriers(HullHandle hull, int page, uint viewer)
+    {
+        var drones = 0;
+        var rules = _content.Drones;
+        var info = _hulls.Info(hull.Index);
+        var design = _content.Designs[info.Design];
+        var alive = _hulls.Blocks(hull.Index);
+        var room = DroneRoom(viewer, out _);
+        for (var i = 0; i < _orderCount && drones < rules.MaxCarriers; i++)
+            if (_orders[i].Base == hull && _orders[i].Task == OrderTask.Hold) drones++;
+        for (var b = 0; b < design.Bays.Length && drones < rules.MaxCarriers; b++)
+        {
+            var block = design.Bays[b];
+            if (!BlockSet.Has(alive, block) || !HatchClear(hull, block)) continue;
+            var free = Math.Min(_bayPages[page].Bays[b].Stocked - _bayPages[page].Bays[b].Pending, room);
+            while (free-- > 0 && drones < rules.MaxCarriers) { drones++; room--; }
+        }
+        return drones;
     }
 
     /// <summary>A recall's phase while the drone first flies to its bay's hold point.</summary>
@@ -197,8 +282,18 @@ public sealed partial class ServerHost
     {
         var index = _containers.Find((uint)order.Subject);
         var held = index >= 0 && _containers.Items[index].FetchHull == order.Base.Packed;
+        // A body that left the pool without a word (evicted, out of its lifetime) ends the fetch here: nothing else
+        // will ever see it again, and its record would hold one of the hull's fetch places for good.
+        if (!held) AbandonFetch(order, ore: false);
         return FetchBody(ref order, held, held ? _containers.Items[index].Position : default, held ? _containers.Items[index].Velocity : default,
             held ? FreeContainers.Half(_content.Cargo, _containers.Items[index].Size).Length() : 0);
+    }
+
+    /// <summary>Lets go of the record of a fetch whose body is gone, without touching the drones' own orders.</summary>
+    private void AbandonFetch(in TaskOrder order, bool ore)
+    {
+        var page = PageOf(order.Base);
+        if (page >= 0) ReleaseFetch(ref _bayPages[page], order.Subject, ore);
     }
 
     /// <summary>
@@ -324,7 +419,9 @@ public sealed partial class ServerHost
         }
         if (attached == 0) push = 0;
         ref var p = ref _bayPages[page];
-        if (p.FetchPending > 0 && p.FetchSubject == id && p.FetchOre == (task == OrderTask.FetchOre)) total += p.FetchPendingKg;
+        var ore = task == OrderTask.FetchOre;
+        for (var g = 0; g < DroneBayRules.MaxFetches; g++)
+            if (p.Fetches[g].Subject == id && p.Fetches[g].Ore == ore) total += p.Fetches[g].PendingKg;
     }
 
     /// <summary>
@@ -340,25 +437,41 @@ public sealed partial class ServerHost
         var page = PageOf(hull);
         if (page < 0) return;
         ref var p = ref _bayPages[page];
-        if (p.FetchPending > 0 && p.FetchSubject == id && p.FetchOre == ore)
-        {
-            var design = _content.Designs[_hulls.Info(hull.Index).Design];
-            for (var b = 0; b < design.Bays.Length && p.FetchPending > 0; b++)
-            {
-                var drop = Math.Min(p.Bays[b].Pending, p.FetchPending);
-                p.Bays[b].Pending -= drop;
-                p.FetchPending -= drop;
-            }
-            p.FetchPending = 0;
-            p.FetchPendingKg = 0;
-        }
+        ReleaseFetch(ref p, id, ore);
         p.Revision++;
+    }
+
+    /// <summary>
+    /// Forgets one fetch's record: the launches that never happened go back to their bays, whose pending drones are
+    /// counted together rather than per fetch. The drones already out keep their orders; whoever ends the fetch parks
+    /// them.
+    /// </summary>
+    private void ReleaseFetch(ref BayPage page, ulong id, bool ore)
+    {
+        for (var g = 0; g < DroneBayRules.MaxFetches; g++)
+        {
+            ref var group = ref page.Fetches[g];
+            if (group.Subject != id || group.Ore != ore) continue;
+            if (group.Pending > 0 && _hulls.IsAlive(page.Hull))
+            {
+                var design = _content.Designs[_hulls.Info(page.Hull.Index).Design];
+                var pending = (int)group.Pending;
+                for (var b = 0; b < design.Bays.Length && pending > 0; b++)
+                {
+                    var drop = Math.Min((int)page.Bays[b].Pending, pending);
+                    page.Bays[b].Pending = (byte)(page.Bays[b].Pending - drop);
+                    pending -= drop;
+                }
+            }
+            group = default;
+            return;
+        }
     }
 
     /// <summary>Drones of a hull out on a fetch or waiting to launch for one.</summary>
     private int FetchingDrones(HullHandle hull, int page)
     {
-        var count = page >= 0 ? _bayPages[page].FetchPending : 0;
+        var count = page >= 0 ? PendingLaunches(ref _bayPages[page]) : 0;
         for (var i = 0; i < _orderCount; i++)
             if (_orders[i].Task is OrderTask.Fetch or OrderTask.FetchOre && _orders[i].Base == hull) count++;
         return count;

@@ -367,6 +367,51 @@ public sealed class DroneFetchTests
         return index >= 0 && Containers(rig).Items[index].FetchHull != 0;
     }
 
+    /// <summary>How many containers the pod's drones are fetching at this moment.</summary>
+    private static int FetchingCount(SaveRig rig)
+    {
+        var packed = Pod(rig).Packed;
+        var count = 0;
+        foreach (ref readonly var item in Containers(rig).Items) if (item.FetchHull == packed) count++;
+        return count;
+    }
+
+    [Fact]
+    public void AutoPickupKeepsEveryFreeDroneBusyAndAManualFetchRunsBesideIt()
+    {
+        var content = Content(secondBay: true);
+        using var rig = Rig(content);
+        Assert.Equal(8, rig.Link.Bays.Bays[0].Stocked + rig.Link.Bays.Bays[1].Stocked);
+        // Six boxes light enough for one drone each, well out of the beam's reach.
+        var ids = new uint[6];
+        for (var i = 0; i < ids.Length; i++) ids[i] = Place(rig, content, new Vector3(-150 - 25 * i, 20 * (i % 3) - 20, 40), size: 0);
+        AutoPickup(rig, true);
+
+        // As many fetches as the content allows go at once, not one, and no more than that however many drones wait.
+        // The test needs two at once and a box left over for the one asked for by hand below.
+        var cap = content.Drones.AutoPickupMaxFetches;
+        Assert.InRange(cap, 2, ids.Length - 1);
+        TickUntil(rig, () => FetchingCount(rig) >= cap, 20, "auto pickup started fetches for one body each");
+        rig.Tick(60 * 10);
+        Assert.Equal(cap, FetchingCount(rig));
+        Assert.Equal(cap, rig.Link.Bays.Fetching);
+        TickUntil(rig, () => Drones(rig).Count == cap, 20, "one drone out for each fetch");
+
+        // A fetch asked for by hand runs beside the auto ones: the cap is auto pickup's, not the hull's.
+        var loose = -1;
+        for (var i = 0; i < ids.Length && loose < 0; i++) if (!Fetching(rig, ids[i])) loose = i;
+        Assert.True(loose >= 0);
+        Fetch(rig, ids[loose]);
+        Reply(rig, DroneReply.Fetching);
+        Assert.Equal(cap + 1, FetchingCount(rig));
+        TickUntil(rig, () => Drones(rig).Count == cap + 1, 20, "the manual fetch took another drone");
+
+        // Every box is brought in, one after another, and the drones park between fetches.
+        TickUntil(rig, () => Containers(rig).Items.Length == 0, 60 * 8, "every box stowed");
+        Assert.True(Held(rig) >= 5);
+        Assert.Null(rig.Server.Fault);
+    }
+
     [Fact]
     public void AutoPickupFetchesOnItsOwnAndStopsWhenTurnedOff()
     {
@@ -454,12 +499,13 @@ public sealed class DroneFetchTests
         Assert.False(seenDrone);
         Assert.True(pulled || Held(rig) == 1);
 
-        // A container the drones are already fetching is not given to a second set: one fetch at a time per hull.
+        // Every free drone goes out: the two containers are fetched at the same time, one drone each, rather than the
+        // second waiting for the first to be stowed.
         var one = Place(rig, content, new Vector3(-150, 20, 40), size: 2);
         var two = Place(rig, content, new Vector3(-150, -20, 40), size: 2);
-        TickUntil(rig, () => Fetching(rig, one) || Fetching(rig, two), 5, "a fetch started");
-        rig.Tick(60);
-        Assert.NotEqual(Fetching(rig, one), Fetching(rig, two));
+        TickUntil(rig, () => Fetching(rig, one) && Fetching(rig, two), 5, "both fetches started");
+        Assert.Equal(2, FetchingCount(rig));
+        TickUntil(rig, () => Drones(rig).Count == 2, 10, "a drone went out for each");
     }
 
     [Fact]
