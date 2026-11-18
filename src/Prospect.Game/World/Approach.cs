@@ -19,6 +19,14 @@ public static class Approach
         distance > 0 && acceleration > 0 && share > 0 ? MathF.Sqrt(2 * acceleration * share * distance) : 0;
 
     /// <summary>
+    /// The least a held body's path must shrink by in one tick to count as progress: the configured distance, but
+    /// never more than the approach rule lets it close at <paramref name="speed"/> in a tick, so a body creeping in at
+    /// the speed that rule allows is never counted as stalled.
+    /// </summary>
+    public static float NeededProgress(float speed, float progressMetres) =>
+        Math.Min(progressMetres, speed * HullSim.Dt);
+
+    /// <summary>
     /// Whether a body closing at <paramref name="speed"/> can still be brought to rest within
     /// <paramref name="distance"/> metres: the condition under which a beam may take it at all.
     /// </summary>

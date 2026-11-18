@@ -328,6 +328,62 @@ public sealed class OreCollectionTests
     }
 
     [Fact]
+    public void AChunkTheBeamLosesBehindTheHullIsPulledBackIntoTheHopperInsteadOfDriftingUntilTheStall()
+    {
+        // A chunk the beam lost was neither steered nor let go: it kept its speed until the 4 s stall dropped it, and
+        // with the battery flat (the ore capture's 36 s to 66 s) that is most of a minute of holding a chunk the beam
+        // could not bring in. The beam now pulls a chunk it cannot see back to its exit point and the hopper's guide
+        // resumes; it only lets go when the pull itself gains nothing.
+        var design = Miner(); using var hulls = new HullStore();
+        var origin = Content.Galaxy.CenterOf(new(0, 100, 0));
+        var h = hulls.Create(1, 0, design, origin);
+        var field = new HullField(hulls, [design]);
+        var bodies = new FreeContainers(); var chunks = new OreChunks();
+        var chunk = Chunk(design, origin, resource: 2, mass: 300, grade: 0.5f);
+        Assert.True(chunks.Add(Content, chunk, out _));
+        var tractor = new TractorSimulation(); var scratch = new byte[8];
+        var contact = new OreChunkSimulation(Content.Galaxy); var rocks = new RockField(Content.Galaxy);
+        var pivot = (design.CenterOfMass + new Vector3(.5f)) * design.BlockSize;
+        var mount = design.Mounts[0];
+        var lostSight = false; var pulledWhileLost = false; var released = false; var stowed = -1;
+        var wasHeld = false;
+        for (var tick = 0; tick < 1800 && stowed < 0; tick++)
+        {
+            field.BeginRound();
+            tractor.Plan(bodies, chunks, Content, field, scratch, tick);
+            if (tick == 30)
+            {
+                // Knocked under the ship: the core, the generator and the battery stand between the beam and the
+                // chunk, as a rock's edge or another hull's hit leaves it.
+                chunks.At(0).Position = origin + new Vector3(.5f, -6, .5f) - pivot;
+            }
+            field.Step(h.Index, default);
+            tractor.Pull(bodies, chunks, Content, field, scratch, tick);
+            contact.Step(chunks, Content, field, rocks, tick);
+            if (chunks.Items.IsEmpty) { stowed = tick; break; }
+            var item = chunks.Items[0];
+            released |= wasHeld && item.TractorHull == 0;
+            wasHeld = item.TractorHull == h.Packed;
+            if (!wasHeld) continue;
+            var state = hulls.State(h.Index);
+            var local = HullRotation.Rotate(item.Position.RelativeTo(state.Position), Quaternion.Conjugate(state.Orientation)) + pivot;
+            var sight = TractorReach.Container(design.Boxes, hulls.Blocks(h.Index), design.BlockSize, mount, local);
+            if (!sight)
+            {
+                lostSight = true;
+                if (tick > 30) pulledWhileLost |= item.TractorPowered;
+            }
+        }
+        Assert.True(lostSight, "the knock put the hull's own blocks in the beam's way");
+        Assert.False(released, "the beam keeps its chunk while it brings it back, instead of dropping it at the stall");
+        Assert.True(pulledWhileLost, "a chunk out of sight is steered back, not left drifting");
+        Assert.InRange(stowed, 0, 900);
+        Assert.Equal((300.0, 2, 0.5f), (hulls.BlockStates.Bins(hulls.Info(h.Index).BlockState)[0].Kg,
+            hulls.BlockStates.Bins(hulls.Info(h.Index).BlockState)[0].Resource,
+            hulls.BlockStates.Bins(hulls.Info(h.Index).BlockState)[0].Grade));
+    }
+
+    [Fact]
     public void AContainerComesFirstAndAChunkIsTakenOnlyWithAHopperInViewAndRoomForAllOfIt()
     {
         // The rack design of the tractor tests with a hopper and bins added: one beam, a container and a chunk in reach.

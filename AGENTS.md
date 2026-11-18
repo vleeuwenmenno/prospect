@@ -296,7 +296,8 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
     what finds no room is dumped and logged. The editor does not preview it.
   - A beam takes a body only if it can still stop it. `Approach` (shared) is the one approach rule: `Speed` closes at
     `approachBrakeShare` of the speed that stops on the goal (`blocks/cargo.json`, `tractor.approachBrakeShare` 0.7),
-    and `StopsIn` is whether the room left is enough. `TractorSimulation.Steer` and `DroneFetch.Pull` both brake by
+    `StopsIn` is whether the room left is enough, and `NeededProgress` is the least a path may shrink in a tick to count
+    as progress (never more than `Speed` closes in one), so a slow glide is never a stall. `TractorSimulation.Steer` and `DroneFetch.Pull` both brake by
     `Speed`, so a tick in which the pull is skipped costs room they have to spare instead of leaving the body too fast
     to stop. `AcquireChunk` and `TractorSimulation.Reaches` refuse a body whose closing speed cannot be stopped before
     it reaches the emitter, less the body's own half edge: a beam that took one dragged it out of its reach,
@@ -1505,9 +1506,15 @@ shield and the server know the design's blocks.
   axes at `alignRate`; it is stowed (only `TryAddCargo` followed by removing the free body does it) within
   `toleranceMetres` of the slot and aligned, or inside the slot's cell and slower than `settleSpeed`.
   `ContainerSimulation` ignores contacts between a powered held body and the hull holding it (rocks and other hulls
-  still hit it): the ridge between a body and its slot used to jam it. A held body that makes no progress, or that the beam
-  cannot see, for `stallSeconds` is released and gets `PickupReadyTick` = now + `retrySeconds`. `FreeContainer.TractorBest`
-  and `TractorIdle` are server-only (not on the wire, not saved). Figures are the `tractor` entry of `blocks/cargo.json`
+  still hit it): the ridge between a body and its slot used to jam it. A held body the beam loses sight of (out of range,
+  or behind its own blocks) is still pulled (powered, so it keeps passing its own hull) toward the emitter's exit
+  point, the one place the beam always sees, and the ordinary guide resumes when the line comes back. A body is let
+  go only when the beam cannot bring it closer for `stallSeconds`: a tick without the power to pull, or one in which the
+  pull gains nothing on the way the body is taking. It then gets `PickupReadyTick` = now + `retrySeconds`. A longer way
+  (the exit route, or a goal that moved) re-bases the count, so a detour is not mistaken for a stall; the least shrink
+  that counts is `Approach.NeededProgress`, capped by `tractor.progressMetres` but never more than the approach rule
+  closes in a tick, so the final glide's creep is progress too. `FreeContainer.TractorBest` and `TractorIdle` are
+  server-only (not on the wire, not saved). Figures are the `tractor` entry of `blocks/cargo.json`
   (`TractorGuidance`, validated). `TractorReach.Rack` skips an aim point lying against another live box (a face
   against a neighbour is a deck, not an entrance). The pull runs after the hulls step and before the bodies drift, so it
   measures a body where it will be at the end of the tick (`Position + Velocity * Dt`) against the hull's new pose;
