@@ -444,8 +444,9 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   Tests: `DroneFlightTests` (one per cause: moving hull, light load, crossing, far side, docking) and
   `DroneSteeringTests`; rules and numbers in `docs/roadmap/drones-mining.md`, "Drone flight as built". Wire: protocol 66, `DroneCommandMessage.Subject`,
   `BayView.Fetching`, replies 11–20; protocol 77 tells every client which drones carry which body
-  (`DroneCarryMessage` 52), sent only to those that may see both, and never saved. Interface: `FetchContainer` (`/`) on the hovered free container
-  (`WorldView.HoverContainerId`) or the targeted one, the target panel's FETCH WITH DRONES button
+  (`DroneCarryMessage` 52), sent only to those that may see both, and never saved. Interface: `FetchContainer` (`/`)
+  on the hovered free container (`WorldView.HoverContainerId`) or the targeted one, the target panel's FETCH WITH
+  DRONES button
   (`DrawFetchButton`), the chip's "N FETCHING". Tests: `DroneFetchTests`. Capture:
   `tools/prepare_drone_fetch_capture.py` then `--open cargo --jettison 5 --drone-fetch 12` (jettisoned at 6 m/s, out of
   beam range before its pickup delay ends; delivered about 42 s in); `make bench` runs it for 50 s.
