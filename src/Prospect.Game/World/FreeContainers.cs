@@ -12,13 +12,17 @@ public struct FreeContainer
     /// <summary>0 while travelling to the staging point, 1 on the final glide into the slot.</summary>
     public byte TractorStage;
     public bool TractorPowered;
-    /// <summary>Server-only, never sent or saved: the least path left so far (0 = not set) and the ticks without gaining on it.</summary>
+    /// <summary>
+    /// Server-only, never sent or saved: the least the body has had left to do so far (<see cref="Approach.Left"/>,
+    /// 0 = not set) and the ticks without gaining on it.
+    /// </summary>
     public float TractorBest;
     public int TractorIdle;
     /// <summary>
     /// Server-only, never sent or saved: the leg the beam last pulled the body along (0 none yet, 1 to the staging
-    /// point, 2 by way of the emitter's exit, 3 the final glide). A change of leg sets <see cref="TractorBest"/> to the
-    /// new leg's length; nothing else may raise it, so a body that only jitters on one leg still reaches the stall.
+    /// point, 2 by way of the emitter's exit, 3 the final glide). A change of leg sets <see cref="TractorBest"/> to what
+    /// the new leg leaves to do, and so does a manoeuvre of the ship's its beam could not carry over; nothing else
+    /// may raise it, so a body that only jitters on one leg still reaches the stall.
     /// </summary>
     public byte TractorRoute;
     /// <summary>

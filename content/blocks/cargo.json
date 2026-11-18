@@ -101,7 +101,8 @@
     "progressMetres": 0.02,
     "stallSeconds": 4,
     "retrySeconds": 10,
-    "approachBrakeShare": 0.7
+    "approachBrakeShare": 0.7,
+    "carryAcceleration": 25
   },
   "space": {
     "perSector": 64,

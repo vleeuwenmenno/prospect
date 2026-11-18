@@ -18,8 +18,13 @@ public readonly record struct ContainerSize(string Name, int Units, GridSize Sha
 /// <param name="StallSeconds">Without progress or without a clear line this long, the claim is released.</param>
 /// <param name="RetrySeconds">After such a release no tractor may acquire the container for this long.</param>
 /// <param name="ApproachBrakeShare">The share of the braking a body has in hand as it closes on its goal (<see cref="Approach"/>).</param>
+/// <param name="CarryAcceleration">
+/// Metres per second squared: how hard the holding ship may manoeuvre and still take what its beams hold along
+/// (<see cref="Approach.Carry"/>). Beyond it the load lags and the pull has to bring it back.
+/// </param>
 public readonly record struct TractorGuidance(float StagingMarginMetres, float ToleranceMetres, float FinalSpeed,
-    float SettleSpeed, float AlignRate, float ProgressMetres, float StallSeconds, float RetrySeconds, float ApproachBrakeShare)
+    float SettleSpeed, float AlignRate, float ProgressMetres, float StallSeconds, float RetrySeconds, float ApproachBrakeShare,
+    float CarryAcceleration)
 {
     /// <summary>Ticks of <see cref="StallSeconds"/> at the fixed simulation interval.</summary>
     public int StallTicks => Math.Max(1, (int)MathF.Ceiling(StallSeconds / Prospect.Game.World.HullSim.Dt));
@@ -32,11 +37,11 @@ public readonly record struct TractorGuidance(float StagingMarginMetres, float T
             e.GetProperty("finalSpeed"u8).GetSingle(), e.GetProperty("settleSpeed"u8).GetSingle(),
             e.GetProperty("alignRate"u8).GetSingle(), e.GetProperty("progressMetres"u8).GetSingle(),
             e.GetProperty("stallSeconds"u8).GetSingle(), e.GetProperty("retrySeconds"u8).GetSingle(),
-            e.GetProperty("approachBrakeShare"u8).GetSingle());
+            e.GetProperty("approachBrakeShare"u8).GetSingle(), e.GetProperty("carryAcceleration"u8).GetSingle());
         if (!In(g.StagingMarginMetres, 0.01f, 2) || !In(g.ToleranceMetres, 0.005f, 0.5f) || !In(g.FinalSpeed, 0.05f, 10)
             || !In(g.SettleSpeed, 0.01f, 5) || !In(g.AlignRate, 0.1f, 60) || !In(g.ProgressMetres, 0.001f, 1)
             || !In(g.StallSeconds, 0.5f, 120) || !In(g.RetrySeconds, 0, 3600) || g.SettleSpeed > g.FinalSpeed
-            || !In(g.ApproachBrakeShare, 0.05f, 1f))
+            || !In(g.ApproachBrakeShare, 0.05f, 1f) || !In(g.CarryAcceleration, 0, 1000))
             throw new InvalidDataException("Invalid tractor guidance tuning.");
         return g;
     }

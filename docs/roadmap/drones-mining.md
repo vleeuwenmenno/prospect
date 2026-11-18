@@ -396,6 +396,60 @@ across claims, and the ore run's battery is flat from 36 s to 66 s.
 | --- | --- | --- |
 | Body above the ridge, hull turned 180 deg at 0.7 s | velocity frozen at 2.7 m/s, released at the 4 s stall, never stowed | pulled back through the exit, stowed at 5.5 s, never released |
 
+### A held body while the ship moves
+
+Fixed 2026-11-18, after "the tractor beam barely works when the ship slightly moves". Measured headless at 60 Hz on
+the shipped ship (`TractorManoeuvreTests`).
+
+Causes:
+
+- The pull is 4 m/s². The ship thrusts at 11.6 m/s², its dampeners brake at 9, and a turn's onset moves a rack faster
+  still. A held body was steered toward a goal that kept jumping away: it lagged, overshot and never settled.
+- The stall rule kept the least path left ever and let go when that was not beaten for 4 s. A ship that moved pushed
+  the path up through no fault of the beam, so a healthy, powered load was dropped.
+- Once dropped it waited the 10 s retry with whatever speed it had, and was out of the 40 m range by then.
+- The path alone also grew while a body flying the wrong way was still being braked: that counted as no progress.
+
+The fix, in the shared rules (`Approach`, `TractorSimulation.Pull` for containers and chunks alike):
+
+- **Carry.** What the ship did in the tick is added to the body first (`Approach.Carry`): the change of velocity of
+  the point the body is steered against, at most `tractor.carryAcceleration` (25 m/s², `blocks/cargo.json`), none
+  without power. `Plan` keeps each hull's motion before the round for it (`HullInfo.Before`). The pull then works
+  only on the way in.
+- **Which point.** The leg's target on the way to the staging point; the body's own place on the final glide, so it
+  goes straight into the opening however the ship turns.
+- **Stall.** It measures `Approach.Left`: path left plus `error² / 2a`, the room to turn the body's velocity into the
+  one asked. A manoeuvre the beam could not carry over measures anew, and with power that tick is not counted.
+- No wire, save or evaluator change. `cargo.json` gained one figure, so the content identity differs.
+
+| Shipped ship, headless (`MOVE` lines of `TheScenarioTable`) | Before | After |
+| --- | --- | --- |
+| At rest: container 9 m above / 30 m out / chunk 18 m ahead / jettisoned | 6.6 / 9.4 / 6.5 / 19.0 s | the same |
+| Drift 2 m/s, yaw 5 and 15°/s, yaw 10°/s with drift | within 0.3 s of rest | within 0.3 s of rest |
+| 35 % thrust for 1 s, stop for 2 s | 9.4 / 15.3 / 5.9 / 27.4 s | 6.6 / 9.4 / 6.5 / 20.0 s |
+| Nudged about (small random thrust and turn) | 6.8 / 64.7 (1 stall) / 7.1 / 21.7 s | 6.6 / 9.3 / 6.2 / 18.1 s |
+| Nudged about, second seed | never (2 stalls) / never (3) / 24.0 s / never (2) | 6.7 / 9.4 / 6.2 / 18.5 s |
+| Full yaw, pitch or roll, full thrust, boost, hard nudging | never, 1 to 4 stalls each | 6.3 to 10.3 s near, no stall |
+| Mining 150 s, at rest | 13 of 13 chunks, no stall | the same |
+| Mining 150 s, nudged about | 2 of 7, 7 stalls; second seed 3 of 7, 3 stalls | 10 of 10 both, no stall |
+
+Every "After" cell has no stall release. "Never" is not stowed in 60 s (90 s for 30 m out).
+
+Limits that remain, as rules:
+
+- The carry is 25 m/s². Past it (a collision's knock, more than the ship's boost) the load lags and the pull makes it
+  up at 4 m/s²; it is not dropped for it.
+- Sustained turning at the ship's full rates still stows (yaw 68°/s, pitch 76°/s, roll 119°/s: under 12 s). Only a
+  container 30 m out from a ship rolling at full rate takes 53 s: the staging point circles and the beam's view of
+  the container comes and goes.
+- View: both beams sit on the deck. A container jettisoned by a ship that pitches its deck away during the 10 s
+  pickup delay is not taken until a beam sees it again within 40 m.
+- Power: thrust is paid before the beams. The ship has 5.2 MW spare, a beam holding a chunk asks 2.27 MW, full thrust
+  takes 4.8 MW and full reverse 8.6 MW. With charge in the battery that never shows. With the battery flat (the
+  lasers leave it so) a beam is paid only while thrust leaves it its share, and one unpaid for `stallSeconds` lets go.
+- The client draws a held body between sets by its velocity, so on screen it may trail a hard-turning hull by a
+  fraction of a metre. Not checked by eye.
+
 ### Numbers (headless, shipped ship, command to delivered)
 
 - Container 150 m out: 32–33 s before, 26–27 s after.

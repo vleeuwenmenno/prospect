@@ -35,13 +35,22 @@ public sealed partial class TractorSimulation
 
     /// <summary>
     /// Validates existing claims first, then lets free mounts acquire in hull/mount/body order: a loose container
-    /// first, an ore chunk only when the beam took no container and sees a hopper with room behind it.
+    /// first, an ore chunk only when the beam took no container and sees a hopper with room behind it. Call it before
+    /// the hulls step, every tick: it also keeps how each hull moves before its step (<see cref="HullInfo.Before"/>),
+    /// which <see cref="Pull"/> needs to carry a load along with what the step changes.
     /// </summary>
     public void Plan(FreeContainers containers, OreChunks? chunks, GameContent content, HullField field, Span<byte> occupied, long tick = 0)
     {
         var hulls = field.Hulls;
         for (var h = 0; h < hulls.Slots; h++)
-            if (hulls.IsAliveAt(h)) hulls.Info(h).TractorDemand = 0;
+        {
+            if (!hulls.IsAliveAt(h)) continue;
+            ref var info = ref hulls.Info(h);
+            info.TractorDemand = 0;
+            // How the hull moves before it steps: the pull carries what its beams hold along with what the step changes.
+            ref readonly var state = ref hulls.State(h);
+            info.Before = new HullMotion(state.Velocity, state.AngularVelocity, state.Orientation, true);
+        }
         for (var c = 0; c < containers.Items.Length; c++)
         {
             ref var item = ref containers.At(c);
@@ -155,8 +164,11 @@ public sealed partial class TractorSimulation
     /// follows <see cref="TractorPath"/>: to the staging point outside the rack's face (by way of the emitter's exit
     /// when the straight line is blocked, or when the beam has lost sight of it), then a slow glide along the face
     /// normal into its slot, where it is stowed. <see cref="ContainerSimulation"/> lets it pass its own hull's blocks
-    /// meanwhile. A body the beam fails to bring closer for <see cref="TractorGuidance.StallSeconds"/> is let go and
-    /// waits <see cref="TractorGuidance.RetrySeconds"/> before any tractor tries it again, so nothing jams for ever.
+    /// meanwhile. What the ship itself does in the tick (thrust, braking, turning) is carried over to the body first
+    /// (<see cref="Approach.Carry"/>, from the motion <see cref="Plan"/> kept), so the pull only ever works on the way
+    /// in: without it a ship that braked at 10 m/s² left a load pulled at 4 m/s² behind. A body the beam fails to
+    /// bring closer for <see cref="TractorGuidance.StallSeconds"/> is let go and waits
+    /// <see cref="TractorGuidance.RetrySeconds"/> before any tractor tries it again, so nothing jams for ever.
     /// </summary>
     public void Pull(FreeContainers containers, GameContent content, HullField field, Span<byte> occupied, long tick = 0) =>
         Pull(containers, null, content, field, occupied, tick);
@@ -203,33 +215,16 @@ public sealed partial class TractorSimulation
             var powered = info.TractorDemand > 0 && info.Power.Tractor >= info.TractorDemand;
             var speed = Math.Min(Approach.Speed(spec.Acceleration, distance, tuning.ApproachBrakeShare),
                 final ? tuning.FinalSpeed : float.PositiveInfinity);
-            // The beam must keep bringing the body closer: a tick it spends without power, or one in which it pulls
-            // and the body still gains nothing on the way it is taking, counts against it.
-            var gained = false;
-            if (powered)
-            {
-                // A longer way (the exit route instead of the straight one, or the glide given up for the exit) is
-                // measured from its own start: a body sent round the hull's own blocks is coming in, not stalled. Only
-                // a change of leg may do this. Raising the best whenever the path grew let a body pressed against a
-                // rock, pushed back and pulled in again each tick, count as gaining for ever, so it never reached the
-                // stall and the beam never let it go. The idle count is kept: a change of leg is not progress.
-                var route = (byte)(final ? 3 : viaExit ? 2 : 1);
-                if (route != item.TractorRoute)
-                {
-                    if (item.TractorRoute != 0 && item.TractorBest > 0) item.TractorBest = Math.Max(left, 1e-6f);
-                    item.TractorRoute = route;
-                }
-                // The least shrink that counts is the configured distance, but never more than the approach rule lets
-                // the body close in a tick: a body creeping in on the final glide is coming in, not stalled.
-                if (item.TractorBest <= 0 || left < item.TractorBest - Approach.NeededProgress(speed, tuning.ProgressMetres))
-                {
-                    item.TractorBest = Math.Max(left, 1e-6f);
-                    gained = true;
-                }
-            }
-            if (gained) item.TractorIdle = 0;
-            else item.TractorIdle++;
-            if (item.TractorIdle >= tuning.StallTicks)
+            // What the ship did this tick is carried over to the body first, so what is left to steer is the body's
+            // own way in. On its way to the staging point it is steered against that point; on the final glide it is
+            // held in the ship's frame where it is, so it goes straight into the opening however the ship turns.
+            var frame = Carry(ref item.Velocity, info, state, (final ? local : target) - Pivot(design) - hulls.Flight(h).CenterOfMass,
+                powered ? tuning.CarryAcceleration : 0, out var slipped);
+            var relative = item.Velocity - frame;
+            var change = Wanted(delta, distance, state.Orientation, speed) - relative;
+            if (Stalled(ref item.TractorBest, ref item.TractorIdle, ref item.TractorRoute, (byte)(final ? 3 : viaExit ? 2 : 1),
+                Approach.Left(left, change.Length(), spec.Acceleration), powered, slipped,
+                Approach.NeededProgress(speed, tuning.ProgressMetres), tuning.StallTicks))
             {
                 item.PickupReadyTick = tick + (long)Math.Ceiling(tuning.RetrySeconds * Prospect.Engine.Time.TickLoop.SimulationHz);
                 Release(ref item);
@@ -237,10 +232,6 @@ public sealed partial class TractorSimulation
             }
             if (!powered) continue;
 
-            var offset = target - Pivot(design);
-            var carrierVelocity = state.Velocity + HullRotation.Rotate(Vector3.Cross(state.AngularVelocity,
-                offset - hulls.Flight(h).CenterOfMass), state.Orientation);
-            var relative = item.Velocity - carrierVelocity;
             var tolerance = Math.Max(tuning.ToleranceMetres, relative.Length() * HullSim.Dt);
             item.TractorPowered = true;
             // Turn onto the hull's axes, as the slot is, and take its spin; a container never settles tumbling.
@@ -249,7 +240,7 @@ public sealed partial class TractorSimulation
             item.AngularVelocity = state.AngularVelocity;
             if (distance <= tolerance && !viaExit)
             {
-                if (!final) { item.TractorStage = 1; item.Velocity = carrierVelocity; continue; }
+                if (!final) { item.TractorStage = 1; item.Velocity = frame; continue; }
                 var aligned = Math.Abs(Quaternion.Dot(item.Orientation, state.Orientation)) >= AlignedDot;
                 if (aligned && hulls.BlockStates.TryAddCargo(info.BlockState, content, Held(item), occupied))
                 { containers.Remove(c); field.Refit(h); }
@@ -262,19 +253,72 @@ public sealed partial class TractorSimulation
                 && hulls.BlockStates.TryAddCargo(info.BlockState, content, Held(item), occupied))
             { containers.Remove(c); field.Refit(h); continue; }
 
-            Steer(ref item.Velocity, delta, distance, relative, state.Orientation, spec.Acceleration, speed);
+            Steer(ref item.Velocity, change, spec.Acceleration);
         }
     }
 
     /// <summary>
-    /// One tick of a beam's pull on a body it holds: its velocity relative to the hull at the target is steered along
-    /// <paramref name="delta"/> (the way left, in the hull's frame) at <paramref name="speed"/> (what
-    /// <see cref="Approach.Speed"/> gives it), changing by no more than the beam's acceleration allows in a tick.
+    /// The velocity of the point of hull <paramref name="state"/> a held body is steered against, <paramref name="arm"/>
+    /// from its centre of mass in its own frame, after carrying the body along with what the hull's step changed of it
+    /// (<see cref="Approach.Carry"/>, at most <paramref name="limit"/>; none without power).
+    /// <paramref name="slipped"/> says the ship did more than the beam carried over.
     /// </summary>
-    private static void Steer(ref Vector3 velocity, Vector3 delta, float distance, Vector3 relative, Quaternion orientation, float acceleration, float speed)
+    private static Vector3 Carry(ref Vector3 velocity, in HullInfo info, in HullState state, Vector3 arm, float limit, out bool slipped)
     {
-        var desired = distance > 1e-6f ? HullRotation.Rotate(delta / distance, orientation) * speed : Vector3.Zero;
-        var change = desired - relative;
+        var frame = state.Velocity + HullRotation.Rotate(Vector3.Cross(state.AngularVelocity, arm), state.Orientation);
+        slipped = false;
+        if (!info.Before.Kept) return frame;
+        var before = info.Before.Velocity + HullRotation.Rotate(Vector3.Cross(info.Before.AngularVelocity, arm), info.Before.Orientation);
+        slipped = !Approach.Carry(ref velocity, frame - before, limit);
+        return frame;
+    }
+
+    /// <summary>
+    /// The stall rule for one held body, by <paramref name="measure"/> (<see cref="Approach.Left"/>: what it has left
+    /// to do): the beam must keep making that smaller. A tick it spends without power, or one in which it pulls and
+    /// the body still gains nothing, counts against it; true once that has gone on for <paramref name="stallTicks"/>.
+    /// A longer way (the exit route instead of the straight one, or the glide given up for the exit) is measured from
+    /// its own start: a body sent round the hull's own blocks is coming in, not stalled. So is what the ship itself
+    /// did and the beam could not carry over (<paramref name="slipped"/>): a ship that out-manoeuvres its beam has not
+    /// jammed its load. Nothing else may raise the least measure, so a body pressed against a rock, pushed back and
+    /// pulled in again each tick, still reaches the stall. A change of leg is not progress: the count is kept.
+    /// </summary>
+    private static bool Stalled(ref float best, ref int idle, ref byte held, byte route, float measure, bool powered,
+        bool slipped, float needed, int stallTicks)
+    {
+        var anew = slipped;
+        if (powered && route != held)
+        {
+            anew |= held != 0;
+            held = route;
+        }
+        if (anew && best > 0) best = Math.Max(measure, 1e-6f);
+        // The least shrink that counts is the configured distance, but never more than the approach rule lets the
+        // body close in a tick: a body creeping in on the final glide is coming in, not stalled.
+        var gained = powered && (best <= 0 || measure < best - needed);
+        if (gained)
+        {
+            best = Math.Max(measure, 1e-6f);
+            idle = 0;
+        }
+        else if (!(powered && slipped)) idle++;
+        return idle >= stallTicks;
+    }
+
+    /// <summary>
+    /// The velocity the approach rule asks of a held body relative to the point it is steered against: along
+    /// <paramref name="delta"/> (the way left, in the hull's frame) at <paramref name="speed"/>
+    /// (<see cref="Approach.Speed"/>).
+    /// </summary>
+    private static Vector3 Wanted(Vector3 delta, float distance, Quaternion orientation, float speed) =>
+        distance > 1e-6f ? HullRotation.Rotate(delta / distance, orientation) * speed : Vector3.Zero;
+
+    /// <summary>
+    /// One tick of a beam's pull on a body it holds: its velocity moves toward the wanted one by
+    /// <paramref name="change"/>, no more than the beam's acceleration allows in a tick.
+    /// </summary>
+    private static void Steer(ref Vector3 velocity, Vector3 change, float acceleration)
+    {
         var length = change.Length();
         if (length > 0) velocity += change * (Math.Min(length, acceleration * HullSim.Dt) / length);
     }

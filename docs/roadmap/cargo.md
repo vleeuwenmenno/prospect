@@ -360,7 +360,9 @@ Deferred: drone launcher, tractor filter.
 - If the straight line to the staging point is blocked, it goes first to the emitter's exit point.
 - While guided and powered, the container ignores contacts with its own hull. Rocks and other hulls still hit it.
 - It turns onto the hull's axes and is stowed at the slot, within tolerance, or inside the slot cell and nearly still.
-- No progress, or no line of sight, for `stallSeconds`: the claim is released and the container waits `retrySeconds`.
+- A held container goes along with what its ship does (thrust, braking, turning), up to `carryAcceleration`; the pull
+  itself only works on the way in. Details in `docs/roadmap/drones-mining.md`, "A held body while the ship moves".
+- No progress for `stallSeconds`: the claim is released and the container waits `retrySeconds`.
 - Where a rack's open face lies against another block it is closed there, never an entrance.
-- Figures: `tractor` in `content/blocks/cargo.json` (staging margin, tolerance, final speed, settle speed, align rate, progress, stall, retry).
+- Figures: `tractor` in `content/blocks/cargo.json` (staging margin, tolerance, final speed, settle speed, align rate, progress, stall, retry, approach brake share, carry).
 - Server only: no wire or save change. Tests: `TractorGuideTests`.

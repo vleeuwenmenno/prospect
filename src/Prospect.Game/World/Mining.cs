@@ -199,15 +199,18 @@ public struct OreChunk
     public byte TractorStage;
     public bool TractorPowered;
 
-    /// <summary>Server-only, never sent or saved: the least path left so far (0 = not set) and the ticks without gaining on it.</summary>
+    /// <summary>
+    /// Server-only, never sent or saved: the least the chunk has had left to do so far (<see cref="Approach.Left"/>,
+    /// 0 = not set) and the ticks without gaining on it.
+    /// </summary>
     public float TractorBest;
     public int TractorIdle;
 
     /// <summary>
     /// Server-only, never sent or saved: the leg the beam last pulled the chunk along (0 none yet, 1 to the point
     /// outside the intake, 2 by way of the emitter's exit, 3 the glide in). A change of leg sets
-    /// <see cref="TractorBest"/> to the new leg's length; nothing else may raise it, so a chunk that only jitters on one
-    /// leg still reaches the stall.
+    /// <see cref="TractorBest"/> to what the new leg leaves to do, and so does a manoeuvre of the ship's its beam could
+    /// not carry over; nothing else may raise it, so a chunk that only jitters on one leg still reaches the stall.
     /// </summary>
     public byte TractorRoute;
 
