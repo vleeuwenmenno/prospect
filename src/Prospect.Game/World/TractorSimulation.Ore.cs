@@ -141,33 +141,14 @@ public sealed partial class TractorSimulation
             var powered = info.TractorDemand > 0 && info.Power.Tractor >= info.TractorDemand;
             var speed = Math.Min(Approach.Speed(spec.Acceleration, distance, tuning.ApproachBrakeShare),
                 final ? tuning.FinalSpeed : float.PositiveInfinity);
-            // The beam must keep bringing the body closer: a tick it spends without power, or one in which it pulls
-            // and the body still gains nothing on the way it is taking, counts against it.
-            var gained = false;
-            if (powered)
-            {
-                // A longer way (the exit route instead of the straight one, or the glide given up for the exit) is
-                // measured from its own start: a body sent round the hull's own blocks is coming in, not stalled. Only
-                // a change of leg may do this. Raising the best whenever the path grew let a body pressed against a
-                // rock, pushed back and pulled in again each tick, count as gaining for ever, so it never reached the
-                // stall and the beam never let it go. The idle count is kept: a change of leg is not progress.
-                var route = (byte)(final ? 3 : viaExit ? 2 : 1);
-                if (route != item.TractorRoute)
-                {
-                    if (item.TractorRoute != 0 && item.TractorBest > 0) item.TractorBest = Math.Max(left, 1e-6f);
-                    item.TractorRoute = route;
-                }
-                // The least shrink that counts is the configured distance, but never more than the approach rule lets
-                // the body close in a tick: a body creeping in on the final glide is coming in, not stalled.
-                if (item.TractorBest <= 0 || left < item.TractorBest - Approach.NeededProgress(speed, tuning.ProgressMetres))
-                {
-                    item.TractorBest = Math.Max(left, 1e-6f);
-                    gained = true;
-                }
-            }
-            if (gained) item.TractorIdle = 0;
-            else item.TractorIdle++;
-            if (item.TractorIdle >= tuning.StallTicks)
+            // Carried along with what the ship did this tick, then steered, as a container is (Pull).
+            var frame = Carry(ref item.Velocity, info, state, (final ? local : target) - Pivot(design) - hulls.Flight(h).CenterOfMass,
+                powered ? tuning.CarryAcceleration : 0, out var slipped);
+            var relative = item.Velocity - frame;
+            var change = Wanted(delta, distance, state.Orientation, speed) - relative;
+            if (Stalled(ref item.TractorBest, ref item.TractorIdle, ref item.TractorRoute, (byte)(final ? 3 : viaExit ? 2 : 1),
+                Approach.Left(left, change.Length(), spec.Acceleration), powered, slipped,
+                Approach.NeededProgress(speed, tuning.ProgressMetres), tuning.StallTicks))
             {
                 item.RetryTick = tick + retry;
                 OreChunks.ClearTractor(ref item);
@@ -175,15 +156,11 @@ public sealed partial class TractorSimulation
             }
             if (!powered) continue;
 
-            var offset = target - Pivot(design);
-            var carrierVelocity = state.Velocity + HullRotation.Rotate(Vector3.Cross(state.AngularVelocity,
-                offset - hulls.Flight(h).CenterOfMass), state.Orientation);
-            var relative = item.Velocity - carrierVelocity;
             var tolerance = Math.Max(tuning.ToleranceMetres, relative.Length() * HullSim.Dt);
             item.TractorPowered = true;
             if (distance <= tolerance && !viaExit)
             {
-                if (!final) { item.TractorStage = 1; item.Velocity = carrierVelocity; continue; }
+                if (!final) { item.TractorStage = 1; item.Velocity = frame; continue; }
                 var taken = hulls.BlockStates.AddOre(info.BlockState, item.Resource, item.Mass, item.Grade);
                 if (taken > 0) field.Refit(h);
                 if (item.Mass - taken <= OreBins.Crumb) { chunks.Remove(c); continue; }
@@ -193,7 +170,7 @@ public sealed partial class TractorSimulation
                 continue;
             }
 
-            Steer(ref item.Velocity, delta, distance, relative, state.Orientation, spec.Acceleration, speed);
+            Steer(ref item.Velocity, change, spec.Acceleration);
         }
     }
 

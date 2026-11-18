@@ -310,6 +310,8 @@ public sealed class TractorGuideTests
     [InlineData("retrySeconds", -1)]
     [InlineData("approachBrakeShare", 0)]
     [InlineData("approachBrakeShare", 1.5)]
+    [InlineData("carryAcceleration", -1)]
+    [InlineData("carryAcceleration", 1001)]
     public void InvalidTractorGuidanceIsRefused(string name, float value)
     {
         using var copy = new ContentCopy();

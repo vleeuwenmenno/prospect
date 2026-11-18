@@ -334,7 +334,8 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   - A beam takes a body only if it can still stop it. `Approach` (shared) is the one approach rule: `Speed` closes at
     `approachBrakeShare` of the speed that stops on the goal (`blocks/cargo.json`, `tractor.approachBrakeShare` 0.7),
     `StopsIn` is whether the room left is enough, and `NeededProgress` is the least a path may shrink in a tick to count
-    as progress (never more than `Speed` closes in one), so a slow glide is never a stall. `TractorSimulation.Steer` and `DroneFetch.Pull` both brake by
+    as progress (never more than `Speed` closes in one), so a slow glide is never a stall. `Carry` and `Left` are the
+    held body's rules while its ship moves ("Tractor beams: cargo step 3"). `TractorSimulation.Steer` and `DroneFetch.Pull` both brake by
     `Speed`, so a tick in which the pull is skipped costs room they have to spare instead of leaving the body too fast
     to stop. `AcquireChunk` and `TractorSimulation.Reaches` refuse a body whose closing speed cannot be stopped before
     it reaches the emitter, less the body's own half edge: a beam that took one dragged it out of its reach,
@@ -1631,12 +1632,12 @@ shield and the server know the design's blocks.
   point, the one place the beam always sees, and the ordinary guide resumes when the line comes back. A body is let
   go only when the beam cannot bring it closer for `stallSeconds`: a tick without the power to pull, or one in which the
   pull gains nothing on the way the body is taking. It then gets `PickupReadyTick` = now + `retrySeconds`. A change of
-  leg (`TractorRoute`: staging, by the exit, final glide) measures from the new leg's length, so a detour is not
-  mistaken for a stall; nothing else may raise `TractorBest`, so a body pushed back and pulled in on one leg (pressed
-  against a rock) still reaches the stall and never holds a beam for ever. The least shrink that counts is
-  `Approach.NeededProgress`, capped by `tractor.progressMetres` but never more than the approach rule closes in a
-  tick, so the final glide's creep is progress too. `TractorBest`, `TractorIdle` and `TractorRoute` (on containers and
-  chunks) are server-only (not on the wire, not saved). Figures are the `tractor` entry of `blocks/cargo.json`
+  leg (`TractorRoute`: staging, by the exit, final glide) measures from what the new leg leaves to do, so a detour is
+  not mistaken for a stall; nothing else but an uncarried manoeuvre (below) may raise `TractorBest`, so a body pushed
+  back and pulled in on one leg (pressed against a rock) still reaches the stall and never holds a beam for ever. The
+  least shrink that counts is `Approach.NeededProgress`, capped by `tractor.progressMetres` but never more than the
+  approach rule closes in a tick, so the final glide's creep is progress too. `TractorBest`, `TractorIdle` and
+  `TractorRoute` (on containers and chunks) are server-only (not on the wire, not saved). Figures are the `tractor` entry of `blocks/cargo.json`
   (`TractorGuidance`, validated). `TractorReach.Rack` skips an aim point lying against another live box (a face
   against a neighbour is a deck, not an entrance). The pull runs after the hulls step and before the bodies drift, so it
   measures a body where it will be at the end of the tick (`Position + Velocity * Dt`) against the hull's new pose;
@@ -1644,6 +1645,31 @@ shield and the server know the design's blocks.
   off. Above a hull's rated speed `FlightModel` sheds speed faster than the beam's 4 m/s² can follow, so at boost
   speed a held body can still be outrun. Tests: `TractorGuideTests`, `TractorSpeedTests` (coasting at 240 m/s, and
   closing at 10 m/s on a body 100 m ahead).
+- A held body goes along with its ship (containers and chunks, one code: `TractorSimulation.Carry`, `Stalled`,
+  `Wanted`, `Steer`). The player's words: "the tractor beam barely works when the ship slightly moves".
+  - Cause: the pull is 4 m/s²; the ship thrusts at 11.6, brakes at 9 and a turn's onset moves a rack at 15 and more.
+    A load fell behind every time the ship moved, never settled at the staging point, and the stall rule (the least
+    path left ever, not beaten for 4 s) let a healthy load go; ten seconds of retry later it was out of range.
+  - The carry: `TractorSimulation.Plan` keeps each hull's motion before the round (`HullInfo.Before`, `HullMotion`;
+    never sent or saved; call `Plan` before the hulls step, every tick). `Pull` adds to the body the change the step
+    made to the velocity of the point the body is steered against (`Approach.Carry`), at most
+    `tractor.carryAcceleration` (25 m/s², `blocks/cargo.json`: the shipped ship's boost is 23) and none on a tick
+    without power. Only then is the body steered, by the beam's own acceleration. Never steer a held body without it.
+  - That point is the leg's target on the way to the staging point (so a load far out is not swung round with the
+    ship) and the body's own place on the final glide (so it goes straight into the opening however the ship turns).
+  - The stall measures `Approach.Left`: the path left plus the room the body needs to turn the velocity it has into
+    the one the approach rule asks (`error² / 2a`). An unhindered pull shrinks it every tick, braking included; the
+    path alone grew while a body was still being braked. A manoeuvre the beam could not carry over (past the limit,
+    or without power) measures anew from where it leaves the body, and with power such a tick is not counted.
+  - Limits, as rules: the carry's figure; a beam's view (a container jettisoned by a ship that then turns its deck
+    away is not taken until it is seen again within 40 m); power (with the battery flat, thrust is paid first: a beam
+    holding a chunk asks 2.27 MW of the 5.2 MW the ship has spare, full thrust takes 4.8 MW, full reverse 8.6 MW; a
+    beam unpaid for `stallSeconds` lets go). Measured on the shipped ship: full yaw, pitch and roll, full thrust and
+    boost all stow in under 12 s; only a container 30 m out from a ship rolling at its full 119°/s takes 53 s.
+  - Tests: `TractorManoeuvreTests` (the shipped ship drifting, thrusting, turning and nudged about; a container, an
+    iron one, a jettisoned one, a chunk, and a mining run with the battery run flat; `TheScenarioTable` prints the
+    `MOVE` lines). The client draws a held body between sets by its velocity, so it may trail a hard-turning hull
+    by a fraction of a metre on screen; that is drawing, not the simulation.
 - Protocol 62 replicates pickup ownership and ready tick as well as transient pulls for beams and prediction;
   redact only transient pulls whose hull/design is unavailable to a client.
   Codec 15 preserves pickup ownership and ready tick; restore clears only transient pulls and restarts acquisition. `TractorPreview` caches the shared

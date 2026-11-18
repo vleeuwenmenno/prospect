@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.InteropServices;
 
 namespace Prospect.Game.World;
@@ -10,6 +11,10 @@ public readonly record struct HullHandle(int Index, int Generation)
     /// <summary>The handle as one number, for the wire.</summary>
     public uint Packed => (uint)Generation << 16 | (uint)Index & 0xFFFF;
 }
+
+/// <summary>A hull's velocity, turn rate (in its own frame) and heading at one moment.</summary>
+/// <param name="Kept">False until a round has recorded it.</param>
+public readonly record struct HullMotion(Vector3 Velocity, Vector3 AngularVelocity, Quaternion Orientation, bool Kept);
 
 /// <summary>Per-hull data that is not part of its motion.</summary>
 public struct HullInfo
@@ -79,6 +84,12 @@ public struct HullInfo
 
     /// <summary>Active tractor demand prepared before this hull steps; never durable.</summary>
     public float TractorDemand;
+
+    /// <summary>
+    /// How the hull moved before this round's step, kept by <see cref="TractorSimulation.Plan"/>: what its beams hold
+    /// is carried along with the change the step makes (<see cref="Approach.Carry"/>). Never sent or saved.
+    /// </summary>
+    public HullMotion Before;
 
     /// <summary>Mining laser demand prepared before this hull steps; never durable.</summary>
     public float LaserDemand;
