@@ -100,6 +100,7 @@ internal static class DesignBytes
         if (reader.Left != 0) throw new InvalidDataException("Trailing design bytes.");
         // Checked before the design is evaluated or its shield built: it costs one pass over the boxes.
         BoxDesign.RequireOneDriveKind(boxes, "received design");
+        BoxDesign.RequireOneLocatorKind(mounts, "received design");
         // The design puts its mounts in order; bytes that list them in another are refused below as noncanonical.
         var design = HullDesign.Of(new BoxDesign(name, size, boxes, content.Blocks.Limits, "received design", kind, color, mounts), content.Rules);
         GeometryAdmission.Validate(design, content.Blocks.Limits);

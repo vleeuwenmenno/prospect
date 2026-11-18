@@ -381,6 +381,7 @@ public sealed class BoxDesign
             }
             ConvertLegacy(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list), legacy, mounts, catalog.Limits, source);
             RequireOneDriveKind(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(list), source);
+            RequireOneLocatorKind(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(mounts), source);
             var c = root.GetProperty("color"u8);
             var kind = root.GetProperty("class"u8).GetString() switch { "ship" => HullClass.Ship, "fighter" => HullClass.Fighter, "station" => HullClass.Station, _ => throw new InvalidDataException($"{source}: unknown class") };
             return new BoxDesign(root.GetProperty("name"u8).GetString()!, root.GetProperty("blockSize"u8).GetSingle(), list.ToArray(), catalog.Limits, source, kind, new Vector3(c[0].GetSingle(), c[1].GetSingle(), c[2].GetSingle()), mounts.ToArray());
@@ -489,6 +490,43 @@ public sealed class BoxDesign
     }
 
     private static string DriveName(FtlKind kind) => kind switch { FtlKind.Hyperspace => "hyperspace", FtlKind.Wormhole => "wormhole", _ => "rift" };
+
+    /// <summary>
+    /// The index of the first mounted locator whose kind differs from an earlier one's, or -1 when a design has
+    /// locators of one kind or none. The kind is whether the locator's pulse carries a filter
+    /// (<see cref="ModuleSpec.Filter"/>): the basic locator and the advanced one are the two. Several of one kind are
+    /// redundant, not mixed. Allocates nothing.
+    /// </summary>
+    public static int MixedLocator(ReadOnlySpan<DesignMount> mounts, out int first)
+    {
+        first = -1;
+        for (var i = 0; i < mounts.Length; i++)
+        {
+            if (mounts[i].Type?.Module.Family != ModuleFamily.AsteroidLocator)
+                continue;
+            if (first < 0)
+                first = i;
+            else if (mounts[i].Type!.Module.Filter != mounts[first].Type!.Module.Filter)
+                return i;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Refuses a design that carries both kinds of locator. Design files, received designs and the editor's drafts are
+    /// all held to it, before any geometry is built; the constructor does not ask it, so arithmetic tests may still
+    /// build such a set of parts, as they may with the drives.
+    /// </summary>
+    public static void RequireOneLocatorKind(ReadOnlySpan<DesignMount> mounts, string source)
+    {
+        var mixed = MixedLocator(mounts, out var first);
+        if (mixed >= 0)
+            throw new InvalidDataException($"{source}: mounts: a ship carries locators of one kind only, but mount {mixed} is a {LocatorName(mounts[mixed])} and mount {first} a {LocatorName(mounts[first])}. Remove one kind");
+    }
+
+    private static string LocatorName(in DesignMount mount) =>
+        mount.Type is { } type && type.Module.Filter ? "an advanced locator" : "a basic locator";
 
     private static GridSize Grid(JsonElement e)
     {

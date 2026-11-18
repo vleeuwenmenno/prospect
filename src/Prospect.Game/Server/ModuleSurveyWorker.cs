@@ -112,6 +112,9 @@ internal sealed class ModuleSurveyWorker : IDisposable
         if (request.Family != ModuleFamily.AsteroidLocator || slot.Range > _galaxy.SectorSize)
         { slot.Failure = ModuleScanState.OutOfRange; return; }
         var origin = _galaxy.SectorOf(slot.Origin);
+        // An advanced locator's filter narrows the candidates before the pulse's limit is spent, so the 256 places it can
+        // list go to the rocks the player asked for.
+        var filter = request.Filter;
         for (var y = -1; y <= 1; y++)
             for (var z = -1; z <= 1; z++)
                 for (var x = -1; x <= 1; x++)
@@ -130,6 +133,7 @@ internal sealed class ModuleSurveyWorker : IDisposable
                         var rock = sector.Asteroids[i];
                         var position = _galaxy.CenterOf(coord) + rock.LocalPosition;
                         if (!ModuleScanRules.InRange(slot.Origin, position, 0, slot.Range)) continue;
+                        if (!filter.Allows(rock.Resource, rock.Radius)) continue;
                         if (slot.Count == slot.Results.Length) { slot.Partial = true; return; }
                         Add(slot, coord, i, rock);
                     }

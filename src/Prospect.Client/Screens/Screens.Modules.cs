@@ -27,12 +27,20 @@ internal sealed partial class ScreenHost
     private readonly string[] _moduleKeyStrings = ["", "", ""];
     private int _moduleKeysVersion = -1;
     private ModuleTargets _moduleTargets;
+
+    /// <summary>The galaxy of this frame's snapshot, for the locator filter's fitting and the popup's ore list.</summary>
+    private Galaxy? _galaxyThisFrame;
     private readonly DroneTracker _droneTrack = new();
     private readonly DronePopup _dronePopup = new();
     private bool _dronePopupWanted;
+    private readonly LocatorPopup _locatorPopup = new();
+    private bool _locatorPopupWanted;
 
     /// <summary>Opens the drone settings popup as soon as the flown hull has a chip for it. Used by <c>--drone-popup</c>, for captures.</summary>
     public void RequestDronePopup() => _dronePopupWanted = true;
+
+    /// <summary>Opens the advanced locator's filter popup as soon as the flown hull carries one. Used by <c>--locator-popup</c>, for captures.</summary>
+    public void RequestLocatorPopup() => _locatorPopupWanted = true;
     private DroneChipState _droneState;
     private byte[] _droneKeyName = [];
     private byte[] _droneRecallKeyName = [];
@@ -57,6 +65,7 @@ internal sealed partial class ScreenHost
     {
         var own = world.Own;
         var galaxy = snapshot.Galaxy;
+        _galaxyThisFrame = galaxy;
         var stats = own.Stats;
         for (var slot = 0; slot < 3; slot++)
             _moduleEquipment[slot] = own.Id == 0 ? default : stats.Module(ModuleRules.Families[slot]);
@@ -82,6 +91,13 @@ internal sealed partial class ScreenHost
             _dronePopupWanted = false;
             if (!_dronePopup.IsOpen) _dronePopup.Toggle();
         }
+        // The advanced locator's popup belongs to a hull that carries one; the basic locator has nothing to filter.
+        _locatorPopup.Follow(own.Id, HasAdvancedLocator);
+        if (_locatorPopupWanted && HasAdvancedLocator)
+        {
+            _locatorPopupWanted = false;
+            if (!_locatorPopup.IsOpen) _locatorPopup.Toggle();
+        }
         if (_droneKeysVersion != _app.Actions.Version)
         {
             _droneKeysVersion = _app.Actions.Version;
@@ -106,6 +122,33 @@ internal sealed partial class ScreenHost
                 _moduleKeyNames[slot] = System.Text.Encoding.UTF8.GetBytes(_moduleKeyStrings[slot]);
             }
         }
+    }
+
+    /// <summary>Whether the ship being flown carries the advanced locator, whose pulse takes a filter.</summary>
+    private bool HasAdvancedLocator => _moduleEquipment[2].Mount != 0 && _moduleEquipment[2].Filter;
+
+    /// <summary>
+    /// The advanced locator's filter as the player left it, fitted to this world: a range inside the controls' own
+    /// and only ores this galaxy has. Read every frame, so a file edited by hand or a world of another seed can never
+    /// send a filter the server would refuse.
+    /// </summary>
+    private LocatorFilter LocatorFilterNow(Galaxy? galaxy)
+    {
+        var look = ModuleStyle.Filter;
+        var filter = _app.Settings.LocatorFilter;
+        var widest = (ushort)Math.Min(look.MaxDiameterMetres, LocatorFilter.MaxDiameterMetres);
+        var max = filter.MaxMetres > widest ? widest : filter.MaxMetres;
+        var min = filter.MaxMetres != 0 && filter.MinMetres > max ? max : filter.MinMetres;
+        var ores = galaxy is null ? filter.Ores : filter.Ores & LocatorFilter.AllOres(galaxy);
+        return new LocatorFilter(min, max, ores);
+    }
+
+    /// <summary>Keeps what the popup changed in the settings, and writes them when the popup is let go.</summary>
+    private void SetLocatorFilter(in LocatorFilter filter, bool save)
+    {
+        _app.Settings.SetLocatorFilter(filter);
+        if (save && !_app.Devices.Muted)
+            _app.Settings.Save();
     }
 
     /// <summary>The asteroid the scanner would scan: the one targeted in flight, or the first one selected in the command view.</summary>
@@ -134,7 +177,8 @@ internal sealed partial class ScreenHost
     private void RequestModule(int slot, PlayerInputBridge bridge)
     {
         var family = ModuleRules.Families[slot];
-        var notice = ModuleRules.Request(family, _moduleGate[slot], _moduleTargets, bridge);
+        var notice = ModuleRules.Request(family, _moduleGate[slot], _moduleTargets, bridge,
+            slot == 2 ? LocatorFilterNow(_galaxyThisFrame) : default);
         if (notice != ModuleNotice.None)
             _moduleTrack.Note(family, notice);
     }
@@ -249,11 +293,18 @@ internal sealed partial class ScreenHost
         var shown = 0;
         var hovered = -1;
         var hoveredMin = default(float2);
+        var locatorChipMin = default(float2);
+        var locatorChipShown = false;
         for (var slot = 0; slot < 3; slot++)
         {
             if (_moduleGate[slot] == ModuleGate.Absent)
                 continue;
             var min = origin + new float2((width + gap) * shown++, 0);
+            if (slot == 2)
+            {
+                locatorChipMin = min;
+                locatorChipShown = HasAdvancedLocator;
+            }
             ImGui.PushID(slot);
             ImGui.SetCursorScreenPos(min);
             var pressed = ImGui.InvisibleButton("##chip"u8, new float2(width, height));
@@ -267,7 +318,14 @@ internal sealed partial class ScreenHost
             }
 
             if (pressed && Bridge is { } bridge)
-                RequestModule(slot, bridge);
+            {
+                // The advanced locator's chip opens its filter popup, as the DRONES chip opens the drone settings; the
+                // popup's own button pulses with the filter. The basic locator's chip pulses, as it always did.
+                if (slot == 2 && HasAdvancedLocator)
+                    _locatorPopup.Toggle();
+                else
+                    RequestModule(slot, bridge);
+            }
         }
 
         // The bays' chip comes last; a click opens the drone settings popup over it (a click again closes it).
@@ -291,6 +349,8 @@ internal sealed partial class ScreenHost
         ImGui.End();
         if (droneChipShown && _dronePopup.IsOpen)
             DrawDronePopup(snapshot, world, droneChipMin, new float2(width, height));
+        if (_locatorPopup.IsOpen && locatorChipShown)
+            DrawLocatorPopup(snapshot, world, locatorChipMin, new float2(width, height));
         if (hovered >= 0)
             DrawModuleTip(ImGui.GetForegroundDrawList(), hovered, hoveredMin, new float2(width, height), snapshot);
     }
@@ -478,6 +538,175 @@ internal sealed partial class ScreenHost
         if (Kit.Button("Cancel scan"u8, ButtonKind.Secondary, half, active) && Bridge is { } cancelBridge)
             DroneScanUi.CancelIfActive(bays, own, cancelBridge);
         ImGui.End();
+    }
+
+    /// <summary>
+    /// The advanced locator's filter popup, over the LOCATOR chip: a diameter bound on a row each, the ores of the
+    /// galaxy with ALL and NONE, and the pulse button that sends the filter as it stands. It only takes presses while
+    /// the pointer is shown, and a press anywhere else closes it (<see cref="LocatorPopup.Press"/>). Every control
+    /// writes the client's own preference; the server is told the filter with the pulse and nothing else.
+    /// </summary>
+    private void DrawLocatorPopup(SessionSnapshot snapshot, WorldView world, float2 chipMin, float2 chipSize)
+    {
+        var look = ModuleStyle;
+        var figures = look.Filter;
+        var galaxy = snapshot.Galaxy;
+        var resources = Math.Min(galaxy?.Resources.Length ?? 0, LocatorFilter.MaxResources);
+        var pad = Kit.Px(Theme.Space3);
+        var gap = Kit.Px(Theme.Space2);
+        var line = Kit.Px(16);
+        var control = Kit.Px(Theme.ControlHeight);
+        var row = Kit.Px(figures.RowHeight);
+        var width = Kit.Px(figures.Width);
+        var perRow = Math.Max(1, figures.OresPerRow);
+        var oreRows = (resources + perRow - 1) / perRow;
+        var height = pad * 2 + line + gap + control * 2 + gap + control + gap + oreRows * row + gap + control + gap + line;
+        var display = _ui.DisplaySize;
+        var edge = Kit.Px(Theme.Space2);
+        var min = new float2(
+            Math.Clamp(chipMin.X, edge, Math.Max(edge, display.X - width - edge)),
+            Math.Clamp(chipMin.Y - gap - height, edge, Math.Max(edge, display.Y - height - edge)));
+        var size = new float2(width, height);
+
+        var pointer = ImGui.GetMousePos();
+        var overPopup = pointer.X >= min.X && pointer.X < min.X + size.X && pointer.Y >= min.Y && pointer.Y < min.Y + size.Y;
+        var overChip = pointer.X >= chipMin.X && pointer.X < chipMin.X + chipSize.X && pointer.Y >= chipMin.Y && pointer.Y < chipMin.Y + chipSize.Y;
+        _locatorPopup.Press(ImGui.IsMouseClicked(ImGuiMouseButton.Left), overPopup, overChip);
+        if (!_locatorPopup.IsOpen)
+            return;
+
+        ImGui.SetNextWindowPos(min);
+        ImGui.SetNextWindowSize(size);
+        ImGui.Begin("##locatorpopup"u8, RootFlags | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+        RaiseIfAppearing();
+        var draw = ImGui.GetWindowDrawList();
+        Kit.PanelFrame(draw, min, min + size);
+        var inner = size.X - pad * 2;
+        var at = min + new float2(pad, pad);
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, at, Theme.TextMute, "ADVANCED LOCATOR"u8);
+        at.Y += line + gap;
+
+        var filter = LocatorFilterNow(galaxy);
+        var changed = false;
+        DrawLocatorBound("MIN"u8, at, true, filter, figures, ref changed, out filter);
+        at.Y += control;
+        DrawLocatorBound("MAX"u8, at, false, filter, figures, ref changed, out filter);
+        at.Y += control + gap;
+
+        // What is looked for: the shortcuts on their row, each only ores this galaxy has.
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(at.X, at.Y + (control - line) * 0.5f), Theme.TextMute, "LOOK FOR"u8);
+        var half = 62f;
+        ImGui.SetCursorScreenPos(new float2(at.X + inner - Kit.Px(half * 2 + Theme.Space2), at.Y));
+        if (Kit.Button("All"u8, ButtonKind.Secondary, half, galaxy is not null) && galaxy is not null)
+        {
+            filter = LocatorPopup.AllOres(galaxy, filter);
+            changed = true;
+        }
+
+        ImGui.SetCursorScreenPos(new float2(at.X + inner - Kit.Px(half), at.Y));
+        if (Kit.Button("None"u8, ButtonKind.Secondary, half))
+        {
+            filter = LocatorPopup.NoOres(filter);
+            changed = true;
+        }
+
+        at.Y += control + gap;
+        var swatch = Kit.Px(figures.SwatchPixels);
+        var cellWidth = inner / perRow;
+        var oreAt = at;
+        for (var r = 0; r < resources; r++)
+        {
+            var column = r % perRow;
+            if (column == 0 && r > 0)
+                oreAt.Y += row;
+            var cell = new float2(oreAt.X + cellWidth * column, oreAt.Y);
+            ImGui.PushID(r);
+            var resource = galaxy!.Resources[r];
+            // The ore's own colour first, where the galaxy keeps it: the colour its containers wear.
+            var swatchAt = new float2(cell.X, cell.Y + (row - swatch) * 0.5f);
+            draw.AddRectFilled(swatchAt, swatchAt + new float2(swatch, swatch), Kit.Color(StarColor(resource.Color)));
+            ImGui.SetCursorScreenPos(new float2(cell.X + swatch + Kit.Px(Theme.Space1), cell.Y));
+            if (EditorCheckbox("##ore"u8, Kit.F($"{resource.Name}"), new float2(cellWidth - swatch - Kit.Px(Theme.Space1) - Kit.Px(Theme.Space2), row), true, filter.HasOre(r)))
+            {
+                filter = LocatorPopup.ToggleOre(filter, r);
+                changed = true;
+            }
+
+            ImGui.PopID();
+        }
+
+        at.Y += oreRows * row + gap;
+        ImGui.SetCursorScreenPos(at);
+        var gate = _moduleGate[2];
+        if (Kit.Button("Pulse"u8, ButtonKind.Primary, inner / Kit.Scale, gate == ModuleGate.Ready) && Bridge is { } bridge)
+            RequestModule(2, bridge);
+        at.Y += control + gap;
+
+        // What the filter reports, and why the pulse cannot go now. Each figure is built before the line that holds
+        // it: one Kit.F's text is never built inside another's.
+        var range = LocatorPopup.RangeWords(filter);
+        var ores = LocatorPopup.OreWords(filter);
+        var words = Kit.F($"{range}   {ores}");
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, at, Theme.TextDim, words);
+        if (gate != ModuleGate.Ready)
+        {
+            ReadOnlySpan<byte> why = gate switch
+            {
+                ModuleGate.Running => Kit.F($"{ModuleRules.SecondsLeft(snapshot.Modules.Scan, snapshot.ServerTick):0.0} S"),
+                ModuleGate.Cooling => Kit.F($"COOL {ModuleRules.CooldownSeconds(snapshot.Modules.Scan, ModuleFamily.AsteroidLocator, snapshot.ServerTick)} S"),
+                ModuleGate.Waiting => "BUSY"u8,
+                _ => "WAIT"u8,
+            };
+            Kit.Text(draw, _ui.Mono, Theme.FontCaption, new float2(at.X + inner - Kit.Measure(_ui.Mono, Theme.FontCaption, why).X, at.Y), Theme.Accent, why);
+        }
+
+        if (changed)
+            SetLocatorFilter(filter, save: true);
+        ImGui.End();
+    }
+
+    /// <summary>
+    /// One diameter bound of the filter popup: its name, a button each side to step it and what it stands at. A step
+    /// is the client's own figure; the bound never passes the other one, and a bound of zero means "no bound".
+    /// </summary>
+    private void DrawLocatorBound(ReadOnlySpan<byte> name, float2 at, bool min, LocatorFilter filter,
+        in LocatorFilterLook figures, ref bool changed, out LocatorFilter result)
+    {
+        var draw = ImGui.GetWindowDrawList();
+        var row = Kit.Px(Theme.ControlHeight);
+        const float Button = 26f;
+        var nameWidth = Kit.Measure(_ui.SansMedium, Theme.FontCaption, name).X;
+        Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, new float2(at.X, at.Y + (row - Kit.Measure(_ui.SansMedium, Theme.FontCaption, name).Y) * 0.5f), Theme.TextMute, name);
+        var valueX = at.X + nameWidth + Kit.Px(Theme.Space2);
+        var lower = min ? filter.MinMetres > 0 : filter.MaxMetres > filter.MinMetres;
+        ImGui.SetCursorScreenPos(new float2(valueX, at.Y));
+        if (Kit.Button("-"u8, ButtonKind.Secondary, Button, lower))
+        {
+            filter = LocatorPopup.Step(filter, min, -1, figures);
+            changed = true;
+        }
+
+        var readout = min
+            ? (filter.MinMetres == 0 ? "ANY"u8 : Kit.F($"{filter.MinMetres} M"))
+            : (filter.MaxMetres == 0 ? "ANY"u8 : Kit.F($"{filter.MaxMetres} M"));
+        var field = Math.Max(Kit.Px(56), Kit.Measure(_ui.Mono, Theme.FontCaption, "00000 M"u8).X + Kit.Px(Theme.Space2));
+        var fieldAt = new float2(valueX + Kit.Px(Button) + Kit.Px(Theme.Space1), at.Y);
+        draw.AddRectFilled(fieldAt, fieldAt + new float2(field, row), Kit.Color(Theme.Panel, 0.95f));
+        draw.AddRect(fieldAt, fieldAt + new float2(field, row), Kit.Color(Theme.Line, 0.9f));
+        var text = Kit.Measure(_ui.Mono, Theme.FontCaption, readout);
+        Kit.Text(draw, _ui.Mono, Theme.FontCaption, fieldAt + new float2(MathF.Round((field - text.X) * 0.5f), MathF.Round((row - text.Y) * 0.5f)), Theme.Text, readout);
+
+        ImGui.SetCursorScreenPos(new float2(fieldAt.X + field + Kit.Px(Theme.Space1), at.Y));
+        var widest = figures.MaxDiameterMetres;
+        var highest = filter.MaxMetres == 0 ? widest : filter.MaxMetres;
+        var upper = min ? filter.MinMetres < highest : highest < widest;
+        if (Kit.Button("+"u8, ButtonKind.Secondary, Button, upper))
+        {
+            filter = LocatorPopup.Step(filter, min, 1, figures);
+            changed = true;
+        }
+
+        result = filter;
     }
 
     /// <summary>The longest rebuild of the flown hull's bays, in ticks: what the rebuild bar measures against.</summary>
@@ -879,7 +1108,13 @@ internal sealed partial class ScreenHost
             var cls = look.Classes[look.ClassOf(galaxy, record.Resource)];
             var meters = nearestDistance[n];
             var distanceText = meters >= 1000 ? Kit.F($"{meters / 1000:0.0} KM") : Kit.F($"{meters:0} M");
-            var text = Kit.F($"{cls.Label}  {distanceText}");
+            // An advanced locator's pulse reports the rock's radius, which its mark words as the diameter, as every
+            // other readout words a rock. A basic pulse reports none, and its labels stay as they were. The size is
+            // built first: one Kit.F's text is built into the next, never inside it.
+            var size = DiameterWords(record.Radius);
+            var text = size.IsEmpty
+                ? Kit.F($"{cls.Label}  {distanceText}")
+                : Kit.F($"{cls.Label}  {size}  {distanceText}");
             Kit.Text(draw, _ui.Mono, Theme.FontCaption, at + new float2(Kit.Px(field.RingPixels + 4), -Kit.Px(7)), cls.Rgb, text, labelAlpha);
         }
 
@@ -887,6 +1122,12 @@ internal sealed partial class ScreenHost
         if (age <= field.VisionSeconds + field.FadeSeconds && drawn > 0)
             DrawLocatorLegend(draw, alpha * LocatorField.Alpha(true, false, age, field), snapshot);
     }
+
+    /// <summary>
+    /// A rock's size as a locator's mark words it: its diameter in whole metres, from the radius the pulse reported.
+    /// Never a second shape of the figure: the target panel's size reads the same way.
+    /// </summary>
+    internal static ReadOnlySpan<byte> DiameterWords(float radiusMetres) => radiusMetres > 0 ? Kit.F($"{radiusMetres * 2f:0} M") : default;
 
     /// <summary>A single line of the classes with their colours, centred under the top of the view while a pulse shows.</summary>
     private void DrawLocatorLegend(ImDrawListPtr draw, float alpha, SessionSnapshot snapshot)

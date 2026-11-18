@@ -14,6 +14,7 @@ public sealed class ModuleSchemaTests
         root["blocks"]!.AsObject().Remove("gasScanner");
         root["blocks"]!.AsObject().Remove("asteroidScanner");
         root["blocks"]!.AsObject().Remove("asteroidLocator");
+        root["blocks"]!.AsObject().Remove("advancedLocator");
         root["moduleTiers"] = new JsonObject
         {
             [quality] = new JsonObject { ["range"] = 2, ["accuracy"] = 2, ["scanSeconds"] = 0.5, ["powerDraw"] = 1.5, ["cooldownSeconds"] = 0.5 }
@@ -95,6 +96,20 @@ public sealed class ModuleSchemaTests
         var root = Document("gasScanner", "Common", 1);
         root["moduleTiers"]!["Common"]!["accuracy"] = 5;
         Assert.Throws<InvalidDataException>(() => Parse(root));
+    }
+
+    [Fact]
+    public void OnlyALocatorMayCarryTheAdvancedFilter()
+    {
+        var root = Document("asteroidLocator", "Common", 1);
+        root["blocks"]!["hull"]!["module"]!["filter"] = true;
+        Assert.True(Parse(root).Filter);
+        root["blocks"]!["hull"]!["module"]!["filter"] = false;
+        Assert.False(Parse(root).Filter);
+        // A scanner names its target and a gas scan names a cloud: there is nothing for a filter to narrow.
+        var gas = Document("gasScanner", "Common", 1);
+        gas["blocks"]!["hull"]!["module"]!["filter"] = true;
+        Assert.Throws<InvalidDataException>(() => Parse(gas));
     }
 
     [Fact]

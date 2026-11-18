@@ -44,8 +44,11 @@ public sealed class PlayerInputBridge
     public void StartGasScan(SectorCoord anchor) => QueueModuleScan(new(ModuleFamily.GasScanner, anchor));
     /// <summary>Requests analysis of the targeted asteroid's stable sector/index identity.</summary>
     public void StartAsteroidScan(RockRef target) => QueueModuleScan(new(ModuleFamily.AsteroidScanner, target.Sector, target.Index));
-    /// <summary>Requests a locator pulse centered on the controlled hull.</summary>
-    public void PulseAsteroidLocator() => QueueModuleScan(new(ModuleFamily.AsteroidLocator, default));
+    /// <summary>
+    /// Requests a locator pulse centered on the controlled hull, looking for what <paramref name="filter"/> names. A
+    /// basic locator ignores the filter; the server refuses one sent for it.
+    /// </summary>
+    public void PulseAsteroidLocator(LocatorFilter filter = default) => QueueModuleScan(new(ModuleFamily.AsteroidLocator, default, 0, filter));
     private void QueueModuleScan(ModuleScanRequest request)
     { lock (_lock) { _moduleRequest = request; _modulePending = true; } }
     internal bool ConsumeModuleScan(out ModuleScanRequest request)

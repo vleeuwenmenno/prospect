@@ -4257,14 +4257,20 @@ internal sealed partial class WorldView
         if (_captureGhost)
         {
             HoldCaptureGhost();
-            if (_capturePlaceThenSelect && Editor.HasMountGhost && Editor.GhostCheck == DraftEdit.Done)
+            if (_capturePlaceThenSelect && Editor.HasMountGhost)
             {
+                // The click goes through whether or not the part would be placed: a refused placement keeps the ghost
+                // and says why in the details panel, which is what a capture of the one-locator-kind rule shows.
+                var before = Editor.Draft?.Mounts.Length ?? 0;
                 Editor.Click();
                 _capturePlaceThenSelect = false;
-                _captureGhost = false;
-                Editor.StopPlacing();
-                if (Editor.Draft is { } placed)
-                    Editor.SelectMount(placed.Mounts.Length - 1, false);
+                if ((Editor.Draft?.Mounts.Length ?? 0) > before)
+                {
+                    _captureGhost = false;
+                    Editor.StopPlacing();
+                    if (Editor.Draft is { } placed)
+                        Editor.SelectMount(placed.Mounts.Length - 1, false);
+                }
             }
 
             if (_captureRings && !Editor.RotatingPart && GhostRings(out _ringMiddle, out _ringRadius))

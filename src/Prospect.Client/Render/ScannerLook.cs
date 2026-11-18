@@ -37,6 +37,12 @@ internal sealed class ScannerLook
     public int Spikes { get; init; } = 3;
     public float SpikeRadius { get; init; } = 0.07f;
 
+    /// <summary>
+    /// How many concentric rings an array carries on its plate, 1 to 3. The basic locator is one ring of pickets; the
+    /// advanced one adds rings inside it, so the two locators read apart on the same face.
+    /// </summary>
+    public int Rings { get; init; } = 1;
+
     /// <summary>How much of the base and head is paint (the tier's colour) rather than bare metal: the rim's share of the head's radius.</summary>
     public float RimShare { get; init; } = 0.9f;
 
@@ -50,11 +56,11 @@ internal sealed class ScannerLook
     public void Check(string path, string id)
     {
         static bool Share(float v, float low = 0.01f) => v >= low && v <= 1f;
-        if (Shape is not (Dish or Array or Dome) || Sides is < 8 or > 32 || Spikes is < 3 or > 8
+        if (Shape is not (Dish or Array or Dome) || Sides is < 8 or > 32 || Spikes is < 3 or > 8 || Rings is < 1 or > 3
             || !Share(BaseRadius, 0.2f) || !Share(BaseHeight) || !Share(HeadRadius, 0.2f) || !Share(HeadHeight, 0.2f) || !Share(BowlHeight, 0.05f)
             || !Share(StemRadius, 0.02f) || !Share(SpikeRadius, 0.01f) || !Share(RimShare, 0.2f)
             || BaseHeight >= HeadHeight || BowlHeight >= HeadHeight || BowlHeight <= BaseHeight || StemRadius >= HeadRadius
             || !(BaseShade is >= 0 and <= 1) || !(HeadShade is >= 0 and <= 1) || !(DetailShade is >= 0 and <= 1) || !(PortShade is >= 0 and <= 1))
-            throw new InvalidDataException($"{path}: scanner {id} is out of range: shape dish, array or dome; 8 to 32 sides; shares up to 1, with the base under the head and the bowl between them");
+            throw new InvalidDataException($"{path}: scanner {id} is out of range: shape dish, array or dome; 8 to 32 sides; 1 to 3 rings; shares up to 1, with the base under the head and the bowl between them");
     }
 }

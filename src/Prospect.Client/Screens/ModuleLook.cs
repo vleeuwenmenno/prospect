@@ -45,6 +45,9 @@ internal sealed class ModuleLook
     /// <summary>The module strip's figures.</summary>
     public StripLook Strip { get; init; } = new();
 
+    /// <summary>The advanced locator's filter popup: its sizes and the step of its diameter controls.</summary>
+    public LocatorFilterLook Filter { get; init; } = new();
+
     /// <summary>The drone scan panel's and the detailed scan hologram's figures.</summary>
     public DroneScanLook DroneScan { get; init; } = new();
 
@@ -216,6 +219,7 @@ internal sealed class ModuleLook
         if (!(TraceMarkPixels is >= 1 and <= 8) || !(CompositionBarHeight is >= 4 and <= 30) || !(CompositionRowHeight is >= 10 and <= 40) || !(TargetPanelFooter is >= 10 and <= 60))
             throw new InvalidDataException($"{path}: traceMarkPixels is 1 to 8, compositionBarHeight 4 to 30, compositionRowHeight 10 to 40, targetPanelFooter 10 to 60");
         DroneScan.Build(path);
+        Filter.Check(path);
         if (!(UnresolvedPercent is >= 0 and <= 20) || !(TargetPanelUnknownExtra is >= 0 and <= 300))
             throw new InvalidDataException($"{path}: unresolvedPercent is 0 to 20, targetPanelUnknownExtra 0 to 300");
     }
@@ -356,3 +360,41 @@ internal readonly record struct ModuleKind(byte[] Label, uint Rgb);
 
 /// <summary>One locator class: a group of resources the locator can tell apart only this coarsely.</summary>
 internal readonly record struct ModuleClass(string Name, byte[] Label, uint Rgb, bool Bare, string[] Resources);
+
+/// <summary>
+/// The advanced locator's filter popup: how wide it is, how tall its rows are, how far one press of a diameter
+/// control moves the bound, and the widest diameter its controls reach. Client figures only: the server takes the
+/// range and the ores it is sent.
+/// </summary>
+internal sealed class LocatorFilterLook
+{
+    /// <summary>The popup's width, in unscaled pixels.</summary>
+    public float Width { get; init; } = 300f;
+
+    /// <summary>The height of a row of the filter: a diameter control or a row of ores, in unscaled pixels.</summary>
+    public float RowHeight { get; init; } = 22f;
+
+    /// <summary>How much one press of a diameter control adds to or takes from the bound, in metres.</summary>
+    public int StepMetres { get; init; } = 100;
+
+    /// <summary>The widest diameter the controls reach, in metres: a diameter control never steps past it.</summary>
+    public int MaxDiameterMetres { get; init; } = 10000;
+
+    /// <summary>How many ore checkboxes share a row.</summary>
+    public int OresPerRow { get; init; } = 2;
+
+    /// <summary>The width of the square an ore's colour is shown in, in unscaled pixels.</summary>
+    public float SwatchPixels { get; init; } = 10f;
+
+    /// <summary>Refuses figures the popup could not draw.</summary>
+    public void Check(string path)
+    {
+        if (!(Width is >= 200 and <= 640) || !(RowHeight is >= 14 and <= 40) || !(SwatchPixels is >= 4 and <= 24))
+            throw new InvalidDataException($"{path}: locatorFilter width is 200 to 640, rowHeight 14 to 40 and swatchPixels 4 to 24");
+        if (StepMetres is < 1 or > 10000 || MaxDiameterMetres is < 100 or > LocatorFilter.MaxDiameterMetres
+            || MaxDiameterMetres % StepMetres != 0)
+            throw new InvalidDataException($"{path}: locatorFilter stepMetres is 1 to 10000, maxDiameterMetres is 100 to {LocatorFilter.MaxDiameterMetres} and a whole number of steps");
+        if (OresPerRow is < 1 or > 8)
+            throw new InvalidDataException($"{path}: locatorFilter oresPerRow is 1 to 8");
+    }
+}

@@ -200,7 +200,7 @@ internal sealed partial class ScreenHost
             }
 
             if (!ok)
-                PointerNote(EditText(editor.GhostCheck));
+                PointerNote(EditText(editor.GhostCheck), anchor: GhostNoteAt(world, boxes[editor.GhostMount.Parent]));
             else if (left > 0)
                 PointerNote(Kit.F($"{left} mirrored not placed"), Theme.TextDim);
         }
@@ -239,7 +239,7 @@ internal sealed partial class ScreenHost
             if (editor.RotatingPart)
                 DrawRotationRings(draw, world);
             if (!ok)
-                PointerNote(EditText(editor.GhostCheck));
+                PointerNote(EditText(editor.GhostCheck), anchor: GhostNoteAt(world, ghost));
             else if (skippedCopies > 0)
                 PointerNote(Kit.F($"{skippedCopies} mirrored not placed"), Theme.TextDim);
         }
@@ -466,13 +466,26 @@ internal sealed partial class ScreenHost
     }
 
     /// <summary>A short line beside the pointer, on a dark backing: red by default, for a refusal.</summary>
-    private void PointerNote(ReadOnlySpan<byte> text, uint tone = Theme.Bad, float lift = 0f)
+    private void PointerNote(ReadOnlySpan<byte> text, uint tone = Theme.Bad, float lift = 0f, float2? anchor = null)
     {
         var draw = ImGui.GetForegroundDrawList();
-        var at = _app.Devices.MousePosition + new float2(Kit.Px(16), Kit.Px(12) + lift);
+        var at = anchor ?? _app.Devices.MousePosition + new float2(Kit.Px(16), Kit.Px(12) + lift);
         var size = Kit.Measure(_ui.SansMedium, Theme.FontCaption, text);
         draw.AddRectFilled(at - new float2(Kit.Px(4), Kit.Px(2)), at + size + new float2(Kit.Px(4), Kit.Px(2)), Kit.Color(Theme.Void, 0.8f));
         Kit.Text(draw, _ui.SansMedium, Theme.FontCaption, at, tone, text);
+    }
+
+    /// <summary>
+    /// Where a note about the held part goes: beside the pointer, as it always does. A scripted run mutes every device,
+    /// so the pointer never moves and the note would sit in the window's corner; there it goes beside the part itself,
+    /// which is where a player's pointer would be. Null when the part is not in front of the camera.
+    /// </summary>
+    private float2? GhostNoteAt(WorldView world, in DesignBox box)
+    {
+        if (!_app.Devices.Muted)
+            return null;
+        var middle = new Vector3(box.At.X - 0.5f, box.At.Y - 0.5f, box.At.Z - 0.5f) + new Vector3(box.Size.X, box.Size.Y, box.Size.Z) * 0.5f;
+        return world.Project(world.EditorPoint(middle), out var at) ? at + new float2(Kit.Px(10), Kit.Px(8)) : null;
     }
 
     /// <summary>
@@ -2010,6 +2023,7 @@ internal sealed partial class ScreenHost
         DraftEdit.TooManyBlocks => "The ship has as many blocks as a design may have."u8,
         DraftEdit.NoSuchBlock => "That block is gone."u8,
         DraftEdit.MixedDrives => "The ship has another kind of FTL drive; a ship takes one kind."u8,
+        DraftEdit.MixedLocators => "The ship carries locators of one kind. The advanced locator replaces the basic ones, or takes their place."u8,
         DraftEdit.OffFace => "It does not fit there: a thruster mounts on a whole flat face."u8,
         DraftEdit.TooManyMounts => "The ship has as many mounted parts as a design may have."u8,
         DraftEdit.WrongKind => "That part mounts on a face; it is not a block."u8,

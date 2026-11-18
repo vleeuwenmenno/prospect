@@ -6,7 +6,7 @@ namespace Prospect.Game.Protocol;
 /// <summary>Bounded reliable module intents and owner-only observations.</summary>
 public static class ModuleMessage
 {
-    public const int RequestWireSize = 18;
+    public const int RequestWireSize = 26;
     public const int ObservationWireSize = 131;
     public const int MaxObservations = 8;
     public const int HeaderWireSize = 95;
@@ -16,14 +16,22 @@ public static class ModuleMessage
     {
         writer.WriteByte((byte)MessageId.ModuleScan);
         writer.WriteByte((byte)request.Family); Sector(ref writer, request.Sector); writer.WriteInt32(request.Index);
+        // What an advanced locator's pulse looks for: a diameter range in whole metres and one bit a resource. Zeros
+        // are the empty filter, which is no narrowing at all; the server refuses a filter its own locator cannot take,
+        // since only it knows which kind the ship carries.
+        writer.WriteUInt16(request.Filter.MinMetres); writer.WriteUInt16(request.Filter.MaxMetres); writer.WriteUInt32(request.Filter.Ores);
     }
 
     public static bool ReadRequest(ref NetReader reader, out ModuleScanRequest request)
     {
-        request = new((ModuleFamily)reader.ReadByte(), Sector(ref reader), reader.ReadInt32());
+        request = new((ModuleFamily)reader.ReadByte(), Sector(ref reader), reader.ReadInt32(),
+            new LocatorFilter(reader.ReadUInt16(), reader.ReadUInt16(), reader.ReadUInt32()));
         return reader.IsValid && reader.Remaining == 0 && request.Family is >= ModuleFamily.GasScanner and <= ModuleFamily.AsteroidLocator
             && request.Index >= 0 && (request.Family == ModuleFamily.AsteroidScanner || request.Index == 0)
-            && (request.Family != ModuleFamily.AsteroidLocator || request.Sector == default);
+            && (request.Family != ModuleFamily.AsteroidLocator || request.Sector == default)
+            // The range must be the right way round; whether a filter may be sent at all is the server's to decide,
+            // since only it knows which locator the ship carries.
+            && request.Filter.MinMetres <= (request.Filter.MaxMetres == 0 ? LocatorFilter.MaxDiameterMetres : request.Filter.MaxMetres);
     }
 
     public static void Write(ref NetWriter writer, in ModuleScanView scan, scoped ReadOnlySpan<ModuleObservation> records)

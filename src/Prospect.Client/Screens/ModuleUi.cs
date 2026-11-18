@@ -201,8 +201,11 @@ internal static class ModuleRules
     /// <summary>
     /// Sends the request a pressed module key or a clicked chip stands for. Only a ready module asks; a known no is
     /// said on the chip instead and returns its notice so the chip can show it. Nothing for a ship without the module.
+    /// A locator pulse carries <paramref name="filter"/>, the player's own; the server refuses one its locator cannot
+    /// take.
     /// </summary>
-    public static ModuleNotice Request(ModuleFamily family, ModuleGate gate, in ModuleTargets targets, PlayerInputBridge bridge)
+    public static ModuleNotice Request(ModuleFamily family, ModuleGate gate, in ModuleTargets targets, PlayerInputBridge bridge,
+        LocatorFilter filter = default)
     {
         if (gate == ModuleGate.Ready)
         {
@@ -215,7 +218,7 @@ internal static class ModuleRules
                     bridge.StartAsteroidScan(targets.Rock!.Value);
                     break;
                 default:
-                    bridge.PulseAsteroidLocator();
+                    bridge.PulseAsteroidLocator(filter);
                     break;
             }
 

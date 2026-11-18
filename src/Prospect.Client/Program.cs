@@ -242,7 +242,7 @@ internal static class Program
                 case "--rock-interior-resource" when hasValue:
                     options.RockInteriorResource = args[++i];
                     break;
-                case "--open" when hasValue && args[i + 1] is "rock-interior" or "exhaust-rock" or "rock-scrape" or "laser" or "laser-command" or "ore" or "action-groups" or "action-groups-popup" or "exhaust-shield" or "exhaust-shield-cold" or "command" or "drone" or "map" or "map-ftl" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "edit-drone" or "edit-fill" or "edit-fill-done" or "edit-turn" or "edit-rings" or "edit-ion" or "edit-tank" or "edit-cargo" or "cargo" or "edit-rack" or "edit-tank-long" or "edit-tank-slab" or "edit-tank-fuel" or "edit-palette-tip" or "edit-scanner" or "edit-bay" or "drones" or "drone-scan" or "edit-mount" or "edit-laser" or "edit-laser-group" or "edit-mirror" or "edit-box-select" or "edit-select-all" or "edit-menu" or "edit-resize" or "edit-dump" or "edit-discard" or "edit-save" or "edit-load" or "edit-load-confirm" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "cargo-window" or "modules" or "module-command" or "gas" or "pinned-gas" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
+                case "--open" when hasValue && args[i + 1] is "rock-interior" or "exhaust-rock" or "rock-scrape" or "laser" or "laser-command" or "ore" or "action-groups" or "action-groups-popup" or "locator-popup" or "exhaust-shield" or "exhaust-shield-cold" or "command" or "drone" or "map" or "map-ftl" or "map-menu" or "map-hover" or "map-card" or "map-card-near" or "map-card-far" or "map-tilt" or "map-reach" or "map-reach-tilt" or "scan" or "command-fog" or "command-fog-one" or "command-fog-pair" or "command-fog-far" or "command-menu" or "command-menu-fleet" or "command-menu-close" or "command-menu-far" or "info" or "galaxy" or "jump" or "jump-wormhole" or "jump-rift" or "jump-fleet" or "jump-fleet-ahead" or "world-settings" or "menu" or "controls" or "players" or "social" or "friends" or "chat" or "hud" or "edit" or "edit-drone" or "edit-fill" or "edit-fill-done" or "edit-turn" or "edit-rings" or "edit-ion" or "edit-tank" or "edit-cargo" or "cargo" or "edit-rack" or "edit-tank-long" or "edit-tank-slab" or "edit-tank-fuel" or "edit-advanced-locator" or "edit-palette-tip" or "edit-scanner" or "edit-bay" or "drones" or "drone-scan" or "edit-mount" or "edit-laser" or "edit-laser-group" or "edit-mirror" or "edit-box-select" or "edit-select-all" or "edit-menu" or "edit-resize" or "edit-dump" or "edit-discard" or "edit-save" or "edit-load" or "edit-load-confirm" or "new-ship" or "new-ship-refused" or "new-ship-editor" or "new-ship-closed" or "scan-pilot" or "scan-command" or "interface" or "charts" or "pinned-charts" or "cargo-window" or "modules" or "module-command" or "gas" or "pinned-gas" or "leave" or "delete-world" or "delete-incompatible" or "deleted-incompatible":
                     options.OpenView = args[++i];
                     break;
                 case "--browser-sample" when hasValue:
@@ -501,6 +501,16 @@ internal static class Program
                 case "--drone-popup":
                     options.DronePopup = true;
                     break;
+                case "--locator-ores" when hasValue:
+                    options.LocatorOres = args[++i];
+                    break;
+                case "--locator-diameter" when hasValue && args[i + 1].Split(',') is { Length: 2 } halves
+                    && int.TryParse(halves[0], out var locatorMin) && int.TryParse(halves[1], out var locatorMax)
+                    && locatorMin is >= 0 and <= ushort.MaxValue && locatorMax is >= 0 and <= ushort.MaxValue && locatorMin <= (locatorMax == 0 ? ushort.MaxValue : locatorMax):
+                    options.LocatorMinMetres = locatorMin;
+                    options.LocatorMaxMetres = locatorMax;
+                    i++;
+                    break;
                 case "--jettison" when hasValue && float.TryParse(args[i + 1], out var jettisonAt) && jettisonAt is >= 4f and <= 600f:
                     options.JettisonSeconds = jettisonAt;
                     i++;
@@ -733,6 +743,10 @@ internal static class Program
 
         if (options.DronePopup && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--drone-popup works only with --capture or --bench.");
+
+        if ((options.LocatorOres is not null || options.LocatorMinMetres is not null)
+            && options.CapturePath is null && options.BenchSeconds <= 0)
+            return Fail("--locator-ores and --locator-diameter work only with --capture or --bench.");
 
         if (options.OreSheet && options.CapturePath is null && options.BenchSeconds <= 0)
             return Fail("--ore-sheet works only with --capture or --bench.");

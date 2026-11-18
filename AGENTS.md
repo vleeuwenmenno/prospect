@@ -933,6 +933,32 @@ scenario run with `Run`, `Start` and `Stop`. `TEST_ENV` in the Makefile keeps co
   hold it. Check with `--open modules|gas|module-command`, `--target-rock`, `--module`
   on the shipped ship, which carries two of each scanner (`tools/prepare_scan_bench.py` makes a copy with short scans,
   and `--open edit-scanner` holds a scanner's mount ghost on a face).
+- **The advanced locator:** the second locator part, a face mount of the same `asteroidLocator` family with
+  `"filter": true` and variant `advanced` in `blocks.json` (`ModuleSpec.Filter`, `ModuleEquipment.Filter`), so
+  cooldowns, chips, `HullStats.Module` and the equipment selection stay one locator.
+  - One kind a ship: `BoxDesign.RequireOneLocatorKind` (beside the one drive kind) is the one rule, asked by design
+    files (`BoxDesign.Parse`), by `DesignBytes.Decode` and by the draft's `Export`; the draft answers
+    `DraftEdit.MixedLocators` from `CanAddMount`, from a paste and from a loaded design that carries both. Several of
+    one kind stay allowed.
+  - The filter is `LocatorFilter` (shared, font-free): a smallest and a largest diameter in whole metres and one bit a
+    resource. A zero diameter is no bound; an empty mask is no ore narrowing (bare rock included), and with bits set
+    only those mains are reported. `Valid` refuses bits this galaxy has not. It is a client preference
+    (`ClientSettings.LocatorFilter`, sent with each pulse) and no server keeps it.
+  - Wire: protocol 77, `ModuleScan` (33) 26 bytes: the two diameters and the mask after the family and the target. The
+    reader refuses a range the wrong way round; `StartModuleScan` refuses a filter for a locator without one or for an
+    ore this galaxy lacks as `InvalidTarget`, before dispatch and before any cooldown. `ModuleSurveyWorker` applies it
+    in the locator's candidate loop, before the 256-place limit.
+  - `ModuleScanRules.Disclose` keeps the radius for an advanced pulse and zeroes it for a basic one;
+    `ModuleObservationRules.Valid` holds a locator record to no mass, grade or mix-in and to any radius, so a save may
+    keep one (save layout unchanged). `DrawLocatorVision` words the diameter (`ScreenHost.DiameterWords`).
+  - Interface: an advanced locator's chip opens `LocatorPopup` over it (Escape, `BackStep.LocatorPopup`) with the two
+    diameter steps, every resource as a checkbox in its colour, All and None, and the pulse button; the key pulses with
+    the filter. Figures are `locatorFilter` in `visuals/modules.json` (`LocatorFilterLook`); the part's look is a
+    two-ring array (`ScannerLook.Rings`).
+  - Tests: `AdvancedLocatorTests`. Check with `tools/prepare_locator_capture.py`, then `--open locator-popup`,
+    `--module locator --locator-ores <ids|all|none> --locator-diameter <min>,<max>`, and on the shipped build
+    `--open edit-advanced-locator` (the ghost is refused on a ship that carries basic locators).
+
 - **Action groups (interface):** the strip above the console shows only groups the flown hull has a part in.
   - State is `ActionGroupStrip` (font-free, no memory): cells in key order (1 to 9, then 0), on, firing, cutting.
     It reads `SessionSnapshot.GroupOf` (override else design), `WorldView.ActionGroupsOn`/`LasersFiring` and `LaserBeams`.
