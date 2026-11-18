@@ -138,7 +138,6 @@ internal sealed partial class WorldView
     public (int Built, double Milliseconds, int Vertices) RockPatchWork => (_rockPatches.Built, _rockPatches.LastBuildMs, _rockPatches.LastVertices);
     // Models of single thrust parts, for the editor's draft and ghost and for far hulls drawn block by block.
     private readonly PartModels _partModels;
-    private readonly RackDeck _rackDecks = new();
 
     /// <summary>Enables sample cargo solely for a scripted editor capture.</summary>
     public void PreviewCargo() => _partModels.PreviewCargo();
@@ -845,6 +844,7 @@ internal sealed partial class WorldView
             _damage.Clear();
             _sparks.Clear();
             _freeVisuals.Clear();
+            _cargoMotion.Clear();
             _oreVisuals.Clear();
             TargetContainer = 0;
             _thrust.Clear();
@@ -887,6 +887,7 @@ internal sealed partial class WorldView
         // their own jump from inside until the command view has mostly taken over.
         _ownInside = _commandBlend < 0.5f;
         _visuals.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, alpha, dt, _ownInside, FtlPreview);
+        UpdateCargoMotion(snapshot);
         _scanPulse.Observe(snapshot.Exploration.Scan, OwnPosition, dt);
         _shields.Update(snapshot.Hulls.AsSpan(0, snapshot.HullCount), _designs, snapshot.PublishedAt, dt, this);
 
@@ -1269,6 +1270,7 @@ internal sealed partial class WorldView
         _partModels.Begin();
         BeginTurrets(time);
         _scene.BeginDamage();
+        _cargoHoldDrawn = false;
         VisibleHulls = DrawnDents = DamageFallbacks = GeneratedRocks = VisibleRocks = 0;
         foreach (var slot in _slots)
             if (slot.State == SectorSlot.Ready && ReferenceEquals(slot.Galaxy, galaxy)) GeneratedRocks += slot.Content.AsteroidCount;
@@ -1332,7 +1334,7 @@ internal sealed partial class WorldView
             // The pilot's own hull inside its jump takes no slot: its opening is cut from the frame's own jump.
             VisibleHulls++;
             var material = Material(visual.Inside, visual.Inside ? -1 : visual.Clip);
-            DrawCargo(frameIndex, design, hull.Cargo.Span, position, orientation, material, stretch);
+            DrawCargo(frameIndex, hull, design, camera, position, orientation, material, stretch);
             DrawTractorTurrets(frameIndex, snapshot, hull, design, camera, position, orientation, material, stretch);
             DrawLaserTurrets(frameIndex, snapshot, hull, design, position, orientation, material, stretch);
             // The shield goes where the hull goes, drawn out and cut with it by the same material.
@@ -1373,7 +1375,7 @@ internal sealed partial class WorldView
                     continue;
                 var block = design.BlockOffsets[b];
                 block.Z *= stretch;
-                if (_partModels.TryGet(design.Types[b], design.Shapes[b], design.BlockHalfExtents[b], design.Types[b].Cargo > 0 ? RackDeck.Of(design, b) : design.Boxes[b].Facing, design.BlockSize, out var model)
+                if (_partModels.TryGet(design.Types[b], design.Shapes[b], design.BlockHalfExtents[b], design.Boxes[b].Facing, design.BlockSize, out var model)
                     && _scene.AddTriangles(frameIndex, model, MeshTransform(position + Vector3.Transform(block, orientation), orientation, Vector3.One, design.Color, material, stretch)))
                     continue;
                 Add(ref candidateCount, _cubeMesh + (int)design.Shapes[b], position + Vector3.Transform(block, orientation), orientation, design.BlockHalfExtents[b] * 2f, design.Color, material, stretch);
@@ -3885,6 +3887,11 @@ internal sealed partial class WorldView
     private static readonly (int Size, int Resource)[] WideSamples = [(2, 0), (1, 1), (0, 2), (0, 3), (0, 4), (0, 5), (1, 6), (1, -1)];
     private void RunCargoCapture(PlayerInputBridge bridge, float dt)
     {
+        if (_captureCargoMode == 4)
+        {
+            RunJettisonCapture(bridge, dt);
+            return;
+        }
         if (!Editor.CanEdit || Editor.Draft is not { } draft) return;
         if (_captureCargoClock == 0)
         {
@@ -3903,20 +3910,6 @@ internal sealed partial class WorldView
             var (size, resource) = CaptureCargoWide ? WideSamples[_captureCargoSent] : _captureCargoSent == 0 ? (2, 0) : _captureCargoSent == 2 ? (1, -1) : (1, 1);
             if (Editor.RequestContainer(bridge, size, resource)) _captureCargoSent++;
         }
-        // Wide runs jettison several, half a second apart, so loose containers of different resources are in view.
-        var toJettison = CaptureCargoWide ? 4 : 1;
-        if (CaptureJettisonSeconds is { } at && !_captureJettisonSent && _captureCargoClock >= at + _captureJettisonCount * .5f
-            && _snapshot is { OwnHull: >= 0 } snapshot && Editor.DraftCargo.Length == samples - _captureJettisonCount)
-        {
-            var hold = snapshot.Hulls[snapshot.OwnHull].Cargo.Span;
-            for (var i = 0; i < hold.Length; i++)
-            {
-                if (hold[i].Rack != Editor.SelectedCargoRack) continue;
-                bridge.JettisonContainer(Editor.Token, Editor.Hull, hold[i].Rack, i, snapshot.OwnCargoTick);
-                _captureJettisonSent = ++_captureJettisonCount >= toJettison;
-                break;
-            }
-        }
         if (_captureCargoMode == 3 && _captureCargoClock > 3 && Editor.DraftCargo.Length == CaptureCargoCount)
         {
             Editor.Cancel(bridge);
@@ -3924,12 +3917,12 @@ internal sealed partial class WorldView
             _cargoWindowReady = true;
             return;
         }
-        if (_captureCargoMode == 2 && _captureCargoClock > 4
-            && (CaptureJettisonSeconds is null ? Editor.DraftCargo.Length == CaptureCargoCount : _captureJettisonSent && _snapshot!.FreeContainerCount > 0))
+        if (_captureCargoMode == 2 && _captureCargoClock > 4 && Editor.DraftCargo.Length == CaptureCargoCount)
         {
-            if (CaptureJettisonSeconds is not null) TargetContainer = _snapshot!.FreeContainers[0].Id;
+            // A release goes through the flight path, as the Cargo window's does, so the container is seen leaving the rack.
+            _captureJettisonRack = Editor.SelectedCargoRack;
             Editor.Cancel(bridge);
-            _captureCargoMode = 0;
+            _captureCargoMode = CaptureJettisonSeconds is null ? 0 : 4;
             if (LookDegrees is null)
             {
                 SetCommandCapturePose(OwnPosition, 25, -.75f, -.8f);
@@ -3937,6 +3930,34 @@ internal sealed partial class WorldView
                 _commandDistance = CaptureCargoDistance ?? (CaptureCargoSpace ? 30f : 12f);
             }
             ClearSelection();
+        }
+    }
+
+    private int _captureJettisonRack = -1;
+
+    // The release of a cargo capture (--jettison), in flight with the editor closed: one container of the rack the
+    // editor had selected (wide runs: several, half a second apart), then the first loose one is targeted.
+    private void RunJettisonCapture(PlayerInputBridge bridge, float dt)
+    {
+        _captureCargoClock += dt;
+        if (CaptureJettisonSeconds is not { } at || _snapshot is not { OwnHull: >= 0 } snapshot) return;
+        var toJettison = CaptureCargoWide ? 4 : 1;
+        ref readonly var own = ref snapshot.Hulls[snapshot.OwnHull];
+        var hold = own.Cargo.Span;
+        if (!_captureJettisonSent && _captureCargoClock >= at + _captureJettisonCount * .5f && hold.Length == CaptureCargoCount - _captureJettisonCount)
+        {
+            for (var i = 0; i < hold.Length; i++)
+            {
+                if (hold[i].Rack != _captureJettisonRack) continue;
+                bridge.JettisonCargo(own.Id, hold[i].Rack, i, snapshot.OwnCargoTick, Prospect.Game.Protocol.JettisonMode.Abandon);
+                _captureJettisonSent = ++_captureJettisonCount >= toJettison;
+                break;
+            }
+        }
+        if (_captureJettisonSent && snapshot.FreeContainerCount > 0)
+        {
+            TargetContainer = snapshot.FreeContainers[0].Id;
+            _captureCargoMode = 0;
         }
     }
 
@@ -5210,21 +5231,6 @@ internal sealed partial class WorldView
         }
     }
 
-    private void DrawCargo(int frameIndex, HullDesign design, ReadOnlySpan<HoldContainer> cargo,
-        Vector3 position, Quaternion orientation, float material, float stretch)
-    {
-        var catalog = PropulsionLook.Shared.Cargo;
-        foreach (var container in cargo)
-        {
-            if (!_partModels.TryGetContainer(container.Size, container.Resource, out var mesh)) continue;
-            var offset = CargoSlots.Centre(design, catalog, container);
-            offset.Z *= stretch;
-            var at = MeshTransform(position + Vector3.Transform(offset, orientation), orientation, Vector3.One, design.Color, material, stretch);
-            _scene.AddTriangles(frameIndex, mesh, at);
-            if (_partModels.TryGetClamp(container.Size, RackDeck.Of(design, container.Rack), out var clamp))
-                _scene.AddTriangles(frameIndex, clamp, at);
-        }
-    }
 
     /// <summary>Adds the draft's blocks in their own shapes where the hull is, each tinted for its role.</summary>
     private void AddDraft(ref int count, int frameIndex, BuildDraft draft, HullDesign source, Double3 camera)
@@ -5244,8 +5250,12 @@ internal sealed partial class WorldView
             var offset = corner + new Vector3(container.At.X + shape.X * .5f, container.At.Y + shape.Y * .5f, container.At.Z + shape.Z * .5f) * catalog.UnitSize;
             var held = MeshTransform(hull + Vector3.Transform(offset, orientation), orientation, Vector3.One, source.Color, material, 1);
             _scene.AddTriangles(frameIndex, mesh, held);
-            if (_partModels.TryGetClamp(container.Size, _rackDecks.Of(draft, container.Rack), out var clamp))
+            if (_partModels.TryGetClamp(container.Size, Facings.Opposite(box.Facing), out var clamp, out var lights))
+            {
                 _scene.AddTriangles(frameIndex, clamp, held);
+                _scene.AddTriangles(frameIndex, lights, MeshTransform(hull + Vector3.Transform(offset, orientation), orientation, Vector3.One,
+                    _cargoMotion.Light(CargoStage.Stored, double.PositiveInfinity), MaterialLight, 1));
+            }
         }
         for (var i = 0; i < boxes.Length && count < _candidates.Length; i++)
         {
@@ -5267,7 +5277,7 @@ internal sealed partial class WorldView
                 color = Vector3.Lerp(color, new Vector3(0.6f, 0.8f, 1f), 0.4f);
             var at = hull + Vector3.Transform(middle, orientation);
             // A thrust part or a tank shows its model, as the ship will; its plain block only until the model is built.
-            if (_partModels.TryGet(box.Type, box.Shape, size * 0.5f, box.Type.Cargo > 0 ? _rackDecks.Of(draft, i) : box.Facing, source.BlockSize, out var model)
+            if (_partModels.TryGet(box.Type, box.Shape, size * 0.5f, box.Facing, source.BlockSize, out var model)
                 && _scene.AddTriangles(frameIndex, model, MeshTransform(at, orientation, Vector3.One, color, material, 1f)))
                 continue;
             Add(ref count, _cubeMesh + (int)box.Shape, at, orientation, size, color, material);
@@ -5330,8 +5340,7 @@ internal sealed partial class WorldView
         var type = content.Blocks.Types[Editor.Part];
         var size = Editor.PartSize;
         var half = new Vector3(size.X, size.Y, size.Z) * (0.5f * source.BlockSize);
-        var draftBoxes = Editor.Draft is { } ghostDraft ? ghostDraft.Boxes : ReadOnlySpan<DesignBox>.Empty;
-        if (!_partModels.TryGet(type, Editor.PartShape, half, type.Cargo > 0 ? RackDeck.Choose(RackDeck.Touched(draftBoxes, -1, Editor.GhostAt, size)) : Editor.GhostFacing, source.BlockSize, out var model))
+        if (!_partModels.TryGet(type, Editor.PartShape, half, Editor.GhostFacing, source.BlockSize, out var model))
             return;
         GhostPose(out var turn, out var shift);
         var at = Editor.GhostAt;
@@ -5347,7 +5356,7 @@ internal sealed partial class WorldView
         {
             var copy = boxes[i];
             var extent = new Vector3(copy.Size.X, copy.Size.Y, copy.Size.Z);
-            if (!_partModels.TryGet(type, copy.Shape, extent * (0.5f * source.BlockSize), type.Cargo > 0 ? RackDeck.Choose(RackDeck.Touched(draftBoxes, -1, copy.At, copy.Size)) : copy.Facing, source.BlockSize, out var copyModel))
+            if (!_partModels.TryGet(type, copy.Shape, extent * (0.5f * source.BlockSize), copy.Facing, source.BlockSize, out var copyModel))
                 continue;
             var centre = new Vector3(copy.At.X - 0.5f, copy.At.Y - 0.5f, copy.At.Z - 0.5f) + extent * 0.5f;
             var place = hull + Vector3.Transform(EditorGeometry.ToHull(centre, source.Pivot, source.BlockSize), orientation);

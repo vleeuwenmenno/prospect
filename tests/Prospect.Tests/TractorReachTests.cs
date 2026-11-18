@@ -7,8 +7,9 @@ namespace Prospect.Tests;
 public sealed class TractorReachTests
 {
     private static readonly GameContent Content = GameContent.Load();
-    private static DesignBox Box(string type, int x, int y, int z) => new(new(x, y, z), new(1, 1, 1), Content.Blocks.Get(type));
-    private static readonly DesignBox[] Boxes = [Box("core", 0, 0, 0), Box("cargo", 2, 1, 0)];
+    private static DesignBox Box(string type, int x, int y, int z, BlockFacing facing = BlockFacing.Back) =>
+        new(new(x, y, z), new(1, 1, 1), Content.Blocks.Get(type), BlockShape.Box, facing);
+    private static readonly DesignBox[] Boxes = [Box("core", 0, 0, 0), Box("cargo", 2, 1, 0, BlockFacing.Left)];
     private static readonly DesignMount[] Mounts = [new(0, BlockFacing.Up, 2, 2, Content.Blocks.Get("tractorBeam"))];
 
     [Fact]
@@ -53,8 +54,30 @@ public sealed class TractorReachTests
         Assert.False(TractorReach.Rack(Boxes, mounts, [], 1, 0, 1, out _, out _));
     }
 
-    private static DesignBox Sized(string type, int x, int y, int z, int sx, int sy, int sz) =>
-        new(new(x, y, z), new(sx, sy, sz), Content.Blocks.Get(type));
+    private static DesignBox Sized(string type, int x, int y, int z, int sx, int sy, int sz, BlockFacing facing = BlockFacing.Back) =>
+        new(new(x, y, z), new(sx, sy, sz), Content.Blocks.Get(type), BlockShape.Box, facing);
+
+    [Fact]
+    public void ARackIsInViewOnlyThroughItsOneOpenFace()
+    {
+        // The mount on the core's top sees the rack's left face; with the opening anywhere else the rack is out of
+        // view, however open that face would have been when every unplated side was an entrance.
+        foreach (var facing in Enum.GetValues<BlockFacing>())
+        {
+            DesignBox[] boxes = [Box("core", 0, 0, 0), Box("cargo", 2, 1, 0, facing)];
+            var reached = TractorReach.Rack(boxes, Mounts, [], 1, 0, 1, out _, out var side);
+            Assert.Equal(facing == BlockFacing.Left, reached);
+            if (reached) Assert.Equal(facing, side);
+        }
+        // The guide stages outside that face and glides in along its normal.
+        var design = TestDesigns.Mounted([Box("core", 0, 0, 0), Box("cargo", 2, 1, 0, BlockFacing.Left)], [.. Mounts]);
+        Assert.True(TractorPath.TryGuide(Content.Cargo, design, design.FullSet, 0, 1, 0, [], new byte[64], out var guide));
+        var face = TractorReach.Middle(design.Boxes[1], 1).X - .5f;
+        Assert.True(guide.Staging.X < face - guide.Half.X);
+        Assert.True(guide.Slot.X > face);
+        Assert.Equal(guide.Slot.Y, guide.Staging.Y, 4);
+        Assert.Equal(guide.Slot.Z, guide.Staging.Z, 4);
+    }
 
     private static bool Reaches(DesignBox[] boxes, int rack, out Vector3 point, out BlockFacing side) =>
         TractorReach.Rack(boxes, Mounts, [], 1, 0, rack, out point, out side);
@@ -63,7 +86,7 @@ public sealed class TractorReachTests
     public void AdjacentRackStraddlingTheFacePlaneIsInView()
     {
         // The rack's side face centre lies below the mount's face plane, but its upper half is in view.
-        DesignBox[] boxes = [Box("core", 0, 0, 0), Sized("cargo", 1, -1, 0, 1, 3, 1)];
+        DesignBox[] boxes = [Box("core", 0, 0, 0), Sized("cargo", 1, -1, 0, 1, 3, 1, BlockFacing.Left)];
         Assert.True(Reaches(boxes, 1, out var point, out var side));
         Assert.Equal(BlockFacing.Left, side);
         Assert.True(point.Y >= 1f);
@@ -73,24 +96,28 @@ public sealed class TractorReachTests
     [Fact]
     public void DiagonalAndLongRacksAreInView()
     {
-        Assert.True(Reaches([Box("core", 0, 0, 0), Box("cargo", 1, 1, 1)], 1, out _, out _));
-        Assert.True(Reaches([Box("core", 0, 0, 0), Sized("cargo", 1, 1, 0, 3, 1, 1)], 1, out _, out _));
-        Assert.True(Reaches([Box("core", 0, 0, 0), Sized("cargo", -3, 1, 0, 3, 1, 1)], 1, out _, out _));
-        Assert.True(Reaches([Box("core", 0, 0, 0), Sized("cargo", 0, 1, 1, 1, 1, 3)], 1, out _, out _));
+        Assert.True(Reaches([Box("core", 0, 0, 0), Box("cargo", 1, 1, 1, BlockFacing.Left)], 1, out _, out _));
+        Assert.True(Reaches([Box("core", 0, 0, 0), Box("cargo", 1, 1, 1, BlockFacing.Front)], 1, out _, out _));
+        Assert.True(Reaches([Box("core", 0, 0, 0), Sized("cargo", 1, 1, 0, 3, 1, 1, BlockFacing.Left)], 1, out _, out _));
+        Assert.True(Reaches([Box("core", 0, 0, 0), Sized("cargo", -3, 1, 0, 3, 1, 1, BlockFacing.Right)], 1, out _, out _));
+        Assert.True(Reaches([Box("core", 0, 0, 0), Sized("cargo", 0, 1, 1, 1, 1, 3, BlockFacing.Front)], 1, out _, out _));
     }
 
     [Fact]
     public void RackBehindTheFacePlaneIsNotInView()
     {
-        Assert.False(Reaches([Box("core", 0, 0, 0), Box("cargo", 0, -2, 0)], 1, out _, out _));
-        Assert.False(Reaches([Box("core", 0, 0, 0), Box("cargo", 1, -2, 0)], 1, out _, out _));
-        Assert.False(Reaches([Box("core", 0, 0, 0), Sized("cargo", 1, -4, 0, 1, 3, 1)], 1, out _, out _));
+        foreach (var facing in Enum.GetValues<BlockFacing>())
+        {
+            Assert.False(Reaches([Box("core", 0, 0, 0), Box("cargo", 0, -2, 0, facing)], 1, out _, out _));
+            Assert.False(Reaches([Box("core", 0, 0, 0), Box("cargo", 1, -2, 0, facing)], 1, out _, out _));
+            Assert.False(Reaches([Box("core", 0, 0, 0), Sized("cargo", 1, -4, 0, 1, 3, 1, facing)], 1, out _, out _));
+        }
     }
 
     [Fact]
     public void BlockedRacksNeedAnotherClearView()
     {
-        DesignBox[] straddling = [Box("core", 0, 0, 0), Sized("cargo", 1, -1, 0, 1, 3, 1)];
+        DesignBox[] straddling = [Box("core", 0, 0, 0), Sized("cargo", 1, -1, 0, 1, 3, 1, BlockFacing.Left)];
         // A block over the only face in view hides the rack.
         Assert.False(Reaches([.. straddling, Box("hull", 0, 1, 0)], 1, out _, out _));
     }

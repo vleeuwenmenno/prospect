@@ -35,17 +35,28 @@ Temporary local debug loading is available. Mining output is not built.
 
 ### Racks
 
-- The cargo block becomes a rack: a loading deck, not a frame. Visual only; collision, shield, picking and tractor reach stay block-based.
-- The deck is a solid plate on one face. Every other side is open, so tractors see in and it reads as a loading bay.
-- Which face: the face that touches the hull. With several, the -Y face if it is one of them, else the lowest face. With none, -Y.
-  The same rule (`RackDeck`) serves hull meshes, the editor's draft, ghosts and far hulls. Racks are box-only and never turned.
-- Two low rails run along the deck's longest axis. Thin posts stand at the four corners. Small lights sit on the rails and post tops.
-- Each stowed container carries four clamp jaws on the sides next to the deck, with a light that shows them closed.
-  An empty slot has none, so an empty rack is a clean deck with rails.
-- Every deck thickness fits the clearance a container keeps from its slot wall, so no part sinks into a container.
-- Proportions and colours are the `rack` entry of `visuals/propulsion.json`, checked on load.
-- Containers placed in a rack are drawn there. The rack's size decides which containers fit.
+- A rack is a closed box with ONE open face. Top, bottom, sides and back are closed walls.
+  Containers go in and come out only through the open face; tractors find the way in there.
+- The open face is the block's facing, chosen at placement by the hatch rule a drone bay and an ore hopper use
+  (`OpenFaces`): away from what the rack is set against; with nothing, up. Mirrored with the block.
+- Old design files (before version 10) take the same rule on load. When that face is against a block or carries a mount,
+  the first free face in face order; with none, the rack stays closed until edited.
+- Look: panelled walls; round the opening a framed rim band with hazard stripes, light strips, orange corners and lit
+  edges; rails along the depth inside. Every rack part takes the outer half of a one-unit container's clearance.
+- Containers sit on the rack's internal grid, attached to it, never floating. A smaller container fills whatever empty
+  space fits it. The packing rule (`CargoPacking`: largest first, fixed orientation) is the one rule.
+- Each stowed container carries mag-lock jaws at the back of its slot, with lights that show its stage.
 - In the hold, containers are slots kept by the server, not physics objects. The server places them by a fixed rule.
+
+### Loading and unloading
+
+- Animated, with clear states: Approaching (the beam brings it to the opening), Transferring (in through the opening),
+  Positioning (slides to its slot), Locked (mag-locks engage, a clear light change). Unloading is the reverse:
+  Unlocking, then out through the opening.
+- A change of the hold that moves containers to other slots slides them there.
+- Client look only: the server stows and releases as before. The states are exposed for effects and the interface.
+- A released container leaves through the open face, in line with its slot, and is pushed out along the face's normal.
+  It never appears inside a block.
 
 ### Container look and hover
 
@@ -169,6 +180,19 @@ Temporary local debug loading is available. Mining output is not built.
 Each major mechanic (cargo, mining, turrets) is designed and tuned on its own first. The glue between them is
 checked afterwards. This overrides the joint mining, inventory and turret brainstorm in `docs/direction.md`.
 
+## Built: racks with one open face and cargo motion
+
+- `OpenFaces` (shared) is the one open-face rule; `BlockType.FacesOut` includes racks. Design file 10, evaluator 27,
+  protocol 78. No wire or save layout change; old saves are refused by the content identity.
+- `TractorReach.Rack` sees only the open face (`Opening`, shared with the hopper intake). `CargoEjection.MayLeave` refuses
+  a release into a block or through a mounted face; a destroyed rack's containers start in their slots.
+- `CargoMotion` (client, font-free, fixed buffers) matches hold records across changes by rack, size, resource,
+  kilograms and hull points, the same place first. It takes over from the beamed body that was led in, and a released
+  record slides out to the loose body it became, handing over at its drawn pose. The first hold of a hull is not animated.
+- Durations and lock light colours: `motion` in the `rack` look of `visuals/propulsion.json`.
+- The Cargo window's tiles say TRANSFERRING, POSITIONING or LOCKED while a container moves.
+- Not built: sounds; a loose body on the beam has no tile yet (its stage is exposed, `CargoMotion.StageOf`).
+
 ## Proposed build order
 
 1. **Built:** racks and containers in the hold: rack block, container sizes in content, the hold's slots on the server,
@@ -237,7 +261,7 @@ Deferred: drone launcher, tractor filter.
 - Jettison is in the Cargo window (U): select a container's tile, then Jettison or Jettison and keep claim. The editor's
   own cargo panel is gone. Local and remote sessions use the same server request.
   The server checks owner, controlled hull, edit token, rack, selected slot and the exact hold revision seen.
-- Jettison starts outside an unplated, unmounted rack face with a small outward push and hull point velocity.
+- Jettison starts just outside the rack's open face, in line with the slot, pushed out along its normal with hull point velocity.
   Damage-only `CargoEjection` adds a seeded outward kick before generic rack loss. Generic `Lose` never ejects;
   a wreck split transfers surviving racks with their contents. Repeated damage cannot eject them twice.
 - Existing container models draw free cargo. Middle-click targets size, resource, kilograms and HP.
@@ -337,6 +361,6 @@ Deferred: drone launcher, tractor filter.
 - While guided and powered, the container ignores contacts with its own hull. Rocks and other hulls still hit it.
 - It turns onto the hull's axes and is stowed at the slot, within tolerance, or inside the slot cell and nearly still.
 - No progress, or no line of sight, for `stallSeconds`: the claim is released and the container waits `retrySeconds`.
-- A rack face against another block is a deck, never an entrance.
+- Where a rack's open face lies against another block it is closed there, never an entrance.
 - Figures: `tractor` in `content/blocks/cargo.json` (staging margin, tolerance, final speed, settle speed, align rate, progress, stall, retry).
 - Server only: no wire or save change. Tests: `TractorGuideTests`.

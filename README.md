@@ -14,14 +14,19 @@ or that local game opened to other players. There is one simulation and one code
 Ships split into unowned wrecks when block loss disconnects shared faces. Wrecks retain HP, fuel and spin,
 collide, split again, and survive saves. Cleanup is configurable; salvage and reclaiming fuel are not built.
 
-Cargo racks are loading decks (a plate on the hull side, rails, posts, clamp jaws on stowed containers), content-defined container sizes and shared deterministic packing.
+Cargo racks are closed boxes with one open face (chosen like a bay's hatch: away from what the rack is set against), a framed,
+lit rim with hazard stripes and rails inside; content-defined container sizes and shared deterministic packing. Containers
+go in and out only through the open face, and are seen doing it: the beam brings one to the opening, it slides in to its
+slot and its mag-locks light up; a repack slides containers to their new slots; a jettisoned one slides out to where it
+floats free. The Cargo window's tiles say TRANSFERRING, POSITIONING or LOCKED meanwhile. No sounds yet.
 Cargo payload mass affects flight and client prediction through the same shared simulation.
 Own hull cargo is held by the server, saved, replicated and drawn; local debug loading is available in the editor.
 Open the Cargo window (U), select a container and jettison it, in local or remote games.
 Destroyed racks eject intact containers; wreck splits retain cargo. Free containers drift, collide, take damage,
 and persist in saves. Middle-click a free container to see its size, resource, amount and HP.
-Containers are drawn the same racked or loose: corner blocks, door seams and lock rods, lifting eyes, and a plate in the
-resource's colour with its code (FE, CU, NI, TI, AG, AU, ICE, set in `galaxy.json`) and the size class; an empty one says EMPTY.
+Containers are drawn the same racked or loose: a dark chamfered body with orange corner caps and light strips, the size
+in units ("16u"), and a plate in the resource's colour with its name, or its code (FE, CU, NI, TI, AG, AU, ICE, set in
+`galaxy.json`) where the name does not fit, over hazard stripes; an empty one says EMPTY.
 Put the cursor on one (hold `Shift` in flight; the command view and interface mode already show it) for a tooltip: resource,
 kg and fill, size and u, HP and, for a loose one, who claims it and the pickup delay left. A rack's own hull blocks in front
 of a stowed container do not hide it from the cursor yet.

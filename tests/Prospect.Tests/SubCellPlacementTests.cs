@@ -190,7 +190,7 @@ public sealed class SubCellPlacementTests
         // The two meet along y, face to whole face.
         Assert.Equal(0, both.ExteriorFaces[1] & (1 << 3));
         Assert.Equal(0, both.ExteriorFaces[2] & (1 << 2));
-        Assert.Equal((int)RackDeck.Touched(both.Boxes, 1, upper.At, upper.Size), both.TouchedFaces[1]);
+        Assert.Equal(OpenFaces.Touched(both.Boxes, 1, upper.At, upper.Size), both.TouchedFaces[1]);
 
         var half = TestDesigns.Of(core, upper);
         Assert.Equal(1, half.TouchedFaces[0] & 1);
@@ -367,7 +367,7 @@ public sealed class SubCellPlacementTests
         using var stream = new MemoryStream();
         old.Write(stream);
         var text = Encoding.UTF8.GetString(stream.ToArray());
-        Assert.Contains("\"version\":9", text);
+        Assert.Contains("\"version\":10", text);
         Assert.Contains("\"at\":[1,0,-2]", text);
         var again = Parse(text);
         Assert.Equal(old.Blocks.ToArray(), again.Blocks.ToArray());
@@ -392,7 +392,7 @@ public sealed class SubCellPlacementTests
         Assert.Contains("quarter", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 9, " + Head + body.Replace("0.5", "0.1"))).Message);
         Assert.Contains("quarter", Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 9, " + Head + body.Replace("0.5", "1e300"))).Message);
         Assert.Throws<InvalidDataException>(() => Parse("{ \"version\": 9, " + Head + "{ \"at\": [0, 0, 0], \"type\": \"core\" }, { \"at\": [1, 0, 0], \"type\": \"hull\", \"size\": [1.5, 1, 1] }] }"));
-        Assert.Equal(9, BoxDesign.FormatVersion);
+        Assert.Equal(10, BoxDesign.FormatVersion);
     }
 
     [Fact]
@@ -575,7 +575,7 @@ public sealed class SubCellPlacementTests
     {
         // Nothing here needs whole cells: a rack's packing is counted from its own corner, and the tractor's view of
         // it from the blocks' real edges.
-        var rack = new DesignBox(GridPoint.Quarters(6, 4, 1), new GridSize(2, 2, 2), Content.Blocks.Get("cargo"));
+        var rack = new DesignBox(GridPoint.Quarters(6, 4, 1), new GridSize(2, 2, 2), Content.Blocks.Get("cargo"), BlockShape.Box, BlockFacing.Left);
         DesignBox[] boxes = [new DesignBox(new(0, 0, 0), One, Core), new DesignBox(new(1, 0, 0), new GridSize(2, 1, 1), Plate), rack];
         var tractor = new DesignMount(0, BlockFacing.Up, 2, 2, Content.Blocks.Get("tractorBeam"));
         var design = TestDesigns.Mounted(boxes, [tractor]);

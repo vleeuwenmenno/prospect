@@ -54,7 +54,7 @@ public sealed partial class ServerHost
             || (uint)index >= (uint)hold.Length || hold[index].Rack != rack
             || (uint)rack >= (uint)design.Types.Length || design.Types[rack].Cargo <= 0
             || !BlockSet.Has(_hulls.Blocks(connection.Hull.Index), rack)
-            || CargoEjection.OpenSide(design, rack) < 0 || !HasRoom(0, 0))
+            || !CargoEjection.MayLeave(_content.Cargo, design, _hulls.Blocks(connection.Hull.Index), hold[index]) || !HasRoom(0, 0))
             return EditorReason.FillRefused;
         var free = CargoEjection.Make(_content.Cargo, design, hold[index], _hulls.State(connection.Hull.Index),
             _hulls.Flight(connection.Hull.Index).CenterOfMass, _tick, 0, false);

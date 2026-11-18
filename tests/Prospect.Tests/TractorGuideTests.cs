@@ -13,7 +13,8 @@ namespace Prospect.Tests;
 public sealed class TractorGuideTests
 {
     private static readonly GameContent Content = GameContent.Load();
-    private static DesignBox Box(string type, int x, int y, int z) => new(new(x, y, z), new(1, 1, 1), Content.Blocks.Get(type));
+    private static DesignBox Box(string type, int x, int y, int z, BlockFacing facing = BlockFacing.Back) =>
+        new(new(x, y, z), new(1, 1, 1), Content.Blocks.Get(type), BlockShape.Box, facing);
 
     /// <summary>
     /// The turret sits on the core's top face, 0.7 m along +X, hard by a two-block ridge on +X. A rack lies on the
@@ -21,7 +22,7 @@ public sealed class TractorGuideTests
     /// (half a diagonal above the turret) puts its box inside the ridge: the old pull aimed there and jammed.
     /// </summary>
     private static HullDesign Ridge() => TestDesigns.Mounted(
-        [Box("core", 0, 0, 0), Box("cargo", -1, 0, 0), Box("generator", 0, -1, 0), Box("battery", 0, -2, 0),
+        [Box("core", 0, 0, 0), Box("cargo", -1, 0, 0, BlockFacing.Up), Box("generator", 0, -1, 0), Box("battery", 0, -2, 0),
             Box("hull", 1, 0, 0), Box("hull", 1, 1, 0)],
         [new(0, BlockFacing.Up, 2, 4, Content.Blocks.Get("tractorBeam"))]);
 

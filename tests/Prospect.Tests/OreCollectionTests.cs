@@ -388,7 +388,7 @@ public sealed class OreCollectionTests
     {
         // The rack design of the tractor tests with a hopper and bins added: one beam, a container and a chunk in reach.
         var design = TestDesigns.Mounted(
-            [Box("core", 0, 0, 0), Box("cargo", 2, 1, 0), Box("generator", 0, -1, 0), Box("battery", 0, -2, 0), Box("oreHopper", -2, 0, 0, BlockFacing.Up), Box("oreBin", 0, -3, 0), Box("hull", -1, 0, 0)],
+            [Box("core", 0, 0, 0), Box("cargo", 2, 1, 0, BlockFacing.Left), Box("generator", 0, -1, 0), Box("battery", 0, -2, 0), Box("oreHopper", -2, 0, 0, BlockFacing.Up), Box("oreBin", 0, -3, 0), Box("hull", -1, 0, 0)],
             [new(0, BlockFacing.Up, 2, 2, Content.Blocks.Get("tractorBeam"))]);
         using (var hulls = new HullStore())
         {

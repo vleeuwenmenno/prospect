@@ -25,7 +25,7 @@ public sealed class DroneFetchTests
             new(new GridSize(x, y, z), new GridSize(1, 1, 1), Shipped.Blocks.Get(type), BlockShape.Box, facing);
         var boxes = new List<DesignBox>
         {
-            Box("core", 0, 0, 0), Box("cargo", 2, 1, 0), Box("generator", 0, -1, 0), Box("battery", 0, -2, 0),
+            Box("core", 0, 0, 0), Box("cargo", 2, 1, 0, BlockFacing.Left), Box("generator", 0, -1, 0), Box("battery", 0, -2, 0),
             Box("gyro", -1, 0, 0), Box("ionDrive", 0, 0, 1), Box("sensor", 0, 0, -1), Box("hull", 1, 0, 0),
             Box("hull", 2, 0, 0), Box("hull", 3, 1, 0), Box("droneBay", -1, 0, -1, BlockFacing.Left),
         };

@@ -68,7 +68,7 @@ built apart.
 - A lost drone is gone; the bay rebuilds one slowly. Buying and building comes later.
 - The bay has tiers, like sensors and tractors: capacity, launch rate (how many at once), rebuild speed.
   Figures are content.
-- The bay is a box block with one hatch face, chosen like a rack's deck face. Drones leave and dock through
+- The bay is a box block with one hatch face, chosen like a rack's open face (`OpenFaces`). Drones leave and dock through
   the hatch, which must face open space.
 
 ### Rock interiors: why crack

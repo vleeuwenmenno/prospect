@@ -390,12 +390,13 @@ internal sealed class ShipEditor(JobSystem jobs)
     public BlockFacing PartFacing { get; private set; } = BlockFacing.Back;
 
     /// <summary>
-    /// The way the ghost faces where it is held: <see cref="PartFacing"/>, except for a drone bay, whose hatch is
-    /// chosen from the faces it touches there (<see cref="Render.RackDeck.Hatch"/>) and placed with it.
+    /// The way the ghost faces where it is held: <see cref="PartFacing"/>, except for a block with an open face (a cargo
+    /// rack, a drone bay, an ore hopper), whose open face is chosen from the faces it touches there
+    /// (<see cref="OpenFaces.Choose"/>) and placed with it.
     /// </summary>
     public BlockFacing GhostFacing =>
         Content is { } content && (uint)Part < (uint)content.Blocks.Types.Count && content.Blocks.Types[Part].FacesOut && Draft is { } draft
-            ? Render.RackDeck.Hatch(Render.RackDeck.Touched(draft.Boxes, -1, GhostAt, PartSize))
+            ? OpenFaces.Choose(OpenFaces.Touched(draft.Boxes, -1, GhostAt, PartSize))
             : PartFacing;
 
     /// <summary>The most cells the chosen part may measure along a side: its type's limit, or the content's.</summary>

@@ -18,68 +18,59 @@ public static class TractorReach
     }
 
     /// <summary>
-    /// A rack is in view when a straight line from the emitter reaches one of its faces. A face counts when the emitter
-    /// is on its outer side, it carries no mount, and its part in the mount's outward half-space (the plane of the face
-    /// of the block the mount sits on, and everything beyond it) is within range and has a clear line. The aim is the middle of that
-    /// visible part, else its point nearest the emitter (<paramref name="nearest"/>). Of the faces in view the nearest
-    /// wins. An aim point lying against a neighbouring live box (<see cref="Covered"/>) is not an entrance: the container
-    /// would have to pass through that box. Only the rack's own frame is ignored on the way: it is open, so it never blocks its own loading. Every
-    /// other live block blocks, the block the mount sits on included, which is why nothing behind the mount's face
-    /// plane is in view.
+    /// A rack is in view through its one open face, the block's facing (<see cref="OpenFaces"/>), by the rule of
+    /// <see cref="Opening"/>: its other five sides are closed walls, so a container goes in and comes out there only.
+    /// <paramref name="side"/> is that face; <paramref name="nearest"/> says the aim is the face's point nearest the
+    /// emitter rather than the middle of its visible part.
     /// </summary>
     public static bool Rack(ReadOnlySpan<DesignBox> boxes, ReadOnlySpan<DesignMount> mounts, ReadOnlySpan<ulong> alive,
         float cell, int tractor, int rack, out Vector3 point, out BlockFacing side, out bool nearest)
     {
         point = default; side = default; nearest = false;
-        if ((uint)tractor >= (uint)mounts.Length || (uint)rack >= (uint)boxes.Length
-            || mounts[tractor].Type.Tractor is not { } spec || boxes[rack].Type.Cargo <= 0
-            || !Live(alive, rack) || !Live(alive, mounts[tractor].Parent)) return false;
-        var start = Emitter(boxes, mounts[tractor], cell);
-        var range = spec.Range * spec.Range;
-        var best = float.PositiveInfinity;
-        for (var f = 0; f < 6; f++)
-        {
-            var facing = (BlockFacing)f;
-            if (!Visible(boxes, mounts[tractor], cell, start, rack, facing, out var low, out var high)
-                || Mounted(mounts, rack, facing)) continue;
-            for (var k = 0; k < 2; k++)
-            {
-                var aim = k == 0 ? (low + high) * .5f : Vector3.Clamp(start, low, high);
-                var distance = Vector3.DistanceSquared(start, aim);
-                if (distance >= best || distance > range || Covered(boxes, alive, cell, rack, facing, aim)
-                    || !Clear(boxes, alive, cell, start, aim, rack)) continue;
-                best = distance; point = aim; side = facing; nearest = k == 1;
-                break;
-            }
-        }
-        return best < float.PositiveInfinity;
+        if ((uint)rack >= (uint)boxes.Length || boxes[rack].Type.Cargo <= 0) return false;
+        side = boxes[rack].Facing;
+        return Opening(boxes, mounts, alive, cell, tractor, rack, out point, out nearest);
     }
 
     /// <summary>
-    /// An ore hopper's intake is in view by the rule of a rack's face (<see cref="Rack"/>), asked of its one intake
-    /// face, the block's facing: the emitter is on its outer side, the face carries no mount, its part in the mount's
-    /// outward half-space is within range and has a clear line, and the aim point does not lie against a neighbour.
+    /// An ore hopper's intake is in view by the same one-face rule as a rack's opening (<see cref="Opening"/>), asked
+    /// of its intake face, the block's facing.
     /// </summary>
     public static bool Intake(ReadOnlySpan<DesignBox> boxes, ReadOnlySpan<DesignMount> mounts, ReadOnlySpan<ulong> alive,
         float cell, int tractor, int hopper, out Vector3 point)
     {
         point = default;
-        if ((uint)tractor >= (uint)mounts.Length || (uint)hopper >= (uint)boxes.Length
-            || mounts[tractor].Type.Tractor is not { } spec || !boxes[hopper].Type.Hopper
-            || !Live(alive, hopper) || !Live(alive, mounts[tractor].Parent)) return false;
-        var facing = boxes[hopper].Facing;
+        if ((uint)hopper >= (uint)boxes.Length || !boxes[hopper].Type.Hopper) return false;
+        return Opening(boxes, mounts, alive, cell, tractor, hopper, out point, out _);
+    }
+
+    /// <summary>
+    /// The one rule for a block's open face (its facing) being in view of a tractor mount: the emitter is on the face's
+    /// outer side, the face carries no mount, its part in the mount's outward half-space (the plane of the face of the
+    /// block the mount sits on, and everything beyond it) is within range, has a clear line, and the aim point does
+    /// not lie against a neighbouring live box (<see cref="Covered"/>: a container led there would have to pass through
+    /// it). The aim is the middle of that visible part, else its point nearest the emitter (<paramref name="nearest"/>).
+    /// The block itself is ignored on the way, since the line ends in its opening; every other live block blocks, the
+    /// block the mount sits on included, which is why nothing behind the mount's face plane is in view.
+    /// </summary>
+    private static bool Opening(ReadOnlySpan<DesignBox> boxes, ReadOnlySpan<DesignMount> mounts, ReadOnlySpan<ulong> alive,
+        float cell, int tractor, int block, out Vector3 point, out bool nearest)
+    {
+        point = default; nearest = false;
+        if ((uint)tractor >= (uint)mounts.Length || mounts[tractor].Type.Tractor is not { } spec
+            || !Live(alive, block) || !Live(alive, mounts[tractor].Parent)) return false;
+        var facing = boxes[block].Facing;
         var start = Emitter(boxes, mounts[tractor], cell);
-        if (!Visible(boxes, mounts[tractor], cell, start, hopper, facing, out var low, out var high)
-            || Mounted(mounts, hopper, facing)) return false;
+        if (!Visible(boxes, mounts[tractor], cell, start, block, facing, out var low, out var high)
+            || Mounted(mounts, block, facing)) return false;
         for (var k = 0; k < 2; k++)
         {
             var aim = k == 0 ? (low + high) * .5f : Vector3.Clamp(start, low, high);
-            if (Vector3.DistanceSquared(start, aim) > spec.Range * spec.Range || Covered(boxes, alive, cell, hopper, facing, aim)
-                || !Clear(boxes, alive, cell, start, aim, hopper)) continue;
-            point = aim;
+            if (Vector3.DistanceSquared(start, aim) > spec.Range * spec.Range || Covered(boxes, alive, cell, block, facing, aim)
+                || !Clear(boxes, alive, cell, start, aim, block)) continue;
+            point = aim; nearest = k == 1;
             return true;
         }
-
         return false;
     }
 

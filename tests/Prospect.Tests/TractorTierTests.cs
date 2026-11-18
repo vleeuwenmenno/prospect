@@ -36,7 +36,7 @@ public sealed class TractorTierTests
         Assert.Equal(3 * power, spec.Power(2000), 4);
         Assert.NotNull(PropulsionModels.ModelOf(type, BlockShape.Box, PropulsionLook.Load()));
         DesignBox[] boxes = [new(new(0, 0, 0), new(1, 1, 1), content.Blocks.Get("core")),
-            new(new(2, 1, 0), new(1, 1, 1), content.Blocks.Get("cargo"))];
+            new(new(2, 1, 0), new(1, 1, 1), content.Blocks.Get("cargo"), BlockShape.Box, BlockFacing.Left)];
         DesignMount[] mounts = [new(0, BlockFacing.Up, 2, 2, type)];
         var emitter = TractorReach.Emitter(boxes, mounts[0], 1);
         Assert.True(TractorReach.Container(boxes, [], 1, mounts[0], emitter + Vector3.UnitY * (range - .01f)));
@@ -67,11 +67,11 @@ public sealed class TractorTierTests
         tractor.Pull(bodies, content, field, scratch);
         Assert.Equal(pull * HullSim.Dt, bodies.Items[0].Velocity.Length(), 4);
 
-        boxes[1] = new(new((int)range - 1, 1, 0), new(1, 1, 1), content.Blocks.Get("cargo"));
+        boxes[1] = new(new((int)range - 1, 1, 0), new(1, 1, 1), content.Blocks.Get("cargo"), BlockShape.Box, BlockFacing.Left);
         var draft = BuildDraft.FromBlueprint(TestDesigns.Mounted(boxes, mounts), content);
         var preview = new TractorPreview(1); preview.Update(draft, 1);
         Assert.True(preview.Complete); Assert.True(preview.Linked(0, 1));
-        boxes[1] = new(new((int)range + 2, 1, 0), new(1, 1, 1), content.Blocks.Get("cargo"));
+        boxes[1] = new(new((int)range + 2, 1, 0), new(1, 1, 1), content.Blocks.Get("cargo"), BlockShape.Box, BlockFacing.Left);
         draft = BuildDraft.FromBlueprint(TestDesigns.Mounted(boxes, mounts), content);
         preview.Update(draft, 1);
         Assert.False(preview.Linked(0, 1));
