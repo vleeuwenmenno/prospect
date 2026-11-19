@@ -33,6 +33,7 @@ Agreed 2026-11-18.
 - Drones no longer haul ore chunks. "Pick up ores" is switched off and its place taken by a collector on the ship.
 - Drones stay in the game: scans, and other uses to be decided. Their hauling code is disabled, not deleted, until the
   collector has proven itself.
+- Drones always collide, their own ship included. Never let one pass through a hull (decided 2026-11-19).
 
 ## Proposed
 
